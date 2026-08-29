@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Transcriptor · ses · metin · özet</title>
+  <link rel="stylesheet" href="/static/fonts.css">
+  <link rel="stylesheet" href="/static/style.css">
+  <script>
+    // Set theme before first paint (no flash): saved choice, else system.
+    (function () {
+      try {
+        var t = localStorage.getItem('transcriptor-theme');
+        if (t !== 'light' && t !== 'dark') {
+          t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        }
+        document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {}
+    })();
+  </script>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <span class="mark">transcript<em>or</em></span>
+      </div>
+      <span class="spacer"></span>
+      <span id="badge" class="chip"><span id="led" class="led"></span><span id="badgeText">…</span></span>
+      <button id="langBtn" class="ghost mini" data-i18n-title="hdr.lang">EN</button>
+      <button id="themeBtn" class="ghost mini" data-i18n-title="hdr.theme">☀</button>
+      <button id="settingsBtn" class="ghost mini" data-i18n="hdr.settings">⚙ Ayarlar</button>
+    </header>
+
+    <!-- Console -->
+    <section class="panel">
+      <div class="console">
+        <div class="rec-wrap" id="recWrap">
+          <span class="ring"></span><span class="ring d2"></span>
+          <button class="rec-btn" id="recBtn" data-i18n-title="rec.start"></button>
+        </div>
+        <div class="console-main">
+          <div class="src-row">
+            <span class="label" data-i18n="src.label">Kaynak</span>
+            <select id="source" class="grow"></select>
+            <select id="micSource" data-i18n-title="src.micMix"></select>
+            <button id="refreshSrc" class="mini" data-i18n-title="src.refresh">⟳</button>
+            <button id="fileBtn" class="mini" data-i18n-title="src.fileTitle" data-i18n="src.file">⇪ Dosya</button>
+            <button id="pauseBtn" class="mini" data-i18n-title="src.pauseTitle" data-i18n="src.pause" disabled>⏸ Duraklat</button>
+            <button id="cancelBtn" class="mini danger" data-i18n-title="src.cancelTitle" data-i18n="src.cancel" disabled>✕ İptal</button>
+            <button id="stopBtn" class="ok" data-i18n="src.stop" disabled>■ Durdur</button>
+            <input type="file" id="fileInput" accept="audio/*,video/*" hidden>
+          </div>
+          <div class="meter" id="meter"></div>
+          <div class="readout">
+            <span id="statusMsg" data-i18n="src.ready">Hazır</span><span id="spinner" class="cursor"></span>
+            <span id="elapsed"></span>
+          </div>
+        </div>
+      </div>
+      <div id="diarHint" class="hint" style="display:none;"></div>
+      <div id="savedRow" class="saved" style="display:none;">
+        <span class="saved-k" data-i18n="saved.k">Kaydedildi →</span>
+        <code id="savedPath"></code>
+        <button id="openFolder" class="mini" data-i18n="saved.open">Klasörü Aç</button>
+      </div>
+    </section>
+
+    <div class="workspace">
+    <!-- Transcript -->
+    <section class="panel">
+      <div class="tx-head">
+        <span class="label" data-i18n="tx.label">Metin</span>
+      </div>
+      <div id="transcript"><span class="empty" data-i18n="tx.empty">Kaydı başlatıp durdurun — deşifre burada belirir.</span></div>
+    </section>
+
+    <!-- Summary -->
+    <section class="panel">
+      <div class="tx-head">
+        <span class="label" data-i18n="sum.label">Özet</span>
+        <select id="tpl" data-i18n-title="sum.tplTitle"></select>
+        <button id="ctxBtn" class="mini" data-i18n-title="sum.ctxTitle" data-i18n="sum.ctx">＋ Bağlam</button>
+        <button id="sumBtn" class="ok" data-i18n="sum.go" disabled>✦ Özetle</button>
+      </div>
+      <div id="ctxBox" class="ctx" style="display:none;">
+        <input type="text" id="ctxTitle" data-i18n-ph="sum.phTitle" placeholder="Başlık (ör. Q3 Bütçe Toplantısı)">
+        <input type="text" id="ctxPeople" data-i18n-ph="sum.phPeople" placeholder="Katılımcılar (virgülle ayırın)">
+        <textarea id="ctxNotes" rows="2" data-i18n-ph="sum.phNotes" placeholder="Ek bağlam / gündem / özel talimat — özete dahil edilir"></textarea>
+      </div>
+      <div id="summary"><span class="empty">—</span></div>
+    </section>
+    </div>
+  </div>
+
+  <!-- Settings -->
+  <div class="modal-bg" id="modalBg">
+    <div class="modal">
+      <h2 data-i18n="set.title">Ayarlar</h2>
+
+      <div class="grp">
+        <div class="t" data-i18n="set.sttGrp">Metin · STT</div>
+        <div class="field"><label data-i18n="set.device">Cihaz</label>
+          <select id="s_device"><option value="auto" data-i18n="set.auto">Otomatik</option>
+            <option value="cuda">GPU (CUDA)</option><option value="cpu">CPU</option></select></div>
+        <div class="field"><label data-i18n="set.whisper">Whisper modeli</label>
+          <select id="s_model"><option>tiny</option><option>base</option><option>small</option>
+            <option>medium</option><option>large-v3</option></select></div>
+        <div class="field"><label data-i18n="set.lang">Dil</label>
+          <select id="s_language"><option value="tr">Türkçe</option>
+            <option value="" data-i18n="set.autoDetect">Otomatik algıla</option><option value="en">English</option></select></div>
+        <div class="field"><label data-i18n="set.modelFile">Model dosyası (boş = otomatik indir)</label>
+          <input type="text" id="s_whisperpath" placeholder="…/ggml-large-v3.bin"></div>
+      </div>
+
+      <div class="grp">
+        <div class="t" data-i18n="set.mixGrp">Ses karışımı · Mikrofon + Sistem</div>
+        <div class="field"><label data-i18n="set.sysGain">Sistem sesi kazancı (0–4)</label>
+          <input type="number" id="s_sysgain" min="0" max="4" step="0.1"></div>
+        <div class="field"><label data-i18n="set.micGain">Mikrofon kazancı (0–4)</label>
+          <input type="number" id="s_micgain" min="0" max="4" step="0.1"></div>
+        <div class="field" data-i18n="set.mixNote" style="font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.6;">
+          Kaynak satırında bir mikrofon seçince sistem sesine karıştırılır.
+          Kırpılmayı önlemek için tepe sınırlayıcı otomatik devrededir.</div>
+      </div>
+
+      <div class="grp">
+        <div class="t" data-i18n="set.diarGrp">Konuşmacı ayrımı · sherpa-onnx</div>
+        <div class="field check"><input type="checkbox" id="s_diar"><label data-i18n="set.diarOn">Konuşmacıları ayır</label></div>
+        <div class="field"><label data-i18n="set.nspk">Konuşmacı sayısı (0 = otomatik bul)</label>
+          <input type="number" id="s_nspk" min="0" max="20" step="1"></div>
+        <div class="field"><label data-i18n="set.clthr">Ayrım eşiği (0.05–0.95) — düşük değer daha çok konuşmacı üretir</label>
+          <input type="number" id="s_clthr" min="0.05" max="0.95" step="0.05"></div>
+        <div class="field"><label data-i18n="set.segModel">Bölütleme modeli (boş = otomatik indir)</label>
+          <input type="text" id="s_segmodel" placeholder="…/segmentation.onnx"></div>
+        <div class="field"><label data-i18n="set.embModel">Ses izi modeli (boş = otomatik indir)</label>
+          <input type="text" id="s_embmodel" placeholder="…/speaker-embedding.onnx"></div>
+        <div class="field" style="font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.6;">
+          <span data-i18n="set.diarNote1">pyannote segmentation-3.0 modelinin ONNX hâli kullanılır — token
+          gerekmez, çıkarım tamamen yerel. Modeller ilk kullanımda</span>
+          <code id="s_modelsdir">…</code><span data-i18n="set.diarNote2"> klasörüne iner.</span></div>
+      </div>
+
+      <div class="grp">
+        <div class="t" data-i18n="set.outGrp">Çıktı &amp; Otomasyon</div>
+        <div class="field"><label data-i18n="set.outDir">Kayıt klasörü</label>
+          <input type="text" id="s_outdir" placeholder="~/Transcriptor"></div>
+        <div class="field check"><input type="checkbox" id="s_saveaudio"><label data-i18n="set.saveAudio">Sesi kaydet (audio.wav)</label></div>
+        <div class="field check"><input type="checkbox" id="s_savetx"><label data-i18n="set.saveTx">Metni kaydet (transcript.txt/.json)</label></div>
+        <div class="field check"><input type="checkbox" id="s_savesum"><label data-i18n="set.saveSum">Özeti kaydet (summary.txt)</label></div>
+        <div class="field check"><input type="checkbox" id="s_autosum"><label data-i18n="set.autoSum">İşleme bitince özeti otomatik çıkar</label></div>
+        <div class="field check"><input type="checkbox" id="s_vram"><label data-i18n="set.vram">VRAM'i sıraya koy: STT sırasında LLM'i, özet sırasında STT modelini boşalt (8GB için)</label></div>
+      </div>
+
+      <div class="grp">
+        <div class="t" data-i18n="set.llmGrp">Özetleyici · llama.cpp</div>
+        <div class="field"><label data-i18n="set.llmMode">Çalışma biçimi</label>
+          <select id="s_llmbackend">
+            <option value="embedded" data-i18n="set.llmEmbedded">Gömülü (llama.cpp) — kurulum gerekmez</option>
+            <option value="remote" data-i18n="set.llmRemote">Uzak sunucu (LM Studio / Ollama / llama-server)</option>
+          </select></div>
+
+        <div id="llmEmbedded">
+          <div class="field"><label data-i18n="set.llmDl">Hazır model indir (isteğe bağlı, tek seferlik)</label>
+            <div class="row"><select id="s_llmdl" class="grow"></select>
+              <button id="dlLlm" class="mini" type="button" data-i18n="set.llmDlBtn">İndir</button></div>
+            <div id="llmDlNote" class="dlnote"></div></div>
+          <div class="field"><label data-i18n="set.gguf">GGUF modeli</label>
+            <div class="row"><select id="s_ggufsel" class="grow"></select>
+              <button id="rescanGguf" class="mini" type="button" data-i18n="set.scan">Tara</button></div></div>
+          <div class="field"><label data-i18n="set.llmPath">Model dosya yolu (listede yoksa elle yazın)</label>
+            <input type="text" id="s_llmpath" placeholder="…/qwen2.5-7b-instruct-q4_k_m.gguf"></div>
+          <div class="field"><label data-i18n="set.llmCtx">Bağlam boyutu (token)</label>
+            <input type="number" id="s_llmctx" min="1024" max="131072" step="1024"></div>
+          <div class="field"><label data-i18n="set.llmGpu">GPU'ya taşınacak katman (0 = sadece CPU, 999 = hepsi)</label>
+            <input type="number" id="s_llmgpu" min="0" max="999" step="1"></div>
+          <div class="field"><label data-i18n="set.llmMaxTok">Azami yanıt uzunluğu (token)</label>
+            <input type="number" id="s_llmmaxtok" min="64" max="16384" step="64"></div>
+          <div class="field" style="font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.6;">
+            <span data-i18n="set.llmNote1">Şu klasöre bir </span><code>.gguf</code><span data-i18n="set.llmNote2"> koyun: </span><code id="s_modelsdir2">…</code><span data-i18n="set.llmNote3"> — "Tara" ile listeye düşer. Kayıt bağlam penceresine sığmazsa parça
+            parça özetlenip birleştirilir.</span></div>
+        </div>
+
+        <div id="llmRemote">
+          <div class="field"><label data-i18n="set.llmUrl">Sunucu URL</label>
+            <input type="text" id="s_llmurl" placeholder="http://127.0.0.1:1234/v1"></div>
+          <div class="field"><label data-i18n="set.model">Model</label>
+            <div class="row"><select id="s_llmmodel" class="grow"></select>
+              <button id="fetchModels" class="mini" type="button" data-i18n="set.fetch">Getir</button></div></div>
+          <div class="field"><label data-i18n="set.llmTimeout">Özet zaman aşımı (sn) — uzun/CPU'ya taşan modeller için artırın</label>
+            <input type="number" id="s_llmtimeout" min="10" max="3600" step="10"></div>
+        </div>
+
+        <div class="field"><label data-i18n="set.sumLang">Özet dili</label>
+          <select id="s_sumlang"><option value="tr">Türkçe</option><option value="en">English</option></select></div>
+      </div>
+
+      <div class="grp">
+        <div class="t" data-i18n="set.tplGrp">Not şablonları · düzenle</div>
+        <div class="field"><label data-i18n="set.tplPick">Düzenlenecek şablon</label>
+          <select id="s_tplsel"></select></div>
+        <div class="field" id="s_tplnamefield"><label data-i18n="set.tplName">Şablon adı</label>
+          <input type="text" id="s_tplname" maxlength="60" data-i18n-ph="set.tplNamePh" placeholder="Örn. Müşteri Görüşmesi"></div>
+        <div class="field"><label data-i18n="set.tplPrompt">Şablon yönergesi (özetleyiciye verilen sistem promptu)</label>
+          <textarea id="s_tplprompt" rows="6"></textarea></div>
+        <div class="field"><label data-i18n="set.tplCtx">Kalıcı ek bağlam (bu şablonun her özetine eklenir)</label>
+          <textarea id="s_tplctx" rows="3" data-i18n-ph="set.tplCtxPh" placeholder="Örn. Şirketimiz Acme; kararlara ve aksiyonlara odaklan."></textarea></div>
+        <div class="field tpl-actions">
+          <button id="s_tplnew" class="mini" type="button" data-i18n="set.tplNew">+ Yeni şablon</button>
+          <button id="s_tplreset" class="mini" type="button" data-i18n="set.tplReset">Yönergeyi varsayılana sıfırla</button>
+          <button id="s_tpldel" class="mini danger" type="button" data-i18n="set.tplDel">Sil</button></div>
+      </div>
+
+      <div class="grp">
+        <div class="t" data-i18n="set.uiLang">Arayüz dili</div>
+        <div class="field"><label data-i18n="set.uiLang">Arayüz dili</label>
+          <select id="s_uilang"><option value="tr">Türkçe</option><option value="en">English</option></select></div>
+      </div>
+
+      <div class="modal-actions">
+        <button id="cancelSettings" class="ghost" data-i18n="set.cancel">İptal</button>
+        <button id="saveSettings" class="save" data-i18n="set.save">Kaydet</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="/static/i18n.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

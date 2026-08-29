@@ -1,0 +1,93 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+
+    {
+      "name": "linux",
+      "displayName": "Linux · CPU",
+      "inherits": "base",
+      "generator": "Ninja",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" }
+    },
+    {
+      "name": "linux-cuda",
+      "displayName": "Linux · NVIDIA CUDA",
+      "inherits": "linux",
+      "cacheVariables": { "TRANSCRIPTOR_CUDA": "ON" }
+    },
+    {
+      "name": "linux-vulkan",
+      "displayName": "Linux · Vulkan (AMD/Intel/NVIDIA)",
+      "inherits": "linux",
+      "cacheVariables": { "TRANSCRIPTOR_VULKAN": "ON" }
+    },
+
+    {
+      "name": "mac-arm64",
+      "displayName": "macOS · Apple Silicon (Metal)",
+      "inherits": "base",
+      "generator": "Ninja",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" },
+      "cacheVariables": {
+        "CMAKE_OSX_ARCHITECTURES": "arm64",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "11.0",
+        "TRANSCRIPTOR_METAL": "ON"
+      }
+    },
+    {
+      "name": "mac-x64",
+      "displayName": "macOS · Intel",
+      "inherits": "base",
+      "generator": "Ninja",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" },
+      "cacheVariables": {
+        "CMAKE_OSX_ARCHITECTURES": "x86_64",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "11.0",
+        "TRANSCRIPTOR_METAL": "OFF"
+      }
+    },
+
+    {
+      "name": "win-msvc",
+      "displayName": "Windows · MSVC (CPU)",
+      "inherits": "base",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    },
+    {
+      "name": "win-cuda",
+      "displayName": "Windows · NVIDIA CUDA",
+      "inherits": "win-msvc",
+      "cacheVariables": { "TRANSCRIPTOR_CUDA": "ON" }
+    },
+    {
+      "name": "win-vulkan",
+      "displayName": "Windows · Vulkan (AMD/Intel/NVIDIA)",
+      "inherits": "win-msvc",
+      "cacheVariables": { "TRANSCRIPTOR_VULKAN": "ON" }
+    }
+  ],
+
+  "buildPresets": [
+    { "name": "linux",        "configurePreset": "linux" },
+    { "name": "linux-cuda",   "configurePreset": "linux-cuda" },
+    { "name": "linux-vulkan", "configurePreset": "linux-vulkan" },
+    { "name": "mac-arm64",    "configurePreset": "mac-arm64" },
+    { "name": "mac-x64",      "configurePreset": "mac-x64" },
+    { "name": "win-msvc",     "configurePreset": "win-msvc",   "configuration": "Release" },
+    { "name": "win-cuda",     "configurePreset": "win-cuda",   "configuration": "Release" },
+    { "name": "win-vulkan",   "configurePreset": "win-vulkan", "configuration": "Release" }
+  ]
+}

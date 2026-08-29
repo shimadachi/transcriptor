@@ -1,0 +1,192 @@
+# All third-party code is fetched and compiled from source, so the result is a
+# self-contained native binary. Every pin below is a released tag; bump them in
+# one place. See README "Bumping dependency pins" before changing ggml-backed
+# ones (llama.cpp and whisper.cpp must agree on their shared ggml).
+
+include(FetchContent)
+set(FETCHCONTENT_QUIET OFF)
+
+set(TRANSCRIPTOR_LLAMA_TAG   "b4689"        CACHE STRING "llama.cpp git tag")
+set(TRANSCRIPTOR_WHISPER_TAG "v1.7.4"       CACHE STRING "whisper.cpp git tag")
+set(TRANSCRIPTOR_SHERPA_TAG  "v1.10.46"     CACHE STRING "sherpa-onnx git tag")
+set(TRANSCRIPTOR_HTTPLIB_TAG "v0.18.3"      CACHE STRING "cpp-httplib git tag")
+set(TRANSCRIPTOR_JSON_TAG    "v3.11.3"      CACHE STRING "nlohmann/json git tag")
+set(TRANSCRIPTOR_MINIAUDIO_TAG "0.11.21"    CACHE STRING "miniaudio git tag")
+set(TRANSCRIPTOR_WEBVIEW_TAG "0.12.0"       CACHE STRING "webview git tag")
+
+add_library(transcriptor_deps INTERFACE)
+add_library(transcriptor::deps ALIAS transcriptor_deps)
+
+# ---------------------------------------------------------------------------
+# ggml backends — one setting, applied to both llama.cpp and whisper.cpp
+# ---------------------------------------------------------------------------
+set(GGML_CUDA   ${TRANSCRIPTOR_CUDA}   CACHE BOOL "" FORCE)
+set(GGML_VULKAN ${TRANSCRIPTOR_VULKAN} CACHE BOOL "" FORCE)
+set(GGML_METAL  ${TRANSCRIPTOR_METAL}  CACHE BOOL "" FORCE)
+if(TRANSCRIPTOR_METAL)
+    # Compile the Metal shaders into the binary rather than shipping a .metal file.
+    set(GGML_METAL_EMBED_LIBRARY ON CACHE BOOL "" FORCE)
+endif()
+set(GGML_OPENMP OFF CACHE BOOL "" FORCE)   # avoids a libomp runtime dependency
+
+# ---------------------------------------------------------------------------
+# llama.cpp — the summarizer (replaces LM Studio)
+#
+# Fetched FIRST on purpose: it defines the `ggml` targets, and whisper.cpp's
+# CMakeLists reuses an existing `ggml` target instead of adding its own. That
+# keeps one ggml in the build and avoids duplicate-target errors.
+# ---------------------------------------------------------------------------
+set(LLAMA_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_SERVER   OFF CACHE BOOL "" FORCE)
+set(LLAMA_CURL           OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS    OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(llama_cpp
+    GIT_REPOSITORY https://github.com/ggml-org/llama.cpp.git
+    GIT_TAG        ${TRANSCRIPTOR_LLAMA_TAG}
+    GIT_SHALLOW    TRUE)
+FetchContent_MakeAvailable(llama_cpp)
+
+target_link_libraries(transcriptor_deps INTERFACE llama)
+
+# ---------------------------------------------------------------------------
+# whisper.cpp — the STT engine (replaces faster-whisper)
+# ---------------------------------------------------------------------------
+set(WHISPER_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
+set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(WHISPER_BUILD_SERVER   OFF CACHE BOOL "" FORCE)
+set(WHISPER_CURL           OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(whisper_cpp
+    GIT_REPOSITORY https://github.com/ggml-org/whisper.cpp.git
+    GIT_TAG        ${TRANSCRIPTOR_WHISPER_TAG}
+    GIT_SHALLOW    TRUE)
+FetchContent_MakeAvailable(whisper_cpp)
+
+target_link_libraries(transcriptor_deps INTERFACE whisper)
+
+# ---------------------------------------------------------------------------
+# sherpa-onnx — speaker diarization (replaces pyannote.audio)
+# Pulls its own ONNX Runtime; that is the one prebuilt blob in the tree.
+# ---------------------------------------------------------------------------
+if(TRANSCRIPTOR_DIARIZE)
+    set(SHERPA_ONNX_ENABLE_PYTHON       OFF CACHE BOOL "" FORCE)
+    set(SHERPA_ONNX_ENABLE_TESTS        OFF CACHE BOOL "" FORCE)
+    set(SHERPA_ONNX_ENABLE_CHECK        OFF CACHE BOOL "" FORCE)
+    set(SHERPA_ONNX_ENABLE_PORTAUDIO    OFF CACHE BOOL "" FORCE)
+    set(SHERPA_ONNX_ENABLE_JNI          OFF CACHE BOOL "" FORCE)
+    set(SHERPA_ONNX_ENABLE_C_API        ON  CACHE BOOL "" FORCE)
+    set(SHERPA_ONNX_ENABLE_WEBSOCKET    OFF CACHE BOOL "" FORCE)
+    set(SHERPA_ONNX_ENABLE_BINARY       OFF CACHE BOOL "" FORCE)
+    set(SHERPA_ONNX_ENABLE_TTS          OFF CACHE BOOL "" FORCE)
+    set(SHERPA_ONNX_ENABLE_SPEAKER_DIARIZATION ON CACHE BOOL "" FORCE)
+
+    # sherpa-onnx expects to be the top-level project: its CMakeLists does
+    # include(kaldi-native-fbank) and friends, resolved against a module path
+    # built from CMAKE_SOURCE_DIR. Under FetchContent that points at *our* tree
+    # and every include() fails. So populate first, put sherpa's own cmake/ on
+    # the module path, then add the subdirectory by hand.
+    #
+    # SOURCE_SUBDIR names a directory with no CMakeLists.txt, which makes
+    # MakeAvailable download without configuring — the documented way to split
+    # those two steps.
+    FetchContent_Declare(sherpa_onnx
+        GIT_REPOSITORY https://github.com/k2-fsa/sherpa-onnx.git
+        GIT_TAG        ${TRANSCRIPTOR_SHERPA_TAG}
+        GIT_SHALLOW    TRUE
+        SOURCE_SUBDIR  cmake/transcriptor-populate-only)
+    FetchContent_MakeAvailable(sherpa_onnx)
+
+    list(APPEND CMAKE_MODULE_PATH "${sherpa_onnx_SOURCE_DIR}/cmake")
+
+    # sherpa appends -static-libstdc++/-static-libgcc to the global flags, which
+    # would otherwise leak into every target in this build. Restore them after.
+    set(_transcriptor_saved_cxx_flags "${CMAKE_CXX_FLAGS}")
+    set(_transcriptor_saved_c_flags   "${CMAKE_C_FLAGS}")
+
+    # kaldi-native-fbank, kaldi-decoder and friends still declare
+    # cmake_minimum_required(VERSION 3.x) with x < 5, which CMake 4 rejects
+    # outright. Scope the compatibility shim to this subtree only.
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL 4.0)
+        set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+    endif()
+
+    # sherpa's sources include their own headers as "sherpa-onnx/csrc/...", which
+    # only resolves if its source root is an include dir. It normally arranges
+    # that with include_directories(${CMAKE_SOURCE_DIR}) — wrong tree for us.
+    # This is the last add_subdirectory() here, so scoping it to the rest of
+    # this directory affects sherpa and nothing already configured.
+    include_directories("${sherpa_onnx_SOURCE_DIR}" "${sherpa_onnx_BINARY_DIR}")
+
+    add_subdirectory("${sherpa_onnx_SOURCE_DIR}" "${sherpa_onnx_BINARY_DIR}"
+                     EXCLUDE_FROM_ALL)
+
+    set(CMAKE_CXX_FLAGS "${_transcriptor_saved_cxx_flags}")
+    set(CMAKE_C_FLAGS   "${_transcriptor_saved_c_flags}")
+    unset(CMAKE_POLICY_VERSION_MINIMUM)
+
+    target_link_libraries(transcriptor_deps INTERFACE sherpa-onnx-cxx-api sherpa-onnx-c-api)
+    target_include_directories(transcriptor_deps INTERFACE "${sherpa_onnx_SOURCE_DIR}")
+endif()
+
+# ---------------------------------------------------------------------------
+# Header-only bits
+# ---------------------------------------------------------------------------
+FetchContent_Declare(json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG        ${TRANSCRIPTOR_JSON_TAG}
+    GIT_SHALLOW    TRUE)
+set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(json)
+target_link_libraries(transcriptor_deps INTERFACE nlohmann_json::nlohmann_json)
+
+FetchContent_Declare(httplib
+    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+    GIT_TAG        ${TRANSCRIPTOR_HTTPLIB_TAG}
+    GIT_SHALLOW    TRUE)
+FetchContent_MakeAvailable(httplib)
+target_include_directories(transcriptor_deps INTERFACE "${httplib_SOURCE_DIR}")
+
+FetchContent_Declare(miniaudio
+    GIT_REPOSITORY https://github.com/mackron/miniaudio.git
+    GIT_TAG        ${TRANSCRIPTOR_MINIAUDIO_TAG}
+    GIT_SHALLOW    TRUE)
+FetchContent_MakeAvailable(miniaudio)
+target_include_directories(transcriptor_deps INTERFACE "${miniaudio_SOURCE_DIR}")
+
+# ---------------------------------------------------------------------------
+# Native window
+# ---------------------------------------------------------------------------
+if(TRANSCRIPTOR_WEBVIEW)
+    set(WEBVIEW_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
+    set(WEBVIEW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(WEBVIEW_BUILD_DOCS     OFF CACHE BOOL "" FORCE)
+    set(WEBVIEW_BUILD_SHARED_LIBRARY OFF CACHE BOOL "" FORCE)
+
+    FetchContent_Declare(webview
+        GIT_REPOSITORY https://github.com/webview/webview.git
+        GIT_TAG        ${TRANSCRIPTOR_WEBVIEW_TAG}
+        GIT_SHALLOW    TRUE)
+    FetchContent_MakeAvailable(webview)
+    target_link_libraries(transcriptor_deps INTERFACE webview::core_static)
+endif()
+
+# ---------------------------------------------------------------------------
+# Platform libraries
+# ---------------------------------------------------------------------------
+find_package(Threads REQUIRED)
+target_link_libraries(transcriptor_deps INTERFACE Threads::Threads)
+
+if(WIN32)
+    target_link_libraries(transcriptor_deps INTERFACE ole32 shell32 shlwapi winmm ws2_32)
+elseif(APPLE)
+    find_library(COREAUDIO CoreAudio)
+    find_library(COREFOUNDATION CoreFoundation)
+    find_library(AUDIOTOOLBOX AudioToolbox)
+    find_library(AUDIOUNIT AudioUnit)
+    target_link_libraries(transcriptor_deps INTERFACE
+        ${COREAUDIO} ${COREFOUNDATION} ${AUDIOTOOLBOX} ${AUDIOUNIT})
+else()
+    target_link_libraries(transcriptor_deps INTERFACE ${CMAKE_DL_LIBS} m)
+endif()
