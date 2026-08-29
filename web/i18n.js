@@ -113,7 +113,10 @@ const STR = {
   'set.embModel':   {tr: 'Ses izi modeli (boş = otomatik indir)', en: 'Speaker-embedding model (empty = download automatically)'},
   'set.diarNote1':  {tr: 'pyannote segmentation-3.0 modelinin ONNX hâli kullanılır — token gerekmez, çıkarım tamamen yerel. Modeller ilk kullanımda',
                      en: 'The ONNX build of pyannote segmentation-3.0 is used — no token needed, inference is fully local. The models download on first use into'},
-  'set.diarNote2':  {tr: 'klasörüne iner.', en: '.'},
+  // Leading space matters: this span sits straight after the <code> path with
+  // no whitespace between them in the markup, and applyLang replaces the
+  // element's text wholesale. English wants none — the sentence ends there.
+  'set.diarNote2':  {tr: ' klasörüne iner.', en: '.'},
 
   'set.outGrp':     {tr: 'Çıktı & Otomasyon', en: 'Output & Automation'},
   'set.outDir':     {tr: 'Kayıt klasörü', en: 'Output folder'},
