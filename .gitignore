@@ -40,9 +40,30 @@ config.json
 *.webm
 *.mp4
 
-# Secrets, if any tooling ever writes one here.
+# Secrets, if any tooling ever writes one here. *.env catches secrets.env and
+# friends, which .env.* alone would miss.
 .env
 .env.*
+*.env
+
+# Keys and certificates, under any of the usual names.
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+id_rsa*
+id_ecdsa*
+id_ed25519*
+.netrc
+
+# Pipeline output, in case an output dir is ever pointed at the source tree:
+# these files hold the actual contents of someone's meeting.
+transcript.txt
+transcript.json
+summary.txt
+*.srt
+*.vtt
 
 # Editors / OS
 .vscode/
