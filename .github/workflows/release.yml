@@ -1,0 +1,116 @@
+# Cuts a GitHub Release from a version tag: builds every preset through the
+# same _build.yml the per-target workflows use, then attaches the packages.
+#
+# Tag the release commit `X.Y.Z` (matching project(VERSION) in CMakeLists.txt)
+# and push the tag; everything below follows from that.
+name: release
+
+on:
+  push:
+    tags: ['[0-9]+.[0-9]+.[0-9]+']
+  # Re-run a release by dispatching this workflow with a tag selected as the ref.
+  workflow_dispatch:
+
+# gh release create writes to the repo; nothing here needs more than that.
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    uses: ./.github/workflows/_build.yml
+    with:
+      preset: linux
+      os: ubuntu-latest
+
+  linux-cuda:
+    uses: ./.github/workflows/_build.yml
+    with:
+      preset: linux-cuda
+      os: ubuntu-latest
+      cuda: true
+
+  linux-vulkan:
+    uses: ./.github/workflows/_build.yml
+    with:
+      preset: linux-vulkan
+      os: ubuntu-latest
+      vulkan: true
+
+  mac-arm64:
+    uses: ./.github/workflows/_build.yml
+    with:
+      preset: mac-arm64
+      os: macos-14
+
+  mac-x64:
+    uses: ./.github/workflows/_build.yml
+    with:
+      preset: mac-x64
+      os: macos-15-intel
+
+  win-msvc:
+    uses: ./.github/workflows/_build.yml
+    with:
+      preset: win-msvc
+      os: windows-2022
+
+  win-cuda:
+    uses: ./.github/workflows/_build.yml
+    with:
+      preset: win-cuda
+      os: windows-2022
+      cuda: true
+
+  win-vulkan:
+    uses: ./.github/workflows/_build.yml
+    with:
+      preset: win-vulkan
+      os: windows-2022
+      vulkan: true
+
+  release:
+    name: publish
+    # Every target has to land before the release exists, so a half-built
+    # release is never published.
+    needs:
+      - linux
+      - linux-cuda
+      - linux-vulkan
+      - mac-arm64
+      - mac-x64
+      - win-msvc
+      - win-cuda
+      - win-vulkan
+    runs-on: ubuntu-latest
+
+    steps:
+      # A dispatch can be pointed at a branch, where there is no tag to release.
+      - name: Require a tag
+        if: github.ref_type != 'tag'
+        run: |
+          echo "::error::This workflow releases a tag; ${{ github.ref_name }} is a ${{ github.ref_type }}."
+          exit 1
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # --generate-notes diffs against the previous tag
+
+      # Package names carry os/arch/backend (see cmake/package.cmake), so the
+      # eight uploads flatten into one directory without colliding.
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: transcriptor-*
+          merge-multiple: true
+
+      - name: List packages
+        run: ls -lh dist
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" dist/* \
+            --title "Transcriptor ${{ github.ref_name }}" \
+            --generate-notes \
+            --verify-tag
