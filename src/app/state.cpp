@@ -1,0 +1,610 @@
+#include "app/state.h"
+
+#include <algorithm>
+#include <cmath>
+#include <map>
+#include <stdexcept>
+
+#include "audio/decode.h"
+#include "diarize/diarizer.h"
+#include "llm/templates.h"
+#include "util/export.h"
+#include "util/models.h"
+
+namespace transcriptor::app {
+
+namespace {
+
+struct PhaseText {
+    const char* tr;
+    const char* en;
+};
+
+const std::map<std::string, PhaseText>& phase_messages() {
+    static const std::map<std::string, PhaseText> kMessages = {
+        {"idle",        {"Hazır",                        "Ready"}},
+        {"recording",   {"Kayıt sürüyor…",               "Recording…"}},
+        {"transcribe",  {"Metne dönüştürülüyor…",        "Transcribing…"}},
+        {"diarize",     {"Konuşmacılar ayrılıyor…",      "Separating speakers…"}},
+        {"attribute",   {"Konuşmacılar eşleştiriliyor…", "Matching speakers…"}},
+        {"done",        {"Tamamlandı",                   "Done"}},
+        {"summarizing", {"Özetleniyor…",                 "Summarizing…"}},
+        {"error",       {"Hata",                         "Error"}},
+    };
+    return kMessages;
+}
+
+std::string trim(const std::string& s) {
+    const auto b = s.find_first_not_of(" \t\r\n");
+    if (b == std::string::npos) return {};
+    const auto e = s.find_last_not_of(" \t\r\n");
+    return s.substr(b, e - b + 1);
+}
+
+}  // namespace
+
+std::string phase_message(const std::string& phase, const std::string& lang) {
+    auto it = phase_messages().find(phase);
+    if (it == phase_messages().end()) return phase;
+    return (lang == "en") ? it->second.en : it->second.tr;
+}
+
+AppState::AppState(Settings settings)
+    : settings_(std::move(settings)),
+      device_(resolve_device(settings_.device, settings_.compute_type)),
+      message_(phase_message("idle", settings_.ui_language)),
+      summary_template_(settings_.summary_template) {
+    ui_en_.store(settings_.ui_language == "en");
+    processor_ = std::make_unique<pipeline::OfflineProcessor>(settings_, device_);
+    llm_ = llm::make_backend(settings_, device_);
+}
+
+AppState::~AppState() { shutdown(); }
+
+void AppState::shutdown() {
+    shutting_down_.store(true);
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (processor_) processor_->request_abort();
+        if (llm_) llm_->request_abort();
+        if (recorder_) recorder_->stop();
+        recorder_.reset();
+    }
+    recording_.store(false);
+    join_worker();
+    // curl runs as a child process and cannot be interrupted mid-file; waiting
+    // is still better than tearing down state the download thread is writing to.
+    join_download();
+}
+
+void AppState::join_worker() {
+    if (worker_.joinable()) worker_.join();
+}
+
+void AppState::join_download() {
+    if (download_thread_.joinable()) download_thread_.join();
+}
+
+void AppState::set_phase(const std::string& phase, double progress,
+                         const std::string& message) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    phase_ = phase;
+    progress_ = progress;
+    message_ = message.empty() ? phase_message(phase, ui_language()) : message;
+}
+
+std::string AppState::phase() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return phase_;
+}
+
+std::string AppState::message() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return message_;
+}
+
+paths::fs::path AppState::session_dir() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return session_dir_;
+}
+
+Settings AppState::settings_copy() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return settings_;
+}
+
+void AppState::replace_settings(const Settings& next) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const std::string old_lang = ui_language();
+    settings_ = next;
+    ui_en_.store(next.ui_language == "en");
+    // An idle status line is a phase default, so re-render it in the new
+    // language; a real message (an error, a filename) is left alone.
+    if (message_ == phase_message(phase_, old_lang)) {
+        message_ = phase_message(phase_, ui_language());
+    }
+    summary_template_ = next.summary_template;
+    device_ = resolve_device(next.device, next.compute_type);
+    // Rebuild lazily: the new device/model only takes effect on the next run.
+    processor_ = std::make_unique<pipeline::OfflineProcessor>(settings_, device_);
+    llm_ = llm::make_backend(settings_, device_);
+}
+
+// ---------------------------------------------------------------------------
+// Recording
+// ---------------------------------------------------------------------------
+
+void AppState::start_recording(const audio::AudioSource& source,
+                               const std::optional<audio::AudioSource>& mic_source) {
+    join_worker();
+
+    std::unique_ptr<audio::Recorder> recorder;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        recorder = std::make_unique<audio::Recorder>(
+            source, settings_.samplerate, mic_source, settings_.system_gain,
+            settings_.mic_gain);
+        result_.reset();
+        summary_.reset();
+        session_dir_.clear();
+    }
+
+    recorder->start();   // throws on failure; state stays clean
+
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        recorder_ = std::move(recorder);
+    }
+    recording_.store(true);
+    set_phase("recording");
+}
+
+void AppState::pause_recording() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (recorder_ && recording_.load()) recorder_->pause();
+}
+
+void AppState::resume_recording() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (recorder_ && recording_.load()) recorder_->resume();
+}
+
+void AppState::cancel() {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (recording_.load() && recorder_) {
+            recorder_->stop();   // discard the audio — do NOT process
+            recorder_.reset();
+        }
+        result_.reset();
+        summary_.reset();
+    }
+    recording_.store(false);
+    delete_session_dir();
+    set_phase("idle");
+}
+
+void AppState::stop_and_process() {
+    std::unique_ptr<audio::Recorder> recorder;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        recorder = std::move(recorder_);
+    }
+    if (!recorder) return;
+
+    std::vector<float> audio = recorder->stop();
+    recording_.store(false);
+
+    const std::string err = recorder->error();
+    recorder.reset();
+
+    if (!err.empty()) {
+        set_phase("error", -1.0, std::string(ui("Ses hatası: ", "Audio error: ")) + err);
+        return;
+    }
+    begin(std::move(audio), {}, {});
+}
+
+bool AppState::process_file(const paths::fs::path& tmp_path,
+                            const std::string& orig_name) {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        result_.reset();
+        summary_.reset();
+        session_dir_.clear();
+    }
+    set_phase("transcribe", -1.0, ui("Dosya çözülüyor…", "Decoding the file…"));
+
+    std::vector<float> audio;
+    try {
+        audio = audio::decode_file(tmp_path, settings_copy().samplerate);
+    } catch (const std::exception& e) {
+        set_phase("error", -1.0,
+                  std::string(ui("Dosya çözülemedi: ", "Could not decode the file: ")) + e.what());
+        return false;
+    }
+    begin(std::move(audio), tmp_path, orig_name);
+    return true;
+}
+
+void AppState::begin(std::vector<float> audio, const paths::fs::path& original_file,
+                     const std::string& original_name) {
+    const Settings settings = settings_copy();
+
+    if (audio.size() < static_cast<std::size_t>(settings.samplerate / 2)) {
+        set_phase("error", -1.0, ui("Çok kısa/boş ses.", "The audio is too short or empty."));
+        return;
+    }
+
+    const paths::fs::path dir = ensure_session_dir();
+    if (!dir.empty() && settings.save_audio) {
+        std::error_code ec;
+        if (!original_file.empty()) {
+            // Keep the user's original file as-is rather than re-encoding it.
+            const std::string name = original_name.empty() ? "audio" : original_name;
+            paths::fs::copy_file(original_file, dir / paths::from_utf8(name),
+                                 paths::fs::copy_options::overwrite_existing, ec);
+        } else {
+            exporter::save_audio_wav(dir / "audio.wav", audio, settings.samplerate);
+        }
+    }
+
+    join_worker();
+    processing_.store(true);
+    worker_ = std::thread(&AppState::process_worker, this, std::move(audio));
+}
+
+void AppState::process_worker(std::vector<float> audio) {
+    const Settings settings = settings_copy();
+    try {
+        // VRAM handoff: drop the summarizer's weights before the STT models load.
+        if (settings.manage_vram) {
+            set_phase("transcribe", -1.0, ui("VRAM boşaltılıyor (LLM)…", "Freeing VRAM (LLM)…"));
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (llm_) llm_->unload();
+        }
+
+        auto progress = [this](const std::string& phase, double fraction,
+                               const std::string& message) {
+            set_phase(phase, fraction, message);
+        };
+
+        pipeline::ProcessResult result;
+        {
+            // The processor is only replaced from replace_settings(), which the
+            // API refuses while processing, so holding a raw pointer is safe.
+            pipeline::OfflineProcessor* processor = nullptr;
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                processor = processor_.get();
+            }
+            result = processor->run(audio, settings.samplerate, progress);
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            result_ = std::move(result);
+        }
+
+        save_transcript();
+        set_phase("done", 1.0);
+
+        if (settings.auto_summarize) do_summarize();
+    } catch (const std::exception& e) {
+        set_phase("error", -1.0, e.what());
+    }
+    processing_.store(false);
+}
+
+bool AppState::any_save() const {
+    return settings_.save_audio || settings_.save_transcript ||
+           settings_.save_summary;
+}
+
+paths::fs::path AppState::ensure_session_dir() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!session_dir_.empty() || !any_save()) return session_dir_;
+    try {
+        session_dir_ = exporter::new_session_dir(settings_.output_dir);
+    } catch (const std::exception&) {
+        session_dir_.clear();
+    }
+    return session_dir_;
+}
+
+void AppState::delete_session_dir() {
+    paths::fs::path dir;
+    std::string base;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        dir = session_dir_;
+        base = settings_.output_dir;
+        session_dir_.clear();
+    }
+    if (!dir.empty()) exporter::remove_session_dir(dir, base);
+}
+
+void AppState::save_transcript() {
+    const paths::fs::path dir = ensure_session_dir();
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (dir.empty() || !result_.has_value() || !settings_.save_transcript) return;
+
+    const std::string lang = settings_.summary_language;
+    exporter::save_text(dir / "transcript.txt", result_->plain_text(lang, true));
+    exporter::save_json(dir / "transcript.json", result_->to_json(lang));
+}
+
+// ---------------------------------------------------------------------------
+// Summarize
+// ---------------------------------------------------------------------------
+
+void AppState::start_summarize(const std::string& context,
+                               const std::string& template_id) {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!result_.has_value()) {
+            phase_ = "error";
+            progress_ = -1.0;
+            message_ = ui("Özetlenecek metin yok.", "There is no text to summarize.");
+            return;
+        }
+        summary_context_ = context;
+        if (llm::is_template(template_id) ||
+            settings_.custom_templates.count(template_id)) {
+            summary_template_ = template_id;
+            if (settings_.summary_template != template_id) {
+                settings_.summary_template = template_id;
+                settings_.save();   // remember the chosen template
+            }
+        }
+    }
+
+    join_worker();
+    processing_.store(true);
+    worker_ = std::thread([this] {
+        try {
+            do_summarize();
+        } catch (const std::exception& e) {
+            set_phase("error", -1.0, e.what());
+        }
+        processing_.store(false);
+    });
+}
+
+void AppState::do_summarize() {
+    llm::SummaryRequest req;
+    bool manage_vram = false;
+    bool save_summary = false;
+
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!result_.has_value()) return;
+
+        req.language    = settings_.summary_language;
+        req.transcript  = result_->plain_text(settings_.summary_language);
+        req.template_id = summary_template_;
+
+        // Per-template edits: prompt override + persistent context, then the
+        // context the user typed for this run. A custom template carries its own
+        // prompt rather than overriding a built-in one.
+        std::string template_context;
+        auto custom = settings_.custom_templates.find(summary_template_);
+        if (custom != settings_.custom_templates.end()) {
+            req.system_override = trim(custom->second.prompt);
+            template_context = trim(custom->second.context);
+        } else {
+            auto it = settings_.template_overrides.find(summary_template_);
+            if (it != settings_.template_overrides.end()) {
+                req.system_override = trim(it->second.prompt);
+                template_context = trim(it->second.context);
+            }
+        }
+        std::vector<std::string> parts;
+        if (!template_context.empty()) parts.push_back(template_context);
+        if (!trim(summary_context_).empty()) parts.push_back(trim(summary_context_));
+        for (std::size_t i = 0; i < parts.size(); ++i) {
+            if (i) req.context += "\n";
+            req.context += parts[i];
+        }
+
+        manage_vram  = settings_.manage_vram;
+        save_summary = settings_.save_summary;
+    }
+
+    set_phase("summarizing");
+
+    try {
+        // VRAM handoff the other way: free the STT models before the LLM loads.
+        if (manage_vram) {
+            set_phase("summarizing", -1.0, "VRAM devrediliyor (STT→LLM)…");
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (processor_) processor_->unload();
+        }
+
+        llm::Backend* backend = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            backend = llm_.get();
+        }
+        if (!backend) throw llm::SummarizerError(ui("Özetleyici hazır değil.", "The summarizer is not ready."));
+
+        const llm::Availability health = backend->available();
+        if (!health.ok) {
+            set_phase("error", -1.0, health.message);
+            return;
+        }
+
+        auto progress = [this](const std::string& msg, double fraction) {
+            set_phase("summarizing", fraction, msg);
+        };
+        std::string summary = backend->summarize(req, progress);
+
+        paths::fs::path dir;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            summary_ = summary;
+            ++summary_rev_;
+        }
+        dir = ensure_session_dir();
+        if (!dir.empty() && save_summary) {
+            exporter::save_text(dir / "summary.txt", summary);
+        }
+        set_phase("done", 1.0);
+    } catch (const llm::SummarizerError& e) {
+        set_phase("error", -1.0, e.what());
+    }
+}
+
+std::vector<std::string> AppState::list_llm_models(
+    const std::string& base_url_override) {
+    Settings settings = settings_copy();
+    if (!base_url_override.empty()) settings.llm_base_url = base_url_override;
+
+    // A throwaway backend: never disturbs the loaded summarizer.
+    auto probe = llm::make_backend(settings, device_);
+    return probe->list_models();
+}
+
+// ---------------------------------------------------------------------------
+// Summarizer model download
+// ---------------------------------------------------------------------------
+
+bool AppState::start_llm_download(const std::string& model_id, std::string* error) {
+    const models::LlmModelSpec* spec = models::llm_spec(model_id);
+    if (!spec) {
+        if (error) *error = "Bilinmeyen model: " + model_id;
+        return false;
+    }
+    if (downloading_.exchange(true)) {
+        if (error) *error = "Zaten bir model indiriliyor.";
+        return false;
+    }
+
+    join_download();   // the previous thread has already finished
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        dl_model_    = spec->id;
+        dl_label_    = spec->label;
+        dl_message_  = spec->label + " indiriliyor…";
+        dl_error_.clear();
+        dl_progress_ = -1.0;
+    }
+
+    const models::LlmModelSpec copy = *spec;
+    download_thread_ = std::thread([this, copy] {
+        auto progress = [this](const std::string& msg, double fraction) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            dl_message_  = msg;
+            dl_progress_ = fraction;
+        };
+
+        const std::string err = models::ensure_llm_model(copy, progress);
+        const paths::fs::path file = models::llm_model_file(copy);
+
+        Settings next;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            dl_error_ = err;
+            if (err.empty()) {
+                dl_message_  = copy.label + ui(" hazır.", " is ready.");
+                dl_progress_ = 1.0;
+            } else {
+                dl_message_.clear();
+                dl_progress_ = -1.0;
+            }
+            next = settings_;
+        }
+
+        if (err.empty()) {
+            // Point the embedded backend at what we just fetched, so the user
+            // does not have to pick the file by hand afterwards.
+            next.llm_model_path = paths::to_utf8(file);
+            next.save();
+            replace_settings(next);
+        }
+        downloading_.store(false);
+    });
+    return true;
+}
+
+nlohmann::json AppState::llm_download_json() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return {
+        {"active", downloading_.load()},
+        {"model", dl_model_.empty() ? nlohmann::json(nullptr)
+                                    : nlohmann::json(dl_model_)},
+        {"label", dl_label_},
+        {"message", dl_message_},
+        {"progress", dl_progress_ < 0 ? nlohmann::json(nullptr)
+                                      : nlohmann::json(dl_progress_)},
+        {"error", dl_error_.empty() ? nlohmann::json(nullptr)
+                                    : nlohmann::json(dl_error_)},
+    };
+}
+
+// ---------------------------------------------------------------------------
+// API snapshots
+// ---------------------------------------------------------------------------
+
+nlohmann::json AppState::state_json() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    const bool is_recording = recording_.load();
+    const double elapsed = recorder_ ? recorder_->elapsed() : 0.0;
+    const double level   = recorder_ ? recorder_->level() : 0.0;
+
+    return {
+        {"recording", is_recording},
+        {"paused", recorder_ ? recorder_->paused() : false},
+        {"processing", processing_.load()},
+        {"phase", phase_},
+        {"message", message_},
+        {"progress", progress_ < 0 ? nlohmann::json(nullptr)
+                                   : nlohmann::json(progress_)},
+        {"device", device_.badge()},
+        {"cuda", device_.gpu_available},
+        {"elapsed", std::round(elapsed * 10.0) / 10.0},
+        {"level", std::round(level * 10000.0) / 10000.0},
+        {"has_result", result_.has_value()},
+        {"has_summary", summary_.has_value()},
+        {"summary_rev", summary_rev_},
+        {"diarization_enabled", settings_.enable_diarization},
+        {"diar_supported", diarize::Diarizer::supported()},
+        {"diar_cached", models::diarization_ready(settings_)},
+        {"stt_cached", models::whisper_ready(settings_)},
+        {"output_dir", session_dir_.empty()
+                           ? nlohmann::json(nullptr)
+                           : nlohmann::json(paths::to_utf8(session_dir_))},
+        {"auto_summarize", settings_.auto_summarize},
+        {"summary_template", summary_template_},
+        {"llm_backend", settings_.llm_backend},
+        // Same fields as llm_download_json(), built here to keep one lock.
+        {"llm_download",
+         {{"active", downloading_.load()},
+          {"model", dl_model_.empty() ? nlohmann::json(nullptr)
+                                      : nlohmann::json(dl_model_)},
+          {"label", dl_label_},
+          {"message", dl_message_},
+          {"progress", dl_progress_ < 0 ? nlohmann::json(nullptr)
+                                        : nlohmann::json(dl_progress_)},
+          {"error", dl_error_.empty() ? nlohmann::json(nullptr)
+                                      : nlohmann::json(dl_error_)}}},
+    };
+}
+
+nlohmann::json AppState::result_json() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return {
+        {"result", result_.has_value()
+                       ? result_->to_json(settings_.summary_language)
+                       : nlohmann::json(nullptr)},
+        {"summary", summary_.has_value() ? nlohmann::json(*summary_)
+                                         : nlohmann::json(nullptr)},
+        {"output_dir", session_dir_.empty()
+                           ? nlohmann::json(nullptr)
+                           : nlohmann::json(paths::to_utf8(session_dir_))},
+    };
+}
+
+}  // namespace transcriptor::app

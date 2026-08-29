@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key>              <string>${MACOSX_BUNDLE_BUNDLE_NAME}</string>
+  <key>CFBundleDisplayName</key>       <string>${MACOSX_BUNDLE_BUNDLE_NAME}</string>
+  <key>CFBundleIdentifier</key>        <string>${MACOSX_BUNDLE_GUI_IDENTIFIER}</string>
+  <key>CFBundleExecutable</key>        <string>${MACOSX_BUNDLE_EXECUTABLE_NAME}</string>
+  <key>CFBundleVersion</key>           <string>${MACOSX_BUNDLE_BUNDLE_VERSION}</string>
+  <key>CFBundleShortVersionString</key><string>${MACOSX_BUNDLE_SHORT_VERSION_STRING}</string>
+  <key>CFBundlePackageType</key>       <string>APPL</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>LSMinimumSystemVersion</key>    <string>11.0</string>
+
+  <!-- macOS refuses microphone access without this string, and the recorder
+       needs it for the mic source (and for BlackHole-style loopback devices,
+       which the OS classifies as input devices). -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Toplantı ve ses kayıtlarını yerel olarak metne dökmek için mikrofon ve ses giriş aygıtlarına erişilir. Ses bu bilgisayardan çıkmaz.</string>
+
+  <!-- Only used if you later route system audio through screen capture. -->
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>Sistem sesini yerel olarak kaydedip metne dökmek için kullanılır.</string>
+
+  <key>NSHighResolutionCapable</key>   <true/>
+  <key>LSApplicationCategoryType</key> <string>public.app-category.productivity</string>
+</dict>
+</plist>
