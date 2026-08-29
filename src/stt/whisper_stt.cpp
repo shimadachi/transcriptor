@@ -119,8 +119,12 @@ std::vector<TranscriptSegment> WhisperTranscriber::transcribe(
     wparams.entropy_thold         = 2.4f;
     wparams.temperature_inc       = 0.2f;   // fall back on failed decodes
 
-    wparams.language       = language_.empty() ? nullptr : language_.c_str();
-    wparams.detect_language = language_.empty();
+    // "auto" makes whisper detect the language and then transcribe. The
+    // detect_language flag is NOT the way to ask for that: whisper_full
+    // returns as soon as it has a language, leaving zero segments behind —
+    // a silently empty transcript for every recording.
+    wparams.language        = language_.empty() ? "auto" : language_.c_str();
+    wparams.detect_language = false;
 
     CallbackState cb_state{&progress, &abort_};
     wparams.progress_callback           = progress_callback;
