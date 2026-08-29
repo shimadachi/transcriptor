@@ -70,6 +70,13 @@ if(WIN32)
     # GUI subsystem: no console window behind the app.
     add_executable(transcriptor WIN32 ${TRANSCRIPTOR_SOURCES})
     target_sources(transcriptor PRIVATE src/platform/app.rc)
+    # app.rc already embeds app.manifest as resource 1. The MSVC linker adds its
+    # own by default, and two of them are a hard error at link time:
+    #   CVT1100: duplicate resource. type:MANIFEST, name:1
+    #   LNK1123: failure during conversion to COFF
+    if(MSVC)
+        target_link_options(transcriptor PRIVATE /MANIFEST:NO)
+    endif()
 elseif(APPLE)
     add_executable(transcriptor MACOSX_BUNDLE ${TRANSCRIPTOR_SOURCES})
 else()
