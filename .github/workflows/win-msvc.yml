@@ -13,4 +13,4 @@ jobs:
     uses: ./.github/workflows/_build.yml
     with:
       preset: win-msvc
-      os: windows-latest
+      os: windows-2022
