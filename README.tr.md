@@ -111,8 +111,15 @@ CI yalnızca derler, çalıştırmaz; GPU yapıları için ilgili CUDA ya da Vul
 sürücüsüne sahip bir makine gerekir.
 
 CUDA presetini **derlemek** için `nvcc` PATH'te olmalı (ya da
-`-DCMAKE_CUDA_COMPILER=/nvcc/yolu`). **Çalıştırmak** için gerekmez: binary
-yalnızca sürücüye ve CUDA çalışma zamanı kütüphanelerine ihtiyaç duyar.
+`-DCMAKE_CUDA_COMPILER=/nvcc/yolu`). **Çalıştırmak** için gerekmez.
+
+CUDA paketleri kendi `cudart` / `cublas` / `cublasLt` kütüphanelerini içinde
+taşır; bunlar sürücüyle değil CUDA **toolkit**'iyle gelir. Aksi hâlde yalnızca
+sürücüsü olan ya da farklı ana sürüm toolkit'i olan bir makinede uygulama hiç
+açılmaz (`libcudart.so.12: cannot open shared object file`,
+`cudart64_12.dll was not found`). CUDA arşivlerinin ~450 MB, CPU arşivinin
+~15 MB olmasının sebebi budur. Yerelde derlerseniz kendi toolkit'inize
+bağlanır; hiçbir şey paketlenmez, binary küçük kalır.
 
 ### Derleme seçenekleri
 
