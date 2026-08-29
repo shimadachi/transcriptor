@@ -12,6 +12,9 @@
 #  include <signal.h>
 #  include <sys/wait.h>
 #  include <unistd.h>
+#  ifdef __linux__
+#    include <sys/prctl.h>   // PR_SET_PDEATHSIG
+#  endif
 #endif
 
 namespace transcriptor::net {
@@ -119,6 +122,13 @@ ProcResult run_posix(const std::vector<std::string>& argv, double timeout_sec) {
         return res;
     }
     if (pid == 0) {
+#ifdef __linux__
+        // Die with the parent. Without this a download outlives the app when it
+        // is killed mid-transfer: curl keeps running detached, finishes writing
+        // the .part file, and nobody is left to rename it into place.
+        prctl(PR_SET_PDEATHSIG, SIGTERM);
+        if (getppid() == 1) _exit(1);   // parent already gone; lost the race
+#endif
         close(fds[0]);
         dup2(fds[1], STDOUT_FILENO);
         dup2(fds[1], STDERR_FILENO);
