@@ -13,4 +13,4 @@ jobs:
     uses: ./.github/workflows/_build.yml
     with:
       preset: mac-x64
-      os: macos-13
+      os: macos-15-intel

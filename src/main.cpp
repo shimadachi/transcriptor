@@ -26,6 +26,7 @@
 
 #ifdef _WIN32
 #  include <windows.h>
+#  include <shellapi.h>   // CommandLineToArgvW, used by wWinMain below
 #endif
 
 namespace {

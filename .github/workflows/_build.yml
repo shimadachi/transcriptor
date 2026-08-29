@@ -38,21 +38,34 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install ninja
 
+      # cuBLAS ships as libcublas / libcublas-dev, which do NOT take the
+      # "cuda-" prefix the sub-packages input applies — hence the second list.
+      # visual_studio_integration is what lets CMake identify nvcc on Windows.
       - name: CUDA toolkit
         if: inputs.cuda
         uses: Jimver/cuda-toolkit@v0.2.19
         with:
           method: network
-          # nvcc plus the libraries ggml-cuda links against.
-          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "thrust"]'
+          sub-packages: >-
+            ${{ runner.os == 'Windows'
+                && '["nvcc", "cudart", "cublas", "cublas_dev", "visual_studio_integration"]'
+                || '["nvcc", "cudart", "cccl"]' }}
+          non-cuda-sub-packages: >-
+            ${{ runner.os == 'Windows' && '[]' || '["libcublas", "libcublas-dev"]' }}
 
-      - name: Vulkan SDK
-        if: inputs.vulkan
-        uses: humbletim/setup-vulkan-sdk@v1.2.1
+      # The distro packages are enough for ggml-vulkan (headers, loader, glslc)
+      # and avoid building glslang from source, which needs SPIR-V Tools too.
+      - name: Vulkan (Linux)
+        if: inputs.vulkan && runner.os == 'Linux'
+        run: sudo apt-get install -y libvulkan-dev glslc glslang-tools spirv-tools
+
+      - name: Vulkan SDK (Windows)
+        if: inputs.vulkan && runner.os == 'Windows'
+        uses: jakoch/install-vulkan-sdk-action@v1
         with:
-          vulkan-query-version: latest
-          vulkan-components: Vulkan-Headers, Vulkan-Loader, Glslang
-          vulkan-use-cache: true
+          install_runtime: true
+          cache: true
+          stripdown: true
 
       - name: Configure
         run: cmake --preset ${{ inputs.preset }}
