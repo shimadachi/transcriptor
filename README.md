@@ -110,8 +110,15 @@ CI only compiles; it never runs the GPU builds. Those need a machine with the
 matching CUDA or Vulkan driver.
 
 **Building** a CUDA preset needs `nvcc` on `PATH` (or
-`-DCMAKE_CUDA_COMPILER=/path/to/nvcc`). **Running** the result does not — the
-binary needs only the driver and the CUDA runtime libraries.
+`-DCMAKE_CUDA_COMPILER=/path/to/nvcc`). **Running** the result does not.
+
+The CUDA packages carry their own `cudart` / `cublas` / `cublasLt`, because
+those come with the CUDA *toolkit* and not with the driver — without them the
+binary will not start on a machine that has only a driver, or a toolkit of a
+different major version (`libcudart.so.12: cannot open shared object file`,
+`cudart64_12.dll was not found`). That is why the CUDA archives are ~450 MB
+against ~15 MB for the CPU one. Building locally links against your own
+toolkit, so nothing is bundled and the binary stays small.
 
 ### Build options
 
