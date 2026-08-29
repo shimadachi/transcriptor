@@ -106,11 +106,44 @@ set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 
 if(WIN32)
     set(CPACK_GENERATOR "ZIP")
+    set(_pkg_os "windows")
 elseif(APPLE)
     set(CPACK_GENERATOR "DragNDrop")
     set(CPACK_DMG_VOLUME_NAME "Transcriptor")
+    set(_pkg_os "macos")
 else()
     set(CPACK_GENERATOR "TGZ")
+    set(_pkg_os "linux")
 endif()
+
+# CPack's default file name is name-version-system, which every preset for one
+# OS shares: the CPU, CUDA and Vulkan builds would all be
+# transcriptor-X.Y.Z-Linux.tar.gz. That is fine per build tree and fatal the
+# moment they meet as assets on a single release, so spell out the backend and
+# the architecture too.
+if(TRANSCRIPTOR_CUDA)
+    set(_pkg_backend "cuda")
+elseif(TRANSCRIPTOR_VULKAN)
+    set(_pkg_backend "vulkan")
+elseif(TRANSCRIPTOR_METAL)
+    set(_pkg_backend "metal")
+else()
+    set(_pkg_backend "cpu")
+endif()
+
+# The mac presets cross-compile, so the target arch is what they were asked for,
+# not what the runner happens to be.
+if(APPLE AND CMAKE_OSX_ARCHITECTURES)
+    set(_pkg_arch "${CMAKE_OSX_ARCHITECTURES}")
+else()
+    set(_pkg_arch "${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+string(TOLOWER "${_pkg_arch}" _pkg_arch)
+if(_pkg_arch STREQUAL "amd64")
+    set(_pkg_arch "x86_64")   # what Windows calls x86_64
+endif()
+
+set(CPACK_PACKAGE_FILE_NAME
+    "transcriptor-${PROJECT_VERSION}-${_pkg_os}-${_pkg_arch}-${_pkg_backend}")
 
 include(CPack)
