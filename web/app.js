@@ -916,9 +916,10 @@ async function onBrowserStop() {
   } catch (e) { toast(t('toast.uploadErr')); }
 }
 
-// Enhance every native <select> into a themed custom dropdown.
-['source','micSource','s_device','s_model','s_language','s_llmmodel','s_sumlang','tpl','s_tplsel']
-  .forEach(id => { const el = $(id); if (el) enhanceSelect(el); });
+// Enhance every native <select> into a themed custom dropdown. Queried rather
+// than listed by id: a hand-kept list silently leaves new selects rendering as
+// the OS widget, light-on-dark and out of place next to the themed ones.
+document.querySelectorAll('select').forEach(enhanceSelect);
 $('source').addEventListener('change', updateMicMixVisibility);
 
 loadSources();
