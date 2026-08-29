@@ -1,58 +1,60 @@
 # Transcriptor
 
+**English** · [Türkçe](README.tr.md)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-e4491f.svg)](LICENSE)
 ![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)
 
-Toplantı, ders ve görüşme kayıtlarını metne döken ve özetleyen **tek bir yerel
-binary**. Kurulum, sanal ortam ya da harici bir servis gerekmez; Windows ve
-macOS için doğrudan çalıştırılabilir dosya üretir.
+Transcribes and summarizes meetings, lectures, and interviews as **a single
+local binary**. No install, no virtualenv, no external service; it produces a
+directly runnable executable for Windows and macOS.
 
-**Ses hiçbir sunucuya gönderilmez; tüm işleme yereldir.**
+**Audio is never sent to any server; all processing is local.**
 
-## Neler yapar
+## What it does
 
-- **Sistem sesini ya da mikrofonu kaydeder** — ikisini aynı anda karıştırabilir
-  (gerçek zamanlı kazanç + tepe sınırlayıcı). Elinizdeki bir ses/video dosyasını
-  da işleyebilir.
-- **Metne döker** — whisper.cpp, kelime bazlı zaman damgalarıyla.
-- **Konuşmacıları ayırır** — sherpa-onnx; "Konuşmacı 1/2/3" olarak etiketler.
-- **Özetler** — gömülü llama.cpp ile, seçtiğiniz not şablonuna göre. Uzun
-  kayıtlar parça parça özetlenip birleştirilir.
-- **Not şablonları** — beş hazır şablon (toplantı, standup, ders, görüşme,
-  genel) ve **kendi şablonlarınız**: ad + sistem promptu + kalıcı bağlam.
-- **İki dilli arayüz** — Türkçe / English, seçim `config.json`'da saklanır.
-- **Aydınlık / karanlık tema.**
+- **Records system audio or a microphone** — or both at once, mixed live with
+  gain control and a peak limiter. It can also process an audio/video file you
+  already have.
+- **Transcribes** — whisper.cpp, with word-level timestamps.
+- **Separates speakers** — sherpa-onnx, labelling them "Speaker 1/2/3".
+- **Summarizes** — embedded llama.cpp, following the note template you pick.
+  Recordings too long for the context window are summarized in chunks and merged.
+- **Note templates** — five built in (meeting, standup, lecture, interview,
+  general) plus **your own**: name, system prompt, and persistent context.
+- **Bilingual interface** — Turkish / English, remembered in `config.json`.
+- **Light / dark theme.**
 
-## Bileşenler
+## Components
 
-| Katman | Kullanılan |
+| Layer | Used |
 |---|---|
-| Arayüz | HTML/CSS/JS, **native pencere** (WebView2 / WKWebView / WebKitGTK) |
+| Interface | HTML/CSS/JS in a **native window** (WebView2 / WKWebView / WebKitGTK) |
 | STT | **whisper.cpp** (ggml) |
-| Konuşmacı ayrımı | **sherpa-onnx** + pyannote segmentation-3.0'ın ONNX hâli |
-| Özetleyici | **Gömülü llama.cpp** (opsiyonel olarak LM Studio/Ollama da) |
-| Ses yakalama | **miniaudio** (WASAPI / CoreAudio / PulseAudio) |
+| Speaker separation | **sherpa-onnx** + the ONNX build of pyannote segmentation-3.0 |
+| Summarizer | **Embedded llama.cpp** (optionally LM Studio / Ollama) |
+| Audio capture | **miniaudio** (WASAPI / CoreAudio / PulseAudio) |
 | HTTP | **cpp-httplib** |
-| Dağıtım | **tek binary** (web arayüzü içine gömülü) |
+| Distribution | **one binary**, web UI compiled in |
 
-## Gereksinimler
+## Requirements
 
-- CMake ≥ 3.21, Ninja (ya da Visual Studio 2022), C++17 derleyici
-- Git (bağımlılıklar `FetchContent` ile kaynaktan derlenir)
-- İlk derlemede ~2 GB indirme + 10–25 dk derleme süresi (llama.cpp + whisper.cpp
-  + sherpa-onnx). Sonraki derlemeler saniyeler sürer.
+- CMake ≥ 3.21, Ninja (or Visual Studio 2022), a C++17 compiler
+- Git (dependencies are built from source via `FetchContent`)
+- First build pulls ~2 GB and takes 10–25 min (llama.cpp + whisper.cpp +
+  sherpa-onnx). Later builds take seconds.
 
-Platforma özel:
+Platform specific:
 
-- **Windows:** Visual Studio 2022 Build Tools. Pencere için **WebView2 Runtime**
-  (Windows 11'de kurulu gelir; Windows 10'da Microsoft'un dağıttığı Evergreen
-  runtime gerekir).
-- **macOS:** Xcode Command Line Tools. Ek çalışma zamanı gerekmez.
-- **Linux:** `libgtk-3-dev` + `libwebkit2gtk-4.1-dev` (native pencere için),
-  PipeWire ya da PulseAudio.
+- **Windows:** Visual Studio 2022 Build Tools. The window needs the **WebView2
+  Runtime** (preinstalled on Windows 11; on Windows 10 install Microsoft's
+  Evergreen runtime).
+- **macOS:** Xcode Command Line Tools. No extra runtime.
+- **Linux:** `libgtk-3-dev` + `libwebkit2gtk-4.1-dev` for the native window,
+  and PipeWire or PulseAudio.
 
-## Derleme
+## Building
 
 ```bash
 # Linux
@@ -60,7 +62,7 @@ cmake --preset linux        && cmake --build --preset linux
 cmake --preset linux-cuda   && cmake --build --preset linux-cuda     # NVIDIA
 cmake --preset linux-vulkan && cmake --build --preset linux-vulkan   # AMD/Intel
 
-# macOS (Apple Silicon — Metal açık)
+# macOS (Apple Silicon — Metal on)
 cmake --preset mac-arm64    && cmake --build --preset mac-arm64
 # macOS (Intel)
 cmake --preset mac-x64      && cmake --build --preset mac-x64
@@ -71,206 +73,210 @@ cmake --preset win-cuda     && cmake --build --preset win-cuda       # NVIDIA
 cmake --preset win-vulkan   && cmake --build --preset win-vulkan     # AMD/Intel
 ```
 
-Her satırdaki iki komut da gerekli: ilki (`cmake --preset …`) yalnızca
-yapılandırır, derlemeyi ikincisi (`cmake --build --preset …`) yapar. Her preset
-kendi `build/<preset>/` klasörüne yazar; başka bir klasördeki eski binary
-güncellenmez.
+Both commands on each line are needed: the first (`cmake --preset …`) only
+configures, the second (`cmake --build --preset …`) compiles. Every preset
+writes to its own `build/<preset>/`, so a binary in another folder is not
+updated.
 
-Web arayüzü (`web/`) binary'nin içine gömülür — `index.html`/`app.js`/`style.css`
-değişince yeniden derlemeden arayüzde görünmez.
+The web UI (`web/`) is compiled into the binary — changes to
+`index.html`/`app.js`/`style.css` do not show up without a rebuild.
 
-Çıktı:
+Output:
 
 - Linux: `build/<preset>/transcriptor`
 - macOS: `build/<preset>/transcriptor.app`
 - Windows: `build/<preset>/Release/transcriptor.exe`
 
-Dağıtılabilir paket için: `cd build/<preset> && cpack`
+For a distributable package: `cd build/<preset> && cpack`
 (Windows → `.zip`, macOS → `.dmg`, Linux → `.tar.gz`).
 
-### Hazır yapılar (CI)
+### Prebuilt (CI)
 
-Her preset kendi iş akışında, kendi işletim sistemi üzerinde derlenir. Rozete
-tıklayınca o hedefin çalışmalarına gidersiniz; paketler her çalışmanın
-**Artifacts** bölümünden inebilir.
+Every preset builds in its own workflow on its own OS. Click a badge to reach
+that target's runs; packages download from each run's **Artifacts** section.
 
-| Preset | Runner | Durum |
+| Preset | Runner | Status |
 |---|---|---|
 | `linux` | ubuntu-latest | [![linux](https://github.com/shimadachi/transcriptor/actions/workflows/linux.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/linux.yml) |
 | `linux-cuda` | ubuntu-latest | [![linux-cuda](https://github.com/shimadachi/transcriptor/actions/workflows/linux-cuda.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/linux-cuda.yml) |
 | `linux-vulkan` | ubuntu-latest | [![linux-vulkan](https://github.com/shimadachi/transcriptor/actions/workflows/linux-vulkan.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/linux-vulkan.yml) |
 | `mac-arm64` | macos-14 | [![mac-arm64](https://github.com/shimadachi/transcriptor/actions/workflows/mac-arm64.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/mac-arm64.yml) |
-| `mac-x64` | macos-13 | [![mac-x64](https://github.com/shimadachi/transcriptor/actions/workflows/mac-x64.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/mac-x64.yml) |
-| `win-msvc` | windows-latest | [![win-msvc](https://github.com/shimadachi/transcriptor/actions/workflows/win-msvc.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/win-msvc.yml) |
-| `win-cuda` | windows-latest | [![win-cuda](https://github.com/shimadachi/transcriptor/actions/workflows/win-cuda.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/win-cuda.yml) |
-| `win-vulkan` | windows-latest | [![win-vulkan](https://github.com/shimadachi/transcriptor/actions/workflows/win-vulkan.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/win-vulkan.yml) |
+| `mac-x64` | macos-15-intel | [![mac-x64](https://github.com/shimadachi/transcriptor/actions/workflows/mac-x64.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/mac-x64.yml) |
+| `win-msvc` | windows-2022 | [![win-msvc](https://github.com/shimadachi/transcriptor/actions/workflows/win-msvc.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/win-msvc.yml) |
+| `win-cuda` | windows-2022 | [![win-cuda](https://github.com/shimadachi/transcriptor/actions/workflows/win-cuda.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/win-cuda.yml) |
+| `win-vulkan` | windows-2022 | [![win-vulkan](https://github.com/shimadachi/transcriptor/actions/workflows/win-vulkan.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/win-vulkan.yml) |
 
-CUDA yapıları için **Vulkan/CUDA sürücüsü olan bir makine** gerekir; CI yalnızca
-derler, çalıştırmaz.
+CI only compiles; it never runs the GPU builds. Those need a machine with the
+matching CUDA or Vulkan driver.
 
-### Derleme seçenekleri
+**Building** a CUDA preset needs `nvcc` on `PATH` (or
+`-DCMAKE_CUDA_COMPILER=/path/to/nvcc`). **Running** the result does not — the
+binary needs only the driver and the CUDA runtime libraries.
 
-| Seçenek | Varsayılan | Ne yapar |
+### Build options
+
+| Option | Default | Effect |
 |---|---|---|
-| `TRANSCRIPTOR_DIARIZE` | ON | Konuşmacı ayrımı (sherpa-onnx + ONNX Runtime). OFF ederseniz derleme hızlanır, metin etiketsiz üretilir. |
-| `TRANSCRIPTOR_WEBVIEW` | ON | Native pencere. OFF → tarayıcıda açılır. |
-| `TRANSCRIPTOR_CUDA` / `TRANSCRIPTOR_VULKAN` / `TRANSCRIPTOR_METAL` | OFF / OFF / macOS'ta ON | GPU hızlandırma. Hem STT hem özetleyici aynı ayarı kullanır. |
+| `TRANSCRIPTOR_DIARIZE` | ON | Speaker separation (sherpa-onnx + ONNX Runtime). OFF builds faster and produces unlabelled transcripts. |
+| `TRANSCRIPTOR_WEBVIEW` | ON | Native window. OFF → opens in the browser. |
+| `TRANSCRIPTOR_CUDA` / `TRANSCRIPTOR_VULKAN` / `TRANSCRIPTOR_METAL` | OFF / OFF / ON on macOS | GPU acceleration. STT and the summarizer share the setting. |
 
-## Çalıştırma
+## Running
 
-Binary'yi çalıştırın; pencere açılır. Konsoldan:
+Run the binary and a window opens. From a console:
 
 ```bash
-./transcriptor              # pencereyi aç
-./transcriptor --check      # başsız teşhis (cihaz, ses kaynakları, modeller)
-./transcriptor --no-window  # sadece sunucu; varsayılan tarayıcıda aç
+./transcriptor              # open the window
+./transcriptor --check      # headless diagnostics (device, audio sources, models)
+./transcriptor --no-window  # server only; opens your default browser
 ./transcriptor --port 5005
 ```
 
-## Modeller
+## Models
 
-Hiçbir model binary'ye gömülü değildir; ilk ihtiyaç duyulduğunda otomatik iner
-(indirme için `curl` kullanılır — Windows 10 1803+, macOS ve Linux'ta hazır
-gelir). İnenler:
+No model is bundled; each downloads the first time it is needed (via `curl`,
+which ships with Windows 10 1803+, macOS, and Linux):
 
-| Model | Boyut | Ne zaman |
+| Model | Size | When |
 |---|---|---|
-| `ggml-large-v3.bin` (whisper.cpp) | ~3.1 GB | İlk kayıt işlenirken |
-| pyannote segmentation-3.0 (ONNX) | ~6 MB | İlk konuşmacı ayrımında |
-| 3D-Speaker ERes2NetV2 ses izi | ~69 MB | İlk konuşmacı ayrımında |
+| `ggml-large-v3.bin` (whisper.cpp) | ~3.1 GB | First recording processed |
+| pyannote segmentation-3.0 (ONNX) | ~6 MB | First speaker separation |
+| 3D-Speaker ERes2NetV2 embedding | ~69 MB | First speaker separation |
 
-Konum: `%APPDATA%\Transcriptor\models` (Windows),
+Location: `%APPDATA%\Transcriptor\models` (Windows),
 `~/Library/Application Support/Transcriptor/models` (macOS),
-`~/.config/Transcriptor/models` (Linux). `TRANSCRIPTOR_MODELS_DIR` ile değiştirilir.
+`~/.config/Transcriptor/models` (Linux). Override with
+`TRANSCRIPTOR_MODELS_DIR`.
 
-Önceden indirmek için: `./scripts/fetch_models.sh` ya da
+To fetch them ahead of time: `./scripts/fetch_models.sh` or
 `.\scripts\fetch_models.ps1`.
 
-**pyannote için HuggingFace token gerekmez** — kullanılan ONNX çıktısı açık
-erişimlidir.
+**No HuggingFace token is needed for pyannote** — the ONNX export used here is
+openly accessible.
 
-### Özetleyici modeli (GGUF)
+### Summarizer model (GGUF)
 
-Gömülü llama.cpp bir GGUF dosyası bekler. En kolayı Ayarlar → Özetleyici →
-**Hazır model indir**: listeden bir model seçip **İndir** deyin, dosya modeller
-klasörüne inip otomatik olarak seçilir. Hiçbiri binary'ye gömülü değildir,
-indirme isteğe bağlıdır.
+The embedded llama.cpp expects a GGUF file. The easiest route is Settings →
+Summarizer → **Download a ready-made model**: pick one and click **Download**;
+it lands in the models folder and is selected automatically. Nothing is
+bundled, and downloading is optional.
 
-| Model | Boyut | Not |
+| Model | Size | Note |
 | --- | --- | --- |
-| Qwen3.5 4B Instruct `Q4_K_M` | ~2.6 GB | Önerilen — kalite/boyut dengesi |
-| Qwen3.5 2B Instruct `Q4_K_M` | ~1.2 GB | 4 GB VRAM ya da salt CPU |
-| Qwen3.5 0.8B Instruct `Q4_K_M` | ~0.5 GB | En küçük, en kaba özet |
-| Gemma 4 E2B Instruct `Q4_K_M` | ~2.9 GB | Google Gemma 4, küçük sürüm |
-| Gemma 4 E4B Instruct `Q4_K_M` | ~4.6 GB | 8 GB VRAM ister |
-| Qwen2.5 7B Instruct `Q4_K_M` | ~4.4 GB | Eski varsayılan |
+| Qwen3.5 4B Instruct `Q4_K_M` | ~2.6 GB | Recommended — quality/size balance |
+| Qwen3.5 2B Instruct `Q4_K_M` | ~1.2 GB | 4 GB VRAM, or CPU only |
+| Qwen3.5 0.8B Instruct `Q4_K_M` | ~0.5 GB | Smallest, roughest summaries |
+| Gemma 4 E2B Instruct `Q4_K_M` | ~2.9 GB | Google Gemma 4, small variant |
+| Gemma 4 E4B Instruct `Q4_K_M` | ~4.6 GB | Wants 8 GB VRAM |
+| Qwen2.5 7B Instruct `Q4_K_M` | ~4.4 GB | Previous default |
 
-Elle indirmeyi tercih ederseniz modeller klasörüne bir `.gguf` koyup Ayarlar →
-Özetleyici → **Tara** demeniz de yeterli.
+If you prefer to download by hand, drop a `.gguf` into the models folder and
+hit Settings → Summarizer → **Scan**.
 
-LM Studio'yu tercih ederseniz Ayarlar → Özetleyici → **Uzak sunucu** seçip
-`http://127.0.0.1:1234/v1` yazın.
+To use LM Studio instead, pick Settings → Summarizer → **Remote server** and
+enter `http://127.0.0.1:1234/v1`.
 
-## Ses kaydı
+## Audio capture
 
-- **Windows:** WASAPI loopback — herhangi bir çıkış aygıtının sesi doğrudan
-  kaydedilir. Kaynak listesinde tüm hoparlörler görünür.
-- **Linux:** PipeWire/PulseAudio monitor kaynakları loopback olarak listelenir.
-- **macOS:** İşletim sistemi sistem sesini doğrudan kaydettirmez. Sanal bir
-  çıkış aygıtı gerekir:
+- **Windows:** WASAPI loopback — any output device is recorded directly. Every
+  speaker shows up in the source list.
+- **Linux:** PipeWire/PulseAudio monitor sources are listed as loopbacks.
+- **macOS:** the OS will not let you record system audio directly. A virtual
+  output device is required:
   ```bash
   brew install blackhole-2ch
   ```
-  Ardından Ses Ayarları'ndan çoklu çıkış aygıtı kurup kaynak olarak BlackHole'ü
-  seçin. Uygulama bunu algılar ve loopback olarak işaretler; kurulu değilse
-  arayüzde açıklayıcı bir uyarı çıkar. (Mikrofon kaydı her platformda çalışır.)
+  Then create a multi-output device in Audio Settings and pick BlackHole as the
+  source. The app detects it and marks it as a loopback; if it is missing, the
+  UI explains why. (Microphone capture works on every platform.)
 
-Kaynak satırından ikinci bir **mikrofon** seçerseniz sistem sesine gerçek
-zamanlı karıştırılır; kazançlar ve tepe sınırlayıcı ayarlardan yönetilir.
+Selecting a second **microphone** in the source row mixes it into the system
+audio in real time; gains and the peak limiter come from Settings.
 
-## VRAM yönetimi
+## VRAM management
 
-8 GB kart için modeller sırayla yüklenir: modelleri uygulama tuttuğu için STT
-başlamadan önce LLM ağırlıkları, özet başlamadan önce whisper ağırlıkları
-doğrudan bırakılır.
-Ayarlar → **VRAM'i sıraya koy** ile kapatılabilir.
+For 8 GB cards the models load in sequence: because the app holds the weights
+itself, the LLM is released before transcription starts and whisper is released
+before summarizing does. Turn it off with Settings → **Sequence VRAM**.
 
-Uzun kayıtlar bağlam penceresine sığmazsa özetleyici otomatik olarak parça
-parça not çıkarıp sonra bunları birleştirir.
+When a recording does not fit the context window, the summarizer takes notes
+chunk by chunk and merges them.
 
-## Yapılandırma
+## Configuration
 
-`config.json`, modellerle aynı klasörün üstünde tutulur. Ortam değişkenleri:
-`TRANSCRIPTOR_HOST`, `TRANSCRIPTOR_PORT`, `TRANSCRIPTOR_OUTPUT_DIR`, `TRANSCRIPTOR_MODELS_DIR`, `TRANSCRIPTOR_LLM_BASE_URL`,
-`TRANSCRIPTOR_LLM_MODEL`, `TRANSCRIPTOR_LLM_MODEL_PATH`, `TRANSCRIPTOR_WHISPER_MODEL`, `TRANSCRIPTOR_DEVICE`,
+`config.json` sits one level above the models folder. Environment variables:
+`TRANSCRIPTOR_HOST`, `TRANSCRIPTOR_PORT`, `TRANSCRIPTOR_OUTPUT_DIR`,
+`TRANSCRIPTOR_MODELS_DIR`, `TRANSCRIPTOR_LLM_BASE_URL`,
+`TRANSCRIPTOR_LLM_MODEL`, `TRANSCRIPTOR_LLM_MODEL_PATH`,
+`TRANSCRIPTOR_WHISPER_MODEL`, `TRANSCRIPTOR_DEVICE`,
 `TRANSCRIPTOR_NO_DIARIZE`, `TRANSCRIPTOR_LLAMA_VERBOSE`.
 
-## Bağımlılık sürümlerini yükseltmek
+## Note templates
 
-Tüm sürümler `cmake/dependencies.cmake` başındaki `TRANSCRIPTOR_*_TAG` değişkenlerinde.
-Dikkat edilmesi gereken tek nokta: **llama.cpp ve whisper.cpp aynı ggml'i
-paylaşır.** llama.cpp önce çekilir ve `ggml` hedeflerini tanımlar; whisper.cpp
-mevcut `ggml` hedefini yeniden kullanır. İkisini birbirinden çok uzak tarihlere
-sabitlerseniz ggml API'si uyuşmaz. İkisini birlikte, yakın tarihli sürümlere
-yükseltin.
+Settings → **Note templates** lets you edit a built-in template's system
+prompt, attach persistent context to it (e.g. "Our company is Acme; focus on
+decisions"), or write your own with **+ New template**. Your templates appear
+in the menu next to the built-ins and are stored under `custom_templates` in
+`config.json`.
 
-llama.cpp'nin C API'si de sık değişir; `src/llm/llama_backend.cpp` mevcut
-`llama_model_load_from_file` / `llama_init_from_model` / `llama_sampler_chain`
-API'sini kullanır. Çok eski bir tag'e dönerseniz burası uyarlanmalıdır.
+## Interface language
 
-**sherpa-onnx** gömülmek üzere tasarlanmamış: CMakeLists'i `CMAKE_SOURCE_DIR`'i
-kendi kökü sanıyor. `cmake/dependencies.cmake` bunu üç yamayla çözer —
-(1) `SOURCE_SUBDIR` hilesiyle önce indirip sonra elle `add_subdirectory`,
-(2) kendi `cmake/` klasörünü `CMAKE_MODULE_PATH`'e ekleme,
-(3) kaynak kökünü `include_directories`'e ekleme. Ayrıca alt bağımlılıkları
-CMake 4'ün reddettiği eski `cmake_minimum_required` sürümlerini bildirdiği için
-o alt ağaca `CMAKE_POLICY_VERSION_MINIMUM=3.5` verilir. Sürüm yükseltirken
-bunların hâlâ gerekli (ya da yeterli) olup olmadığını kontrol edin.
+The **EN / TR** button in the header, or Settings → **Interface language**. The
+choice is written to `ui_language` in `config.json`, and mirrored in
+`localStorage` so the first paint does not flash. Summary language
+(`summary_language`) is separate: an English interface can produce Turkish
+summaries.
 
-Konuşmacı ayrımı sherpa-onnx'in **C** API'siyle yazıldı (`c-api.h`); C++
-sarmalayıcısı (`cxx-api.h`) diarization'ı kapsamıyor.
+## Upgrading dependency versions
 
-## Proje yapısı
+All versions live in the `TRANSCRIPTOR_*_TAG` variables at the top of
+`cmake/dependencies.cmake`. The one thing to watch: **llama.cpp and whisper.cpp
+share the same ggml.** llama.cpp is fetched first and defines the `ggml`
+targets; whisper.cpp reuses the existing one. Pin them to dates far apart and
+the ggml API will not match. Upgrade them together, to nearby versions.
+
+llama.cpp's C API also changes often; `src/llm/llama_backend.cpp` uses the
+current `llama_model_load_from_file` / `llama_init_from_model` /
+`llama_sampler_chain` API. Going back to a much older tag means adapting it.
+
+**sherpa-onnx** was not designed to be embedded: its CMakeLists assumes
+`CMAKE_SOURCE_DIR` is its own root. `cmake/dependencies.cmake` works around
+this three ways — (1) the `SOURCE_SUBDIR` trick to download first and
+`add_subdirectory` manually, (2) adding its own `cmake/` folder to
+`CMAKE_MODULE_PATH`, (3) adding its source root to `include_directories`. Its
+sub-dependencies also declare `cmake_minimum_required` versions CMake 4
+rejects, so that subtree gets `CMAKE_POLICY_VERSION_MINIMUM=3.5`. Check whether
+these are still necessary (or sufficient) when upgrading.
+
+Speaker separation is written against sherpa-onnx's **C** API (`c-api.h`); the
+C++ wrapper (`cxx-api.h`) does not cover diarization.
+
+## Project layout
 
 ```
 src/
-  main.cpp              Giriş noktası, --check, pencere/tarayıcı seçimi
-  config.*              JSON ayarlar (Settings)
-  device.*              GPU tespiti (ggml backend kayıt defteri üzerinden)
-  audio/                miniaudio: kaynak listesi, yakalama, kayıt/mixleme, dosya çözme
-  stt/whisper_stt.*     whisper.cpp sarmalayıcı, kelime zaman damgalı
-  diarize/diarizer.*    sherpa-onnx konuşmacı ayrımı
-  llm/                  şablonlar + gömülü llama.cpp + OpenAI uyumlu istemci
-  pipeline/processor.*  transcribe → diarize → konuşmacı eşleme
-  app/                  AppState, /api/* sunucusu, native pencere, gömülü varlıklar
-  util/                 yollar, dışa aktarma, indirme, model kayıt defteri
-web/                    Arayüz (derleme sırasında binary'ye gömülür)
-  index.html            İşaretleme; çevrilecek metinler data-i18n ile etiketli
-  app.js                Tüm arayüz mantığı
-  i18n.js               tr/en sözlüğü ve dil uygulayıcı
-  style.css             Tema (aydınlık/karanlık), düzen
+  main.cpp              Entry point, --check, window/browser choice
+  config.*              JSON settings (Settings)
+  device.*              GPU detection (via the ggml backend registry)
+  audio/                miniaudio: source list, capture, recording/mixing, decoding
+  stt/whisper_stt.*     whisper.cpp wrapper, word-level timestamps
+  diarize/diarizer.*    sherpa-onnx speaker separation
+  llm/                  templates + embedded llama.cpp + OpenAI-compatible client
+  pipeline/processor.*  transcribe → diarize → speaker attribution
+  app/                  AppState, the /api/* server, native window, embedded assets
+  util/                 paths, export, downloads, model registry
+web/                    Interface (compiled into the binary at build time)
+  index.html            Markup; translatable strings tagged with data-i18n
+  app.js                All interface logic
+  i18n.js               tr/en dictionary and the language applier
+  style.css             Theme (light/dark), layout
 ```
 
-## Not şablonları
-
-Ayarlar → **Not şablonları** altından hazır şablonların sistem promptunu
-düzenleyebilir, her birine kalıcı bir bağlam ekleyebilir (örn. "Şirketimiz
-Acme; kararlara odaklan") ya da **+ Yeni şablon** ile kendi şablonunuzu
-yazabilirsiniz. Kendi şablonlarınız hazır olanların yanında menüde görünür ve
-`config.json` içinde `custom_templates` altında saklanır.
-
-## Arayüz dili
-
-Başlıktaki **EN / TR** düğmesi ya da Ayarlar → **Arayüz dili**. Seçim
-`config.json`'daki `ui_language` alanına yazılır, ilk boyamada titremesin diye
-`localStorage`'da da tutulur. Özet dili (`summary_language`) ayrıdır: arayüz
-İngilizce, özetler Türkçe olabilir.
-
-## Lisans
+## License
 
 [MIT](LICENSE) — © 2026 shimadachi.
 
-Derlenen binary'nin içindeki üçüncü taraf bileşenler kendi lisanslarıyla
-gelir: llama.cpp ve whisper.cpp (MIT), sherpa-onnx (Apache-2.0), ONNX Runtime
-(MIT), miniaudio (MIT/Unlicense), cpp-httplib (MIT), nlohmann/json (MIT),
-webview (MIT), Eigen (MPL-2.0), OpenFST (Apache-2.0).
+Third-party components inside the compiled binary keep their own licenses:
+llama.cpp and whisper.cpp (MIT), sherpa-onnx (Apache-2.0), ONNX Runtime (MIT),
+miniaudio (MIT/Unlicense), cpp-httplib (MIT), nlohmann/json (MIT), webview
+(MIT), Eigen (MPL-2.0), OpenFST (Apache-2.0).
