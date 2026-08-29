@@ -354,6 +354,7 @@ private:
         llama_sampler_chain_add(sampler, llama_sampler_init_top_k(40));
         llama_sampler_chain_add(sampler, llama_sampler_init_top_p(0.95f, 1));
         llama_sampler_chain_add(sampler, llama_sampler_init_penalties(
+                                             llama_vocab_n_tokens(vocab_),
                                              /*penalty_last_n=*/256,
                                              /*penalty_repeat=*/1.1f,
                                              /*penalty_freq=*/0.0f,

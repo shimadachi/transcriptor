@@ -6,8 +6,8 @@
 include(FetchContent)
 set(FETCHCONTENT_QUIET OFF)
 
-set(TRANSCRIPTOR_LLAMA_TAG   "b4689"        CACHE STRING "llama.cpp git tag")
-set(TRANSCRIPTOR_WHISPER_TAG "v1.7.4"       CACHE STRING "whisper.cpp git tag")
+set(TRANSCRIPTOR_LLAMA_TAG   "b10687"       CACHE STRING "llama.cpp git tag")
+set(TRANSCRIPTOR_WHISPER_TAG "v1.9.3"       CACHE STRING "whisper.cpp git tag")
 set(TRANSCRIPTOR_SHERPA_TAG  "v1.10.46"     CACHE STRING "sherpa-onnx git tag")
 set(TRANSCRIPTOR_HTTPLIB_TAG "v0.18.3"      CACHE STRING "cpp-httplib git tag")
 set(TRANSCRIPTOR_JSON_TAG    "v3.11.3"      CACHE STRING "nlohmann/json git tag")
