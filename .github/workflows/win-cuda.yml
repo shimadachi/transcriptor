@@ -13,5 +13,5 @@ jobs:
     uses: ./.github/workflows/_build.yml
     with:
       preset: win-cuda
-      os: windows-latest
+      os: windows-2022
       cuda: true
