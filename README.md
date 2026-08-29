@@ -88,6 +88,26 @@ değişince yeniden derlemeden arayüzde görünmez.
 Dağıtılabilir paket için: `cd build/<preset> && cpack`
 (Windows → `.zip`, macOS → `.dmg`, Linux → `.tar.gz`).
 
+### Hazır yapılar (CI)
+
+Her preset kendi iş akışında, kendi işletim sistemi üzerinde derlenir. Rozete
+tıklayınca o hedefin çalışmalarına gidersiniz; paketler her çalışmanın
+**Artifacts** bölümünden inebilir.
+
+| Preset | Runner | Durum |
+|---|---|---|
+| `linux` | ubuntu-latest | [![linux](https://github.com/shimadachi/transcriptor/actions/workflows/linux.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/linux.yml) |
+| `linux-cuda` | ubuntu-latest | [![linux-cuda](https://github.com/shimadachi/transcriptor/actions/workflows/linux-cuda.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/linux-cuda.yml) |
+| `linux-vulkan` | ubuntu-latest | [![linux-vulkan](https://github.com/shimadachi/transcriptor/actions/workflows/linux-vulkan.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/linux-vulkan.yml) |
+| `mac-arm64` | macos-14 | [![mac-arm64](https://github.com/shimadachi/transcriptor/actions/workflows/mac-arm64.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/mac-arm64.yml) |
+| `mac-x64` | macos-13 | [![mac-x64](https://github.com/shimadachi/transcriptor/actions/workflows/mac-x64.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/mac-x64.yml) |
+| `win-msvc` | windows-latest | [![win-msvc](https://github.com/shimadachi/transcriptor/actions/workflows/win-msvc.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/win-msvc.yml) |
+| `win-cuda` | windows-latest | [![win-cuda](https://github.com/shimadachi/transcriptor/actions/workflows/win-cuda.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/win-cuda.yml) |
+| `win-vulkan` | windows-latest | [![win-vulkan](https://github.com/shimadachi/transcriptor/actions/workflows/win-vulkan.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/win-vulkan.yml) |
+
+CUDA yapıları için **Vulkan/CUDA sürücüsü olan bir makine** gerekir; CI yalnızca
+derler, çalıştırmaz.
+
 ### Derleme seçenekleri
 
 | Seçenek | Varsayılan | Ne yapar |
