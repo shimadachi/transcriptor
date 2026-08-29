@@ -25,6 +25,25 @@ ggml-*.bin
 recordings/
 Transcriptor/
 
+# Never commit a settings file: it carries absolute paths, llm_api_key, and
+# whatever prompts and context the user wrote into their own templates. The
+# real one lives in the OS config dir, but a copy dropped here must not slip in.
+config.json
+
+# Loose audio/video dropped in the tree while testing.
+*.wav
+*.mp3
+*.m4a
+*.flac
+*.ogg
+*.opus
+*.webm
+*.mp4
+
+# Secrets, if any tooling ever writes one here.
+.env
+.env.*
+
 # Editors / OS
 .vscode/
 .idea/
