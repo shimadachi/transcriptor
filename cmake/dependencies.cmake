@@ -29,6 +29,34 @@ if(TRANSCRIPTOR_METAL)
 endif()
 set(GGML_OPENMP OFF CACHE BOOL "" FORCE)   # avoids a libomp runtime dependency
 
+# A CPU baseline the packages can actually run on. ggml defaults GGML_NATIVE to
+# ON, which builds the CPU backend with -march=native (/arch:AVX512 under MSVC,
+# via FindSIMD.cmake) — tuned for whatever machine happened to run the build. A
+# CI runner with AVX-512 therefore ships a binary that dies with SIGILL inside
+# ggml_cpu_init, before the window ever opens, on any CPU without AVX-512: every
+# AMD Zen 1-3, and every Intel consumer part since Alder Lake.
+#
+# Switching it off flips ggml's INS_ENB on instead, which enables SSE4.2, AVX,
+# AVX2, BMI2, FMA and F16C while leaving the AVX-512 options off — one baseline
+# that every x86-64 CPU from Haswell / Excavator (2013-15) onwards can run.
+#
+# x86 only. On Apple Silicon GGML_NATIVE drives -mcpu=native, and turning it off
+# there would drop the NEON dotprod / i8mm paths whisper leans on; the arm64
+# runner is an M1, so native there is already the conservative baseline.
+#
+# TRANSCRIPTOR_NATIVE brings -march=native back for a build you are making for
+# the machine it will run on. Never set it for anything you intend to hand to
+# someone else.
+set(TRANSCRIPTOR_NATIVE_LABEL "not x86 (unchanged)")
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64|i[3-6]86)$")
+    if(TRANSCRIPTOR_NATIVE)
+        set(TRANSCRIPTOR_NATIVE_LABEL "native (-march=native) — THIS MACHINE ONLY")
+    else()
+        set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+        set(TRANSCRIPTOR_NATIVE_LABEL "portable baseline (AVX2/FMA/F16C, no AVX-512)")
+    endif()
+endif()
+
 # ---------------------------------------------------------------------------
 # llama.cpp — the summarizer (replaces LM Studio)
 #

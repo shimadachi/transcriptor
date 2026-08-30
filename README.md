@@ -129,6 +129,7 @@ toolkit, so nothing is bundled and the binary stays small.
 | `TRANSCRIPTOR_DIARIZE` | ON | Speaker separation (sherpa-onnx + ONNX Runtime). OFF builds faster and produces unlabelled transcripts. |
 | `TRANSCRIPTOR_WEBVIEW` | ON | Native window. OFF → opens in the browser. |
 | `TRANSCRIPTOR_CUDA` / `TRANSCRIPTOR_VULKAN` / `TRANSCRIPTOR_METAL` | OFF / OFF / ON on macOS | GPU acceleration. STT and the summarizer share the setting. |
+| `TRANSCRIPTOR_NATIVE` | OFF | x86 only. ON compiles the CPU backend with `-march=native`, which is faster but runs *only* on a CPU like the one that built it. Off by default so a build is portable; never turn it on for a binary you hand to someone else. |
 
 ## Running
 
