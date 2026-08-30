@@ -55,9 +55,12 @@ jobs:
 
       # The distro packages are enough for ggml-vulkan (headers, loader, glslc)
       # and avoid building glslang from source, which needs SPIR-V Tools too.
+      # spirv-headers is what supplies SPIRV-HeadersConfig.cmake, which
+      # ggml-vulkan has required via find_package since it started compiling
+      # its shaders against the SPIR-V headers directly.
       - name: Vulkan (Linux)
         if: inputs.vulkan && runner.os == 'Linux'
-        run: sudo apt-get install -y libvulkan-dev glslc glslang-tools spirv-tools
+        run: sudo apt-get install -y libvulkan-dev glslc glslang-tools spirv-tools spirv-headers
 
       - name: Vulkan SDK (Windows)
         if: inputs.vulkan && runner.os == 'Windows'
