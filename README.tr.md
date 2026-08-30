@@ -130,6 +130,7 @@ bağlanır; hiçbir şey paketlenmez, binary küçük kalır.
 | `TRANSCRIPTOR_DIARIZE` | ON | Konuşmacı ayrımı (sherpa-onnx + ONNX Runtime). OFF ederseniz derleme hızlanır, metin etiketsiz üretilir. |
 | `TRANSCRIPTOR_WEBVIEW` | ON | Native pencere. OFF → tarayıcıda açılır. |
 | `TRANSCRIPTOR_CUDA` / `TRANSCRIPTOR_VULKAN` / `TRANSCRIPTOR_METAL` | OFF / OFF / macOS'ta ON | GPU hızlandırma. Hem STT hem özetleyici aynı ayarı kullanır. |
+| `TRANSCRIPTOR_NATIVE` | OFF | Yalnızca x86. ON, CPU backend'ini `-march=native` ile derler; daha hızlıdır ama *sadece* onu derleyen makineye benzer bir CPU'da çalışır. Derlemenin taşınabilir kalması için varsayılan kapalıdır; başkasına vereceğiniz bir binary için asla açmayın. |
 
 ## Çalıştırma
 

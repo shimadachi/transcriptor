@@ -23,6 +23,9 @@ option(TRANSCRIPTOR_CUDA      "GPU acceleration via CUDA (Linux/Windows, NVIDIA)
 option(TRANSCRIPTOR_VULKAN    "GPU acceleration via Vulkan (Linux/Windows, any GPU)" OFF)
 option(TRANSCRIPTOR_METAL     "GPU acceleration via Metal (macOS)" ${APPLE})
 option(TRANSCRIPTOR_STATIC_RT "Statically link the MSVC runtime (Windows)" ON)
+# Off by default so a build is portable to any x86-64 machine; see the note in
+# cmake/dependencies.cmake. Only turn it on for a binary you will run yourself.
+option(TRANSCRIPTOR_NATIVE    "Tune the x86 CPU backend for THIS machine (-march=native)" OFF)
 
 if(MSVC AND TRANSCRIPTOR_STATIC_RT)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -130,4 +133,5 @@ message(STATUS "  build type   : ${CMAKE_BUILD_TYPE}")
 message(STATUS "  diarization  : ${TRANSCRIPTOR_DIARIZE}")
 message(STATUS "  native window: ${TRANSCRIPTOR_WEBVIEW}")
 message(STATUS "  GPU          : CUDA=${TRANSCRIPTOR_CUDA} Vulkan=${TRANSCRIPTOR_VULKAN} Metal=${TRANSCRIPTOR_METAL}")
+message(STATUS "  x86 CPU      : ${TRANSCRIPTOR_NATIVE_LABEL}")
 message(STATUS "")
