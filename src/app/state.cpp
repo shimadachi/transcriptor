@@ -16,20 +16,20 @@ namespace transcriptor::app {
 namespace {
 
 struct PhaseText {
-    const char* tr;
     const char* en;
+    const char* tr;
 };
 
 const std::map<std::string, PhaseText>& phase_messages() {
     static const std::map<std::string, PhaseText> kMessages = {
-        {"idle",        {"Hazır",                        "Ready"}},
-        {"recording",   {"Kayıt sürüyor…",               "Recording…"}},
-        {"transcribe",  {"Metne dönüştürülüyor…",        "Transcribing…"}},
-        {"diarize",     {"Konuşmacılar ayrılıyor…",      "Separating speakers…"}},
-        {"attribute",   {"Konuşmacılar eşleştiriliyor…", "Matching speakers…"}},
-        {"done",        {"Tamamlandı",                   "Done"}},
-        {"summarizing", {"Özetleniyor…",                 "Summarizing…"}},
-        {"error",       {"Hata",                         "Error"}},
+        {"idle",        {"Ready",               "Hazır"}},
+        {"recording",   {"Recording…",          "Kayıt sürüyor…"}},
+        {"transcribe",  {"Transcribing…",       "Metne dönüştürülüyor…"}},
+        {"diarize",     {"Separating speakers…","Konuşmacılar ayrılıyor…"}},
+        {"attribute",   {"Matching speakers…",  "Konuşmacılar eşleştiriliyor…"}},
+        {"done",        {"Done",                "Tamamlandı"}},
+        {"summarizing", {"Summarizing…",        "Özetleniyor…"}},
+        {"error",       {"Error",               "Hata"}},
     };
     return kMessages;
 }
@@ -46,7 +46,7 @@ std::string trim(const std::string& s) {
 std::string phase_message(const std::string& phase, const std::string& lang) {
     auto it = phase_messages().find(phase);
     if (it == phase_messages().end()) return phase;
-    return (lang == "en") ? it->second.en : it->second.tr;
+    return (lang == "tr") ? it->second.tr : it->second.en;
 }
 
 AppState::AppState(Settings settings)
@@ -54,7 +54,7 @@ AppState::AppState(Settings settings)
       device_(resolve_device(settings_.device, settings_.compute_type)),
       message_(phase_message("idle", settings_.ui_language)),
       summary_template_(settings_.summary_template) {
-    ui_en_.store(settings_.ui_language == "en");
+    lang::set(settings_.ui_language);
     processor_ = std::make_unique<pipeline::OfflineProcessor>(settings_, device_);
     llm_ = llm::make_backend(settings_, device_);
 }
@@ -117,7 +117,7 @@ void AppState::replace_settings(const Settings& next) {
     std::lock_guard<std::mutex> lock(mutex_);
     const std::string old_lang = ui_language();
     settings_ = next;
-    ui_en_.store(next.ui_language == "en");
+    lang::set(next.ui_language);
     // An idle status line is a phase default, so re-render it in the new
     // language; a real message (an error, a filename) is left alone.
     if (message_ == phase_message(phase_, old_lang)) {
@@ -199,7 +199,7 @@ void AppState::stop_and_process() {
     recorder.reset();
 
     if (!err.empty()) {
-        set_phase("error", -1.0, std::string(ui("Ses hatası: ", "Audio error: ")) + err);
+        set_phase("error", -1.0, L("Audio error: ", "Ses hatası: ") + err);
         return;
     }
     begin(std::move(audio), {}, {});
@@ -213,14 +213,15 @@ bool AppState::process_file(const paths::fs::path& tmp_path,
         summary_.reset();
         session_dir_.clear();
     }
-    set_phase("transcribe", -1.0, ui("Dosya çözülüyor…", "Decoding the file…"));
+    set_phase("transcribe", -1.0, L("Decoding the file…", "Dosya çözülüyor…"));
 
     std::vector<float> audio;
     try {
         audio = audio::decode_file(tmp_path, settings_copy().samplerate);
     } catch (const std::exception& e) {
         set_phase("error", -1.0,
-                  std::string(ui("Dosya çözülemedi: ", "Could not decode the file: ")) + e.what());
+                  std::string(L("Could not decode the file: ",
+                                "Dosya çözülemedi: ")) + e.what());
         return false;
     }
     begin(std::move(audio), tmp_path, orig_name);
@@ -232,7 +233,7 @@ void AppState::begin(std::vector<float> audio, const paths::fs::path& original_f
     const Settings settings = settings_copy();
 
     if (audio.size() < static_cast<std::size_t>(settings.samplerate / 2)) {
-        set_phase("error", -1.0, ui("Çok kısa/boş ses.", "The audio is too short or empty."));
+        set_phase("error", -1.0, L("The audio is too short or empty.", "Çok kısa/boş ses."));
         return;
     }
 
@@ -259,7 +260,7 @@ void AppState::process_worker(std::vector<float> audio) {
     try {
         // VRAM handoff: drop the summarizer's weights before the STT models load.
         if (settings.manage_vram) {
-            set_phase("transcribe", -1.0, ui("VRAM boşaltılıyor (LLM)…", "Freeing VRAM (LLM)…"));
+            set_phase("transcribe", -1.0, L("Freeing VRAM (LLM)…", "VRAM boşaltılıyor (LLM)…"));
             std::lock_guard<std::mutex> lock(mutex_);
             if (llm_) llm_->unload();
         }
@@ -346,7 +347,7 @@ void AppState::start_summarize(const std::string& context,
         if (!result_.has_value()) {
             phase_ = "error";
             progress_ = -1.0;
-            message_ = ui("Özetlenecek metin yok.", "There is no text to summarize.");
+            message_ = L("There is no text to summarize.", "Özetlenecek metin yok.");
             return;
         }
         summary_context_ = context;
@@ -417,7 +418,8 @@ void AppState::do_summarize() {
     try {
         // VRAM handoff the other way: free the STT models before the LLM loads.
         if (manage_vram) {
-            set_phase("summarizing", -1.0, "VRAM devrediliyor (STT→LLM)…");
+            set_phase("summarizing", -1.0,
+                      L("Handing VRAM over (STT→LLM)…", "VRAM devrediliyor (STT→LLM)…"));
             std::lock_guard<std::mutex> lock(mutex_);
             if (processor_) processor_->unload();
         }
@@ -427,7 +429,10 @@ void AppState::do_summarize() {
             std::lock_guard<std::mutex> lock(mutex_);
             backend = llm_.get();
         }
-        if (!backend) throw llm::SummarizerError(ui("Özetleyici hazır değil.", "The summarizer is not ready."));
+        if (!backend) {
+            throw llm::SummarizerError(
+                L("The summarizer is not ready.", "Özetleyici hazır değil."));
+        }
 
         const llm::Availability health = backend->available();
         if (!health.ok) {
@@ -473,11 +478,14 @@ std::vector<std::string> AppState::list_llm_models(
 bool AppState::start_llm_download(const std::string& model_id, std::string* error) {
     const models::LlmModelSpec* spec = models::llm_spec(model_id);
     if (!spec) {
-        if (error) *error = "Bilinmeyen model: " + model_id;
+        if (error) *error = L("Unknown model: ", "Bilinmeyen model: ") + model_id;
         return false;
     }
     if (downloading_.exchange(true)) {
-        if (error) *error = "Zaten bir model indiriliyor.";
+        if (error) {
+            *error = L("A model is already downloading.",
+                       "Zaten bir model indiriliyor.");
+        }
         return false;
     }
 
@@ -486,7 +494,8 @@ bool AppState::start_llm_download(const std::string& model_id, std::string* erro
         std::lock_guard<std::mutex> lock(mutex_);
         dl_model_    = spec->id;
         dl_label_    = spec->label;
-        dl_message_  = spec->label + " indiriliyor…";
+        dl_message_  = lang::english() ? "Downloading " + spec->label + "…"
+                                       : spec->label + " indiriliyor…";
         dl_error_.clear();
         dl_progress_ = -1.0;
     }
@@ -507,7 +516,7 @@ bool AppState::start_llm_download(const std::string& model_id, std::string* erro
             std::lock_guard<std::mutex> lock(mutex_);
             dl_error_ = err;
             if (err.empty()) {
-                dl_message_  = copy.label + ui(" hazır.", " is ready.");
+                dl_message_  = copy.label + L(" is ready.", " hazır.");
                 dl_progress_ = 1.0;
             } else {
                 dl_message_.clear();

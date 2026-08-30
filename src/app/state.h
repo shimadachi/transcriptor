@@ -19,6 +19,7 @@
 #include "device.h"
 #include "llm/summarizer.h"
 #include "pipeline/processor.h"
+#include "util/lang.h"
 
 namespace transcriptor::app {
 
@@ -58,10 +59,10 @@ public:
     nlohmann::json state_json() const;
     nlohmann::json result_json() const;
 
-    // Language for user-facing messages. Kept in an atomic rather than read
-    // from settings_ so it is safe to call with mutex_ already held, and from
-    // the request threads.
-    std::string ui_language() const { return ui_en_.load() ? "en" : "tr"; }
+    // Language for user-facing messages. Read from the process-wide atomic in
+    // util/lang.h rather than from settings_, so it is safe to call with mutex_
+    // already held, and from the request threads.
+    std::string ui_language() const { return lang::english() ? "en" : "tr"; }
 
     bool            recording() const { return recording_.load(); }
     bool            processing() const { return processing_.load(); }
@@ -87,11 +88,6 @@ public:
 private:
     void set_phase(const std::string& phase, double progress = -1.0,
                    const std::string& message = "");
-
-    // Picks the string matching ui_language() for a message built in place.
-    const char* ui(const char* tr, const char* en) const {
-        return ui_en_.load() ? en : tr;
-    }
 
     void begin(std::vector<float> audio, const paths::fs::path& original_file,
                const std::string& original_name);
@@ -134,7 +130,6 @@ private:
     std::string dl_error_;
     double      dl_progress_ = -1.0;
 
-    std::atomic<bool> ui_en_{false};
     std::atomic<bool> recording_{false};
     std::atomic<bool> processing_{false};
     std::atomic<bool> downloading_{false};

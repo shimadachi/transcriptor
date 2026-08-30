@@ -61,6 +61,7 @@
 :root[data-theme="light"] ::selection { background: rgba(228,73,31,.20); color: #1a1712; }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0; background: var(--bg); color: var(--ink);
@@ -214,6 +215,97 @@ select.grow { flex: 1; }
 .xsel-opt .xsel-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @keyframes pop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 
+/* ---------- tabs (studio / library) ---------- */
+.tabs { display: flex; gap: 4px; margin: -10px 0 18px;
+  border-bottom: 1px solid var(--line); animation: rise .6s var(--ease) both;
+  animation-delay: .03s; }
+.tab {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .2em;
+  text-transform: uppercase; color: var(--muted);
+  background: transparent; border: 0; border-radius: 0;
+  padding: 12px 18px 14px; position: relative; }
+/* The generic button hover lifts and tints; a tab should do neither. */
+.tab:hover:not(:disabled) { background: transparent; transform: none;
+  color: var(--ink-dim); }
+.tab::after { content: ""; position: absolute; left: 14px; right: 14px; bottom: -1px;
+  height: 2px; background: var(--rec); border-radius: 2px;
+  transform: scaleX(0); transform-origin: left;
+  transition: transform .22s var(--ease); }
+.tab.on { color: var(--ink); }
+.tab.on::after { transform: scaleX(1); }
+
+/* ---------- library ---------- */
+.lib-dir { font-family: var(--mono); font-size: 11px; color: var(--muted);
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; direction: rtl; text-align: left; }
+.lib-grid { display: grid; grid-template-columns: 330px minmax(0, 1fr);
+  gap: 20px; align-items: start; }
+@media (max-width: 900px) { .lib-grid { grid-template-columns: 1fr; } }
+
+.lib-list { display: flex; flex-direction: column; gap: 6px;
+  max-height: 68vh; overflow-y: auto; padding-right: 4px; }
+.lib-row { display: grid; gap: 5px; width: 100%; text-align: left;
+  background: var(--bg-2); border: 1px solid var(--line);
+  border-left: 2px solid transparent; border-radius: 10px; padding: 11px 13px; }
+.lib-row:hover:not(:disabled) { background: var(--panel-2); transform: none;
+  border-color: var(--line-2); border-left-color: var(--line-2); }
+.lib-row.sel { background: color-mix(in srgb, var(--rec) 8%, var(--bg-2));
+  border-color: var(--line-2); border-left-color: var(--rec); }
+.lib-when { font-family: var(--mono); font-size: 12px; letter-spacing: .04em;
+  color: var(--ink); }
+/* Two lines of transcript, then an ellipsis — enough to recognise a session. */
+.lib-prev { font-family: var(--body); font-size: 12.5px; line-height: 1.45;
+  color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical; overflow: hidden; }
+.lib-tags { display: flex; gap: 5px; flex-wrap: wrap; }
+.lib-tags i { font-family: var(--mono); font-style: normal; font-size: 10px;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--faint);
+  border: 1px solid var(--line-2); border-radius: 999px; padding: 1px 8px; }
+
+.lib-detail { min-width: 0; }
+.lib-placeholder { padding: 24px 2px; }
+.lib-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
+.lib-head-text { flex: 1; min-width: 0; }
+.lib-title { font-family: var(--display); font-weight: 700; font-size: 19px;
+  letter-spacing: -.01em; color: var(--ink); line-height: 1.2; }
+.lib-path { display: block; font-family: var(--mono); font-size: 11px;
+  color: var(--muted); margin-top: 4px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+
+.lib-audio { margin-bottom: 18px; }
+.lib-audio audio { display: block; width: 100%; height: 40px; border-radius: 10px; }
+.lib-audio-name { font-family: var(--mono); font-size: 11px; color: var(--faint);
+  margin-top: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-none { font-family: var(--mono); font-size: 12px; color: var(--faint);
+  border: 1px dashed var(--line-2); border-radius: 10px; padding: 12px 14px;
+  margin-bottom: 18px; }
+
+.lib-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px; align-items: start; }
+@media (max-width: 1100px) { .lib-cols { grid-template-columns: 1fr; } }
+.lib-cols .tx-head { margin-bottom: 12px; }
+/* A session saved before transcript.json existed only has the flat .txt. */
+.lib-raw { white-space: pre-wrap; color: var(--ink); font-size: 14px; }
+
+/* ---------- settings: advanced disclosure ---------- */
+details.adv { margin-bottom: 16px; }
+details.adv > summary {
+  display: flex; align-items: center; gap: 10px; cursor: pointer;
+  list-style: none; font-family: var(--mono); font-size: 11px;
+  letter-spacing: .18em; text-transform: uppercase; color: var(--vu);
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px;
+  padding: 15px 16px; transition: border-color .18s var(--ease); }
+details.adv > summary::-webkit-details-marker { display: none; }
+details.adv > summary:hover { border-color: var(--line-2); }
+details.adv > summary::after { content: ""; width: 7px; height: 7px;
+  margin-left: auto; margin-top: -3px; flex-shrink: 0;
+  border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted);
+  transform: rotate(45deg); transition: transform .2s var(--ease); }
+details.adv[open] > summary::after { transform: rotate(225deg); margin-top: 3px; }
+details.adv[open] > summary { margin-bottom: 16px; }
+.adv-hint { font-family: var(--mono); font-size: 10px; letter-spacing: .06em;
+  text-transform: none; color: var(--faint); }
+
 /* readout + meter */
 .readout { display: flex; align-items: center; gap: 14px; font-family: var(--mono); font-size: 13px; }
 #statusMsg { color: var(--ink-dim); }
@@ -246,14 +338,14 @@ select.grow { flex: 1; }
    a second line, not squeeze the select down to its caret. */
 .tx-head { display: flex; justify-content: space-between; align-items: center;
   gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
-#transcript { max-height: 48vh; overflow-y: auto; padding-right: 6px; }
-#transcript .line { padding: 4px 0 4px 14px; margin-bottom: 4px; border-left: 2px solid transparent; }
-#transcript .line.spk { border-left-color: var(--sc, var(--rec)); }
+.tx-body { max-height: 48vh; overflow-y: auto; padding-right: 6px; }
+.tx-body .line { padding: 4px 0 4px 14px; margin-bottom: 4px; border-left: 2px solid transparent; }
+.tx-body .line.spk { border-left-color: var(--sc, var(--rec)); }
 .spk-tag { font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
   color: var(--sc, var(--rec)); font-weight: 700; margin-right: 8px; }
-#transcript .ts { font-family: var(--mono); font-size: 11px; color: var(--muted);
+.tx-body .ts { font-family: var(--mono); font-size: 11px; color: var(--muted);
   margin-right: 10px; opacity: .8; }
-#transcript .txt { color: var(--ink); }
+.tx-body .txt { color: var(--ink); }
 .empty { color: var(--faint); font-style: italic; font-family: var(--mono); font-size: 13px; }
 
 /* active-toggle buttons (pause, context) */
@@ -271,35 +363,35 @@ button.mini.on { border-color: var(--rec); color: var(--rec); }
   background: var(--bg-2); border: 1px solid var(--line-2); border-radius: 9px;
   padding: 10px 12px; width: 100%; box-sizing: border-box; }
 .ctx textarea { resize: vertical; }
-#summary { color: var(--ink-dim); font-size: 15px; line-height: 1.6;
+.sum-body { color: var(--ink-dim); font-size: 15px; line-height: 1.6;
   padding: 16px; background: var(--bg-2); border: 1px dashed var(--line-2); border-radius: 10px;
   min-height: 84px; max-height: 48vh; overflow-y: auto; }
-#summary.filled { color: var(--ink); border-style: solid; border-color: var(--ok-dim); }
+.sum-body.filled { color: var(--ink); border-style: solid; border-color: var(--ok-dim); }
 /* rendered markdown */
-#summary > :first-child { margin-top: 0; }
-#summary > :last-child { margin-bottom: 0; }
-#summary p { margin: 0 0 10px; }
-#summary h3, #summary h4, #summary h5, #summary h6 {
+.sum-body > :first-child { margin-top: 0; }
+.sum-body > :last-child { margin-bottom: 0; }
+.sum-body p { margin: 0 0 10px; }
+.sum-body h3, .sum-body h4, .sum-body h5, .sum-body h6 {
   font-family: var(--display); color: var(--ink); font-weight: 700; line-height: 1.3;
   margin: 16px 0 8px; font-size: 16px; }
-#summary ul, #summary ol { margin: 0 0 10px; padding-left: 22px; }
-#summary li { margin: 3px 0; }
-#summary li::marker { color: var(--muted); }
-#summary strong { color: var(--ink); font-weight: 700; }
-#summary em { font-style: italic; }
-#summary code { font-family: var(--mono); font-size: 12.5px; color: var(--ink);
+.sum-body ul, .sum-body ol { margin: 0 0 10px; padding-left: 22px; }
+.sum-body li { margin: 3px 0; }
+.sum-body li::marker { color: var(--muted); }
+.sum-body strong { color: var(--ink); font-weight: 700; }
+.sum-body em { font-style: italic; }
+.sum-body code { font-family: var(--mono); font-size: 12.5px; color: var(--ink);
   background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 5px; padding: 1px 5px; }
-#summary blockquote { margin: 0 0 10px; padding: 2px 0 2px 12px;
+.sum-body blockquote { margin: 0 0 10px; padding: 2px 0 2px 12px;
   border-left: 3px solid var(--line-2); color: var(--ink-dim); }
-#summary hr { border: 0; border-top: 1px solid var(--line-2); margin: 14px 0; }
+.sum-body hr { border: 0; border-top: 1px solid var(--line-2); margin: 14px 0; }
 /* GFM tables: scroll horizontally on narrow panels instead of overflowing. */
-#summary table { display: block; width: max-content; max-width: 100%; overflow-x: auto;
+.sum-body table { display: block; width: max-content; max-width: 100%; overflow-x: auto;
   border-collapse: collapse; margin: 0 0 12px; font-size: 13.5px; }
-#summary th, #summary td { border: 1px solid var(--line-2);
+.sum-body th, .sum-body td { border: 1px solid var(--line-2);
   padding: 6px 10px; text-align: left; vertical-align: top; }
-#summary thead th { background: var(--panel-2); color: var(--ink); font-weight: 700;
+.sum-body thead th { background: var(--panel-2); color: var(--ink); font-weight: 700;
   font-family: var(--display); }
-#summary tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--panel-2) 45%, transparent); }
+.sum-body tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--panel-2) 45%, transparent); }
 
 /* ---------- modal ---------- */
 .modal-bg { position: fixed; inset: 0; background: rgba(6,5,4,.72); backdrop-filter: blur(3px);

@@ -5,9 +5,12 @@
 #include <cctype>
 #include <chrono>
 #include <cstdlib>
+#include <fstream>
 #include <map>
+#include <memory>
 #include <optional>
 #include <thread>
+#include <vector>
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -18,6 +21,8 @@
 #include "llm/llama_backend.h"
 #include "llm/templates.h"
 #include "util/export.h"
+#include "util/lang.h"
+#include "util/library.h"
 #include "util/models.h"
 
 namespace transcriptor::app {
@@ -83,11 +88,6 @@ bool valid_template_id(const std::string& id) {
         if (!ok) return false;
     }
     return !llm::is_template(id);   // never shadow a built-in
-}
-
-// User-facing API errors follow the UI language, the way the status line does.
-const char* ui(const AppState* state, const char* tr, const char* en) {
-    return state->ui_language() == "en" ? en : tr;
 }
 
 json source_json(const audio::AudioSource& s) {
@@ -171,8 +171,10 @@ bool Server::start() {
     // -- recording ---------------------------------------------------------
     svr.Post("/api/record/start", [state](const httplib::Request& req,
                                           httplib::Response& res) {
-        if (state->recording()) return send_error(res, ui(state, "Zaten kayıtta.", "Already recording."));
-        if (state->processing()) return send_error(res, ui(state, "İşlem sürüyor.", "A job is already running."));
+        if (state->recording()) return send_error(res, L("Already recording.", "Zaten kayıtta."));
+        if (state->processing()) {
+            return send_error(res, L("A job is already running.", "İşlem sürüyor."));
+        }
 
         const json body = parse_body(req);
 
@@ -180,7 +182,7 @@ bool Server::start() {
         auto source = audio::find_source(get_string(body, "source_id"));
         if (!source) source = audio::default_loopback_source();
         if (!source) {
-            std::string msg = ui(state, "Geçerli ses kaynağı yok.", "No usable audio source.");
+            std::string msg = L("No usable audio source.", "Geçerli ses kaynağı yok.");
             const std::string hint = audio::macos_loopback_hint();
             if (!hint.empty()) msg += " " + hint;
             return send_error(res, msg);
@@ -192,7 +194,10 @@ bool Server::start() {
         const std::string mic_id = get_string(body, "mic_source_id");
         if (!mic_id.empty()) {
             mic = audio::find_source(mic_id);
-            if (!mic) return send_error(res, ui(state, "Seçilen mikrofon bulunamadı.", "The selected microphone was not found."));
+            if (!mic) {
+                return send_error(res, L("The selected microphone was not found.",
+                                         "Seçilen mikrofon bulunamadı."));
+            }
         }
 
         try {
@@ -205,21 +210,21 @@ bool Server::start() {
 
     svr.Post("/api/record/stop", [state](const httplib::Request&,
                                          httplib::Response& res) {
-        if (!state->recording()) return send_error(res, ui(state, "Kayıt yok.", "Nothing is recording."));
+        if (!state->recording()) return send_error(res, L("Nothing is recording.", "Kayıt yok."));
         state->stop_and_process();
         send_json(res, json{{"ok", true}});
     });
 
     svr.Post("/api/record/pause", [state](const httplib::Request&,
                                           httplib::Response& res) {
-        if (!state->recording()) return send_error(res, ui(state, "Kayıt yok.", "Nothing is recording."));
+        if (!state->recording()) return send_error(res, L("Nothing is recording.", "Kayıt yok."));
         state->pause_recording();
         send_json(res, json{{"ok", true}, {"paused", true}});
     });
 
     svr.Post("/api/record/resume", [state](const httplib::Request&,
                                            httplib::Response& res) {
-        if (!state->recording()) return send_error(res, ui(state, "Kayıt yok.", "Nothing is recording."));
+        if (!state->recording()) return send_error(res, L("Nothing is recording.", "Kayıt yok."));
         state->resume_recording();
         send_json(res, json{{"ok", true}, {"paused", false}});
     });
@@ -227,8 +232,8 @@ bool Server::start() {
     svr.Post("/api/cancel", [state](const httplib::Request&,
                                     httplib::Response& res) {
         if (state->processing()) {
-            return send_error(res, ui(state, "İşlem sürüyor; bitince iptal edin.",
-                                     "A job is running; cancel once it finishes."));
+            return send_error(res, L("A job is running; cancel once it finishes.",
+                                     "İşlem sürüyor; bitince iptal edin."));
         }
         state->cancel();
         send_json(res, json{{"ok", true}});
@@ -238,13 +243,15 @@ bool Server::start() {
     svr.Post("/api/process_file", [state](const httplib::Request& req,
                                           httplib::Response& res) {
         if (state->recording() || state->processing()) {
-            return send_error(res, ui(state, "İşlem sürüyor.", "A job is already running."));
+            return send_error(res, L("A job is already running.", "İşlem sürüyor."));
         }
-        if (!req.has_file("file")) return send_error(res, ui(state, "Dosya seçilmedi.", "No file selected."));
+        if (!req.has_file("file")) {
+            return send_error(res, L("No file selected.", "Dosya seçilmedi."));
+        }
 
         const httplib::MultipartFormData& file = req.get_file_value("file");
         if (file.filename.empty() || file.content.empty()) {
-            return send_error(res, ui(state, "Dosya seçilmedi.", "No file selected."));
+            return send_error(res, L("No file selected.", "Dosya seçilmedi."));
         }
 
         const std::string name = safe_filename(file.filename);
@@ -253,8 +260,9 @@ bool Server::start() {
             paths::from_utf8("transcriptor_upload_" + std::to_string(std::rand()) + "_" + name);
 
         if (!paths::write_file(tmp, file.content)) {
-            return send_error(res, ui(state, "Yüklenen dosya geçici klasöre yazılamadı.",
-                                     "The upload could not be written to the temp folder."), 500);
+            return send_error(res,
+                              L("The upload could not be written to the temp folder.",
+                                "Yüklenen dosya geçici klasöre yazılamadı."), 500);
         }
 
         const bool ok = state->process_file(tmp, name);
@@ -269,7 +277,129 @@ bool Server::start() {
     svr.Post("/api/open_folder", [state](const httplib::Request&,
                                          httplib::Response& res) {
         const paths::fs::path dir = state->session_dir();
-        if (dir.empty()) return send_error(res, ui(state, "Henüz kaydedilmiş çıktı yok.", "Nothing has been saved yet."));
+        if (dir.empty()) {
+            return send_error(res, L("Nothing has been saved yet.",
+                                     "Henüz kaydedilmiş çıktı yok."));
+        }
+        const bool ok = exporter::open_in_file_manager(dir);
+        send_json(res, json{{"ok", ok}, {"path", paths::to_utf8(dir)}});
+    });
+
+    // -- library (past sessions in the output folder) -----------------------
+    // The folder is the only store: nothing is indexed, so a session copied in
+    // by hand shows up and one deleted outside the app quietly disappears.
+    svr.Get("/api/library", [state](const httplib::Request&,
+                                    httplib::Response& res) {
+        const Settings s = state->settings_copy();
+
+        json arr = json::array();
+        for (const library::Entry& e : library::list(s.output_dir)) {
+            arr.push_back({
+                {"id", e.id},
+                {"path", e.path},
+                {"mtime", e.mtime},
+                {"has_transcript", e.has_transcript},
+                {"has_summary", e.has_summary},
+                {"audio", e.audio.empty() ? json(nullptr) : json(e.audio)},
+                {"audio_bytes", e.audio_bytes},
+                {"preview", e.preview},
+            });
+        }
+        send_json(res, json{
+            {"output_dir", paths::to_utf8(paths::expand_user(s.output_dir))},
+            {"sessions", arr},
+        });
+    });
+
+    svr.Get("/api/library/item", [state](const httplib::Request& req,
+                                         httplib::Response& res) {
+        const Settings s = state->settings_copy();
+        const paths::fs::path dir =
+            library::resolve(s.output_dir, req.get_param_value("id"));
+        if (dir.empty()) {
+            return send_error(res, L("That recording is no longer there.",
+                                     "Bu kayıt artık yerinde değil."), 404);
+        }
+
+        json body;
+        body["id"]   = paths::to_utf8(dir.filename());
+        body["path"] = paths::to_utf8(dir);
+
+        std::string raw;
+        // transcript.json carries speakers and timestamps, so the library shows
+        // it exactly the way the live transcript panel does; the .txt is only
+        // the fallback for a session saved before the JSON existed.
+        body["transcript"] = json(nullptr);
+        if (paths::read_file(dir / "transcript.json", &raw)) {
+            json parsed = json::parse(raw, nullptr, /*allow_exceptions=*/false);
+            if (!parsed.is_discarded()) body["transcript"] = parsed;
+        }
+        body["transcript_text"] =
+            paths::read_file(dir / "transcript.txt", &raw) ? json(raw) : json(nullptr);
+        body["summary"] =
+            paths::read_file(dir / "summary.txt", &raw) ? json(raw) : json(nullptr);
+
+        const std::string audio = library::find_audio(dir);
+        body["audio"] = audio.empty() ? json(nullptr) : json(audio);
+        send_json(res, body);
+    });
+
+    // Streamed rather than buffered: an hour of WAV is ~110 MB, and <audio>
+    // wants byte ranges to seek.
+    svr.Get("/api/library/audio", [state](const httplib::Request& req,
+                                          httplib::Response& res) {
+        const Settings s = state->settings_copy();
+        const paths::fs::path dir =
+            library::resolve(s.output_dir, req.get_param_value("id"));
+        if (dir.empty()) {
+            return send_error(res, L("That recording is no longer there.",
+                                     "Bu kayıt artık yerinde değil."), 404);
+        }
+
+        const std::string name = library::find_audio(dir);
+        if (name.empty()) {
+            return send_error(res, L("This recording has no audio file.",
+                                     "Bu kaydın ses dosyası yok."), 404);
+        }
+
+        const paths::fs::path file = dir / paths::from_utf8(name);
+        std::error_code ec;
+        const auto size = paths::fs::file_size(file, ec);
+        if (ec) {
+            return send_error(res, L("The audio file could not be read.",
+                                     "Ses dosyası okunamadı."), 404);
+        }
+
+        auto in = std::make_shared<std::ifstream>(file, std::ios::binary);
+        if (!*in) {
+            return send_error(res, L("The audio file could not be read.",
+                                     "Ses dosyası okunamadı."), 500);
+        }
+
+        res.set_header("Accept-Ranges", "bytes");
+        res.set_content_provider(
+            static_cast<size_t>(size), library::content_type_for(name),
+            [in](size_t offset, size_t length, httplib::DataSink& sink) -> bool {
+                constexpr size_t kChunk = 256 * 1024;
+                std::vector<char> buf(std::min<size_t>(length, kChunk));
+                in->clear();   // a previous range may have hit EOF
+                in->seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+                in->read(buf.data(), static_cast<std::streamsize>(buf.size()));
+                const auto n = in->gcount();
+                if (n <= 0) return false;
+                return sink.write(buf.data(), static_cast<size_t>(n));
+            });
+    });
+
+    svr.Post("/api/library/open", [state](const httplib::Request& req,
+                                          httplib::Response& res) {
+        const Settings s = state->settings_copy();
+        const paths::fs::path dir =
+            library::resolve(s.output_dir, get_string(parse_body(req), "id"));
+        if (dir.empty()) {
+            return send_error(res, L("That recording is no longer there.",
+                                     "Bu kayıt artık yerinde değil."), 404);
+        }
         const bool ok = exporter::open_in_file_manager(dir);
         send_json(res, json{{"ok", ok}, {"path", paths::to_utf8(dir)}});
     });
@@ -277,7 +407,9 @@ bool Server::start() {
     // -- summarize ---------------------------------------------------------
     svr.Post("/api/summarize", [state](const httplib::Request& req,
                                        httplib::Response& res) {
-        if (state->processing()) return send_error(res, ui(state, "İşlem sürüyor.", "A job is already running."));
+        if (state->processing()) {
+            return send_error(res, L("A job is already running.", "İşlem sürüyor."));
+        }
 
         const json body = parse_body(req);
         const Settings settings = state->settings_copy();
@@ -346,7 +478,7 @@ bool Server::start() {
             std::error_code ec;
             catalog.push_back({{"id", m.id},
                                {"label", m.label},
-                               {"note", m.note},
+                               {"note", m.note()},
                                {"size", models::human_size(m.approx_bytes)},
                                {"path", paths::to_utf8(file)},
                                {"downloaded", paths::fs::exists(file, ec)}});
@@ -379,6 +511,7 @@ bool Server::start() {
             {"llm_timeout", s.llm_timeout},
 
             {"ui_language", s.ui_language},
+            {"ui_theme", s.ui_theme},
             {"summary_language", s.summary_language},
             {"summary_template", s.summary_template},
             {"templates", templates},
@@ -401,8 +534,9 @@ bool Server::start() {
     svr.Post("/api/settings", [state](const httplib::Request& req,
                                       httplib::Response& res) {
         if (state->processing() || state->recording()) {
-            return send_error(res, ui(state, "İşlem sürüyor; bitince ayarları kaydedin.",
-                                     "A job is running; save the settings once it finishes."));
+            return send_error(res,
+                              L("A job is running; save the settings once it finishes.",
+                                "İşlem sürüyor; bitince ayarları kaydedin."));
         }
 
         const json body = parse_body(req);
@@ -441,7 +575,9 @@ bool Server::start() {
         str("llm_base_url", &s.llm_base_url);
         str("llm_model", &s.llm_model);
         str("ui_language", &s.ui_language);
-        if (s.ui_language != "en") s.ui_language = "tr";
+        if (s.ui_language != "tr") s.ui_language = "en";
+        str("ui_theme", &s.ui_theme);
+        if (s.ui_theme != "light" && s.ui_theme != "dark") s.ui_theme = "system";
         str("summary_language", &s.summary_language);
         str("summary_template", &s.summary_template);
         str("output_dir", &s.output_dir);
@@ -532,7 +668,7 @@ bool Server::start() {
                                           httplib::Response& res) {
         const json body = parse_body(req);
         const std::string id = trim(get_string(body, "id"));
-        if (id.empty()) return send_error(res, ui(state, "Model seçilmedi.", "No model selected."));
+        if (id.empty()) return send_error(res, L("No model selected.", "Model seçilmedi."));
 
         std::string error;
         if (!state->start_llm_download(id, &error)) {

@@ -23,8 +23,10 @@ directly runnable executable for Windows and macOS.
   Recordings too long for the context window are summarized in chunks and merged.
 - **Note templates** — five built in (meeting, standup, lecture, interview,
   general) plus **your own**: name, system prompt, and persistent context.
-- **Bilingual interface** — Turkish / English, remembered in `config.json`.
-- **Light / dark theme.**
+- **Library** — a second tab listing every past session in the output folder,
+  with its transcript, its summary, and a player for the saved audio.
+- **Bilingual interface** — English / Turkish, remembered in `config.json`.
+  Both the language and the light / dark theme live in Settings → General.
 
 ## Components
 
@@ -226,11 +228,29 @@ decisions"), or write your own with **+ New template**. Your templates appear
 in the menu next to the built-ins and are stored under `custom_templates` in
 `config.json`.
 
+## Library
+
+The **Library** tab lists every session folder under the output directory,
+newest first, and shows the one you pick: the transcript (with speakers and
+timestamps, straight from `transcript.json`), the summary, and a player for
+whatever audio was saved. Nothing is indexed — the folder on disk is the whole
+database, so a session you copy in appears and one you delete disappears.
+
+## Settings
+
+Settings runs general to specific. **General** (interface language, appearance,
+spoken and summary language, Whisper model, speaker separation), **Output &
+Automation**, **Summarizer** and **Note templates** sit at the top; everything
+that only matters when something needs tuning — device selection, model file
+paths, gains, clustering thresholds, context size, GPU layers — is folded into
+**Advanced** at the bottom.
+
 ## Interface language
 
-The **EN / TR** button in the header, or Settings → **Interface language**. The
-choice is written to `ui_language` in `config.json`, and mirrored in
-`localStorage` so the first paint does not flash. Summary language
+Settings → **General** → **Interface language**. The choice is written to
+`ui_language` in `config.json`, and mirrored in `localStorage` so the first
+paint does not flash; the light/dark theme (`ui_theme`, which also accepts
+`system`) works the same way. English is the default. Summary language
 (`summary_language`) is separate: an English interface can produce Turkish
 summaries.
 
@@ -271,11 +291,11 @@ src/
   llm/                  templates + embedded llama.cpp + OpenAI-compatible client
   pipeline/processor.*  transcribe → diarize → speaker attribution
   app/                  AppState, the /api/* server, native window, embedded assets
-  util/                 paths, export, downloads, model registry
+  util/                 paths, export, library, language, downloads, model registry
 web/                    Interface (compiled into the binary at build time)
   index.html            Markup; translatable strings tagged with data-i18n
   app.js                All interface logic
-  i18n.js               tr/en dictionary and the language applier
+  i18n.js               en/tr dictionary and the language applier
   style.css             Theme (light/dark), layout
 ```
 

@@ -41,7 +41,14 @@ struct LlmModelSpec {
     std::string   filename;       // file name inside the models dir
     std::string   url;
     std::uint64_t approx_bytes = 0;
-    std::string   note;           // one-line hint (size / hardware)
+
+    // One-line hint (size / hardware). Both languages are carried rather than
+    // resolved here: the catalog is a function-local static, built once, so a
+    // note picked at construction would freeze the language of the first call.
+    std::string note_en;
+    std::string note_tr;
+
+    std::string note() const;     // the one matching the interface language
 };
 
 const std::vector<LlmModelSpec>& llm_catalog();

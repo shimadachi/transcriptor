@@ -5,6 +5,7 @@
 
 #include <miniaudio.h>
 
+#include "util/lang.h"
 #include "util/net.h"
 
 namespace transcriptor::audio {
@@ -71,19 +72,23 @@ std::vector<float> decode_with_ffmpeg(const paths::fs::path& path, int samplerat
 
     if (!r.launched) {
         throw std::runtime_error(
-            "Bu ses biçimi çözülemedi ve ffmpeg bulunamadı. WAV/MP3/FLAC "
-            "deneyin ya da ffmpeg kurun.");
+            L("This audio format could not be decoded and ffmpeg was not found. "
+              "Try WAV/MP3/FLAC, or install ffmpeg.",
+              "Bu ses biçimi çözülemedi ve ffmpeg bulunamadı. WAV/MP3/FLAC "
+              "deneyin ya da ffmpeg kurun."));
     }
     if (r.exit_code != 0) {
         std::string tail = r.output.size() > 400
                                ? r.output.substr(r.output.size() - 400)
                                : r.output;
-        throw std::runtime_error("ffmpeg çözme hatası: " + tail);
+        throw std::runtime_error(L("ffmpeg decoding error: ",
+                                   "ffmpeg çözme hatası: ") + tail);
     }
 
     std::string bytes;
     if (!paths::read_file(raw, &bytes) || bytes.empty()) {
-        throw std::runtime_error("Ses çözüldü ama veri okunamadı.");
+        throw std::runtime_error(L("The audio decoded, but no data came back.",
+                                   "Ses çözüldü ama veri okunamadı."));
     }
 
     std::vector<float> out(bytes.size() / sizeof(float));
@@ -96,7 +101,8 @@ std::vector<float> decode_with_ffmpeg(const paths::fs::path& path, int samplerat
 std::vector<float> decode_file(const paths::fs::path& path, int samplerate) {
     std::error_code ec;
     if (!paths::fs::exists(path, ec)) {
-        throw std::runtime_error("Dosya bulunamadı: " + paths::to_utf8(path));
+        throw std::runtime_error(L("File not found: ", "Dosya bulunamadı: ") +
+                                 paths::to_utf8(path));
     }
 
     bool handled = false;

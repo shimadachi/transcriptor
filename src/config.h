@@ -37,7 +37,7 @@ struct Settings {
     // -- STT (whisper.cpp) ------------------------------------------------
     std::string whisper_model = "large-v3";   // tiny/base/small/medium/large-v3
     std::string whisper_model_path;           // explicit .bin; empty = managed
-    std::string language      = "tr";         // "" = auto-detect
+    std::string language      = "en";         // "" = auto-detect
     std::string device        = "auto";       // auto/cuda/cpu
     std::string compute_type  = "auto";       // kept for UI parity (quantization)
     int         stt_threads   = 0;            // 0 = hardware_concurrency
@@ -64,8 +64,9 @@ struct Settings {
     std::string llm_api_key  = "lm-studio";
     double      llm_timeout  = 600.0;
 
-    std::string ui_language      = "tr";   // interface chrome: "tr" or "en"
-    std::string summary_language = "tr";
+    std::string ui_language      = "en";   // interface chrome: "en" or "tr"
+    std::string ui_theme         = "system";  // "system" / "light" / "dark"
+    std::string summary_language = "en";
     std::string summary_template = "meeting";
     std::map<std::string, TemplateOverride> template_overrides;
     std::map<std::string, CustomTemplate>   custom_templates;

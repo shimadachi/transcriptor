@@ -1,4 +1,5 @@
 #include "diarize/diarizer.h"
+#include "util/lang.h"
 
 #include <map>
 #include <stdexcept>
@@ -108,7 +109,10 @@ std::vector<Turn> Diarizer::diarize(const std::vector<float>& audio, int sampler
     if (stale) unload();
 
     if (!impl_->sd) {
-        if (progress) progress("Konuşmacı modelleri yükleniyor…", -1.0);
+        if (progress) {
+            progress(L("Loading the speaker models…",
+                       "Konuşmacı modelleri yükleniyor…"), -1.0);
+        }
 
         const char* provider = device_.use_gpu() ? "cuda" : "cpu";
 
@@ -139,7 +143,8 @@ std::vector<Turn> Diarizer::diarize(const std::vector<float>& audio, int sampler
         impl_->sd = SherpaOnnxCreateOfflineSpeakerDiarization(&config);
         if (!impl_->sd) {
             throw std::runtime_error(
-                "Konuşmacı ayrımı başlatılamadı. Model dosyalarını kontrol edin:\n"
+                L("Speaker separation could not start. Check the model files:\n",
+                  "Konuşmacı ayrımı başlatılamadı. Model dosyalarını kontrol edin:\n")
                 + seg + "\n" + emb);
         }
         impl_->seg_path     = seg;
@@ -152,8 +157,10 @@ std::vector<Turn> Diarizer::diarize(const std::vector<float>& audio, int sampler
         SherpaOnnxOfflineSpeakerDiarizationGetSampleRate(impl_->sd);
     if (expected_rate != samplerate) {
         throw std::runtime_error(
-            "Konuşmacı modeli " + std::to_string(expected_rate) +
-            " Hz bekliyor, ses " + std::to_string(samplerate) + " Hz.");
+            L("The speaker model expects ", "Konuşmacı modeli ") +
+            std::to_string(expected_rate) +
+            L(" Hz, but the audio is ", " Hz bekliyor, ses ") +
+            std::to_string(samplerate) + " Hz.");
     }
 
     if (progress) progress("", 0.0);
@@ -163,7 +170,10 @@ std::vector<Turn> Diarizer::diarize(const std::vector<float>& audio, int sampler
     result.r = SherpaOnnxOfflineSpeakerDiarizationProcessWithCallback(
         impl_->sd, audio.data(), static_cast<int32_t>(audio.size()), on_progress,
         &bridge);
-    if (!result.r) throw std::runtime_error("Konuşmacı ayrımı sonuç üretmedi.");
+    if (!result.r) {
+        throw std::runtime_error(L("Speaker separation produced no result.",
+                                   "Konuşmacı ayrımı sonuç üretmedi."));
+    }
 
     const int32_t count =
         SherpaOnnxOfflineSpeakerDiarizationResultGetNumSegments(result.r);
@@ -207,8 +217,10 @@ void Diarizer::unload() {}
 std::vector<Turn> Diarizer::diarize(const std::vector<float>&, int,
                                     const ProgressFn&) {
     throw std::runtime_error(
-        "Bu sürüm konuşmacı ayrımı olmadan derlendi (-DTRANSCRIPTOR_DIARIZE=ON ile "
-        "yeniden derleyin).");
+        L("This build was compiled without speaker separation (rebuild with "
+          "-DTRANSCRIPTOR_DIARIZE=ON).",
+          "Bu sürüm konuşmacı ayrımı olmadan derlendi (-DTRANSCRIPTOR_DIARIZE=ON ile "
+          "yeniden derleyin)."));
 }
 
 #endif  // TRANSCRIPTOR_HAVE_DIARIZE

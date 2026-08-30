@@ -6,6 +6,7 @@
 #include <stdexcept>
 
 #include "audio/device_registry.h"
+#include "util/lang.h"
 
 namespace transcriptor::audio {
 
@@ -69,7 +70,8 @@ std::vector<AudioSource> enumerate_locked() {
 
     if (ma_context_get_devices(ctx, &playback, &playback_count, &capture,
                                &capture_count) != MA_SUCCESS) {
-        throw std::runtime_error("Ses cihazları listelenemedi.");
+        throw std::runtime_error(L("The audio devices could not be listed.",
+                                   "Ses cihazları listelenemedi."));
     }
 
     std::map<std::string, Entry> registry;
@@ -134,7 +136,10 @@ ma_context* shared_context() {
     std::lock_guard<std::mutex> lock(ctx_mutex);
 
     if (g_context) return g_context;
-    if (g_context_failed) throw std::runtime_error("Ses altyapısı başlatılamadı.");
+    if (g_context_failed) {
+        throw std::runtime_error(L("The audio backend could not be started.",
+                                   "Ses altyapısı başlatılamadı."));
+    }
 
     auto* ctx = new ma_context();
     ma_context_config cfg = ma_context_config_init();
@@ -142,8 +147,10 @@ ma_context* shared_context() {
         delete ctx;
         g_context_failed = true;
         throw std::runtime_error(
-            "Ses altyapısı başlatılamadı. Linux'ta PipeWire/PulseAudio "
-            "çalışıyor mu?");
+            L("The audio backend could not be started. Is PipeWire/PulseAudio "
+              "running on Linux?",
+              "Ses altyapısı başlatılamadı. Linux'ta PipeWire/PulseAudio "
+              "çalışıyor mu?"));
     }
     g_context = ctx;
     return g_context;
@@ -193,10 +200,14 @@ std::string macos_loopback_hint() {
     } catch (const std::exception&) {
         return {};
     }
-    return "macOS sistem sesini doğrudan kaydedemez. Sanal bir çıkış aygıtı "
-           "kurun (ör. BlackHole: `brew install blackhole-2ch`), sesi ona "
-           "yönlendirin ve kaynak olarak seçin — ya da kaynak menüsünden "
-           "\"🎙 Tarayıcı\" seçeneklerini kullanın.";
+    return L("macOS cannot record system audio directly. Install a virtual "
+             "output device (e.g. BlackHole: `brew install blackhole-2ch`), "
+             "route the sound into it and pick it as the source — or use the "
+             "\"🎙 Browser\" entries in the source menu.",
+             "macOS sistem sesini doğrudan kaydedemez. Sanal bir çıkış aygıtı "
+             "kurun (ör. BlackHole: `brew install blackhole-2ch`), sesi ona "
+             "yönlendirin ve kaynak olarak seçin — ya da kaynak menüsünden "
+             "\"🎙 Tarayıcı\" seçeneklerini kullanın.");
 #else
     return {};
 #endif

@@ -1,4 +1,5 @@
 #include "stt/whisper_stt.h"
+#include "util/lang.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -87,14 +88,19 @@ std::vector<TranscriptSegment> WhisperTranscriber::transcribe(
     if (impl_->ctx && impl_->loaded_path != path_utf8) unload();
 
     if (!impl_->ctx) {
-        if (progress) progress("Model yükleniyor (" + model_name_ + ")…", -1.0);
+        if (progress) {
+            progress(L("Loading the model (", "Model yükleniyor (") +
+                         model_name_ + ")…", -1.0);
+        }
 
         whisper_context_params cparams = whisper_context_default_params();
         cparams.use_gpu = device_.use_gpu();
 
         impl_->ctx = whisper_init_from_file_with_params(path_utf8.c_str(), cparams);
         if (!impl_->ctx) {
-            throw std::runtime_error("Whisper modeli yüklenemedi: " + path_utf8);
+            throw std::runtime_error(
+                L("The Whisper model could not be loaded: ",
+                  "Whisper modeli yüklenemedi: ") + path_utf8);
         }
         impl_->loaded_path = path_utf8;
     }
@@ -137,8 +143,12 @@ std::vector<TranscriptSegment> WhisperTranscriber::transcribe(
     const int rc = whisper_full(impl_->ctx, wparams,
                                 audio.data(), static_cast<int>(audio.size()));
     if (rc != 0) {
-        if (abort_.load()) throw std::runtime_error("Metne dönüştürme iptal edildi.");
-        throw std::runtime_error("Metne dönüştürme başarısız (whisper_full=" +
+        if (abort_.load()) {
+            throw std::runtime_error(L("Transcription was cancelled.",
+                                       "Metne dönüştürme iptal edildi."));
+        }
+        throw std::runtime_error(L("Transcription failed (whisper_full=",
+                                   "Metne dönüştürme başarısız (whisper_full=") +
                                  std::to_string(rc) + ").");
     }
 

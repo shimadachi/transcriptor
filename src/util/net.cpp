@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <thread>
 
+#include "util/lang.h"
+
 #ifdef _WIN32
 #  include <windows.h>
 #else
@@ -226,13 +228,15 @@ DownloadResult download(const std::string& url, const paths::fs::path& dest,
 
     if (!r.launched) {
         paths::fs::remove(tmp, ec);
-        out.error = "curl bulunamadı — modeli elle indirip Ayarlar'dan yolunu "
-                    "gösterin.";
+        out.error = L("curl was not found — download the model by hand and point "
+                      "Settings at it.",
+                      "curl bulunamadı — modeli elle indirip Ayarlar'dan yolunu "
+                      "gösterin.");
         return out;
     }
     if (r.exit_code != 0 || size_on_disk(tmp) == 0) {
         paths::fs::remove(tmp, ec);
-        out.error = "İndirme başarısız (" + url + "): " +
+        out.error = L("Download failed (", "İndirme başarısız (") + url + "): " +
                     (r.output.empty() ? ("curl exit " + std::to_string(r.exit_code))
                                       : r.output);
         return out;
@@ -241,7 +245,8 @@ DownloadResult download(const std::string& url, const paths::fs::path& dest,
     paths::fs::remove(dest, ec);
     paths::fs::rename(tmp, dest, ec);
     if (ec) {
-        out.error = "İndirilen dosya taşınamadı: " + ec.message();
+        out.error = L("The downloaded file could not be moved: ",
+                      "İndirilen dosya taşınamadı: ") + ec.message();
         return out;
     }
     if (progress) progress(1.0, size_on_disk(dest));
