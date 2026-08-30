@@ -6,10 +6,21 @@
 
 include(GNUInstallDirs)
 
+# Everything we actually want shipped goes in the "app" component, and CPack is
+# told to package only that (see CPACK_COMPONENTS_ALL below).
+#
+# llama.cpp, whisper.cpp and ggml are pulled in with FetchContent, so their own
+# install() rules join ours: without this filter the package also carries
+# lib/*.a, lib/cmake/, share/ and two dozen headers — llama.h, ggml-*.h,
+# whisper.h — none of which a compiled-in binary has any use for. On the CUDA
+# build that is libggml-cuda.a alone at ~119 MB. They have no option to turn
+# their install rules off, and none of them set a COMPONENT, so everything they
+# add lands in "Unspecified" and drops out here.
 if(APPLE)
-    install(TARGETS transcriptor BUNDLE DESTINATION .)
+    install(TARGETS transcriptor BUNDLE DESTINATION . COMPONENT app)
 else()
-    install(TARGETS transcriptor RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(TARGETS transcriptor RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+            COMPONENT app)
 endif()
 
 # Backends built as shared libraries (a CUDA or Vulkan ggml backend can be one)
@@ -18,6 +29,7 @@ if(BUILD_SHARED_LIBS)
     install(TARGETS ggml ggml-base
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
             LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            COMPONENT app
             OPTIONAL)
 endif()
 
@@ -29,7 +41,7 @@ if(TRANSCRIPTOR_DIARIZE AND TARGET onnxruntime)
                 $<TARGET_FILE:onnxruntime> $<TARGET_FILE_DIR:transcriptor>
         COMMENT "Staging ONNX Runtime next to the executable")
     install(FILES $<TARGET_FILE:onnxruntime>
-            DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
+            DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT app OPTIONAL)
 endif()
 
 # CUDA builds link cudart/cublas/cublasLt, and those ship with the CUDA
@@ -69,7 +81,7 @@ if(TRANSCRIPTOR_CUDA)
                     file(REAL_PATH "${_f}" _real)
                     get_filename_component(_soname "${_f}" NAME)
                     install(FILES "${_real}" DESTINATION "${_cuda_dest}"
-                            RENAME "${_soname}")
+                            RENAME "${_soname}" COMPONENT app)
                     list(APPEND _cuda_libs "${_soname}")
                 endif()
             endforeach()
@@ -77,7 +89,8 @@ if(TRANSCRIPTOR_CUDA)
 
         if(_cuda_libs)
             if(WIN32)
-                install(FILES ${_cuda_libs} DESTINATION "${_cuda_dest}")
+                install(FILES ${_cuda_libs} DESTINATION "${_cuda_dest}"
+                        COMPONENT app)
             endif()
             message(STATUS "  bundling CUDA : ${_cuda_libs}")
         else()
@@ -96,6 +109,13 @@ if(TRANSCRIPTOR_CUDA)
                         "the package will not carry a CUDA runtime.")
     endif()
 endif()
+
+# Package the "app" component and nothing else; ALL_COMPONENTS_IN_ONE keeps it
+# a single flat archive named by CPACK_PACKAGE_FILE_NAME, exactly as before.
+set(CPACK_COMPONENTS_ALL app)
+set(CPACK_COMPONENTS_GROUPING ALL_COMPONENTS_IN_ONE)
+set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
+set(CPACK_DMG_COMPONENT_INSTALL ON)
 
 set(CPACK_PACKAGE_NAME "transcriptor")
 set(CPACK_PACKAGE_VENDOR "Transcriptor")
