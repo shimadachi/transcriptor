@@ -1,4 +1,5 @@
 #include "util/export.h"
+#include "util/lang.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -52,7 +53,8 @@ fs::path new_session_dir(const std::string& base) {
     }
     fs::create_directories(dir, ec);
     if (ec) {
-        throw std::runtime_error("Kayıt klasörü oluşturulamadı: " +
+        throw std::runtime_error(L("The output folder could not be created: ",
+                                   "Kayıt klasörü oluşturulamadı: ") +
                                  paths::to_utf8(dir) + " (" + ec.message() + ")");
     }
     return dir;

@@ -23,8 +23,10 @@ macOS için doğrudan çalıştırılabilir dosya üretir.
   kayıtlar parça parça özetlenip birleştirilir.
 - **Not şablonları** — beş hazır şablon (toplantı, standup, ders, görüşme,
   genel) ve **kendi şablonlarınız**: ad + sistem promptu + kalıcı bağlam.
-- **İki dilli arayüz** — Türkçe / English, seçim `config.json`'da saklanır.
-- **Aydınlık / karanlık tema.**
+- **Arşiv** — çıktı klasöründeki tüm eski oturumları listeleyen ikinci sekme;
+  metni, özeti ve saklanmış sesi oynatıcısıyla birlikte gösterir.
+- **İki dilli arayüz** — English / Türkçe, seçim `config.json`'da saklanır.
+  Hem dil hem aydınlık/karanlık tema Ayarlar → Genel altındadır.
 
 ## Bileşenler
 
@@ -256,11 +258,11 @@ src/
   llm/                  şablonlar + gömülü llama.cpp + OpenAI uyumlu istemci
   pipeline/processor.*  transcribe → diarize → konuşmacı eşleme
   app/                  AppState, /api/* sunucusu, native pencere, gömülü varlıklar
-  util/                 yollar, dışa aktarma, indirme, model kayıt defteri
+  util/                 yollar, dışa aktarma, arşiv, dil, indirme, model kayıt defteri
 web/                    Arayüz (derleme sırasında binary'ye gömülür)
   index.html            İşaretleme; çevrilecek metinler data-i18n ile etiketli
   app.js                Tüm arayüz mantığı
-  i18n.js               tr/en sözlüğü ve dil uygulayıcı
+  i18n.js               en/tr sözlüğü ve dil uygulayıcı
   style.css             Tema (aydınlık/karanlık), düzen
 ```
 
@@ -272,12 +274,30 @@ Acme; kararlara odaklan") ya da **+ Yeni şablon** ile kendi şablonunuzu
 yazabilirsiniz. Kendi şablonlarınız hazır olanların yanında menüde görünür ve
 `config.json` içinde `custom_templates` altında saklanır.
 
+## Arşiv
+
+**Arşiv** sekmesi, çıktı klasöründeki tüm oturum klasörlerini en yeniden eskiye
+listeler; seçtiğinizi gösterir: metin (konuşmacı ve zaman damgalarıyla, doğrudan
+`transcript.json`'dan), özet ve saklanmış sesin oynatıcısı. Hiçbir şey
+indekslenmez — veritabanı diskteki klasörün kendisidir; dışarıdan kopyaladığınız
+bir oturum listede belirir, sildiğiniz kaybolur.
+
+## Ayarlar
+
+Ayarlar genelden özele sıralanır. **Genel** (arayüz dili, görünüm, konuşma ve
+özet dili, Whisper modeli, konuşmacı ayrımı), **Çıktı & Otomasyon**,
+**Özetleyici** ve **Not şablonları** üstte durur; yalnızca ince ayar
+gerektiğinde önemli olan her şey — cihaz seçimi, model dosya yolları,
+kazançlar, ayrım eşiği, bağlam boyutu, GPU katmanları — en alttaki
+**Gelişmiş** başlığının altındadır.
+
 ## Arayüz dili
 
-Başlıktaki **EN / TR** düğmesi ya da Ayarlar → **Arayüz dili**. Seçim
-`config.json`'daki `ui_language` alanına yazılır, ilk boyamada titremesin diye
-`localStorage`'da da tutulur. Özet dili (`summary_language`) ayrıdır: arayüz
-İngilizce, özetler Türkçe olabilir.
+Ayarlar → **Genel** → **Arayüz dili**. Seçim `config.json`'daki `ui_language`
+alanına yazılır, ilk boyamada titremesin diye `localStorage`'da da tutulur;
+aydınlık/karanlık tema (`ui_theme`, `system` değerini de alır) aynı şekilde
+çalışır. Varsayılan İngilizce'dir. Özet dili (`summary_language`) ayrıdır:
+arayüz İngilizce, özetler Türkçe olabilir.
 
 ## Lisans
 

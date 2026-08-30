@@ -302,11 +302,17 @@ async function poll() {
     hint.innerHTML = notes.join('<br>');
   } else hint.style.display = 'none';
 
-  if (s.has_result && !prevResult) { prevResult = true; await loadResult(); }
+  const freshResult  = s.has_result && !prevResult;
+  const freshSummary = (s.summary_rev || 0) !== prevSummaryRev;
+
+  if (freshResult) { prevResult = true; await loadResult(); }
   if (!s.has_result) prevResult = false;
   // Re-render on every NEW summary (rev changes), even if one already existed.
   const rev = s.summary_rev || 0;
   if (rev !== prevSummaryRev) { prevSummaryRev = rev; if (s.has_summary) await loadResult(); }
+
+  // A finished run just wrote a folder; refresh the list if it is on screen.
+  if ((freshResult || freshSummary) && !$('viewLibrary').hidden) loadLibrary();
 }
 
 // ---- results ----
@@ -315,19 +321,20 @@ async function loadResult() {
   renderTranscript(d.result);
   renderSummary(d.summary);
 }
-function renderTranscript(res) {
-  const el = $('transcript');
-  if (!res || !res.lines.length) {
-    el.innerHTML = '<span class="empty" data-i18n="tx.none">' + esc(t('tx.none')) + '</span>'; return;
+function renderTranscript(res, el) {
+  el = el || $('transcript');
+  if (!res || !res.lines || !res.lines.length) {
+    el.innerHTML = '<span class="empty">' + esc(t('tx.none')) + '</span>'; return;
   }
   el.innerHTML = '';
   const idx = {};
   res.lines.forEach(l => {
     const div = document.createElement('div'); div.className = 'line';
     if (l.ts) {
-      const t = document.createElement('span');
-      t.className = 'ts'; t.textContent = l.ts;
-      div.appendChild(t);
+      // Named `ts`, not `t`: `t` is the translation lookup.
+      const ts = document.createElement('span');
+      ts.className = 'ts'; ts.textContent = l.ts;
+      div.appendChild(ts);
     }
     if (res.diarized && l.speaker !== null) {
       div.classList.add('spk');
@@ -343,11 +350,11 @@ function renderTranscript(res) {
     el.appendChild(div);
   });
 }
-function renderSummary(text) {
-  const el = $('summary');
+function renderSummary(text, el, emptyText) {
+  el = el || $('summary');
   el.classList.toggle('filled', !!text);
   if (text) el.innerHTML = mdToHtml(text);
-  else el.innerHTML = '<span class="empty">—</span>';
+  else el.innerHTML = '<span class="empty">' + esc(emptyText || '—') + '</span>';
 }
 
 // ---- actions ----
@@ -546,8 +553,14 @@ $('s_tplname').addEventListener('input', () => {
 // Show only the fields that belong to the selected summarizer backend.
 function syncLlmBackend() {
   const embedded = $('s_llmbackend').value !== 'remote';
-  $('llmEmbedded').style.display = embedded ? '' : 'none';
-  $('llmRemote').style.display = embedded ? 'none' : '';
+  // Two pairs: the everyday fields in the Summarizer group, and the matching
+  // knobs down in Advanced.
+  ['llmEmbedded', 'advLlmEmbedded'].forEach(id => {
+    $(id).style.display = embedded ? '' : 'none';
+  });
+  ['llmRemote', 'advLlmRemote'].forEach(id => {
+    $(id).style.display = embedded ? 'none' : '';
+  });
 }
 $('s_llmbackend').addEventListener('change', syncLlmBackend);
 
@@ -582,7 +595,7 @@ function fillLlmCatalog(catalog) {
   llmCatalog.forEach(m => {
     const o = document.createElement('option');
     o.value = m.id;
-    o.textContent = m.label + ' · ' + m.size + (m.downloaded ? ' · inik' : '');
+    o.textContent = m.label + ' · ' + m.size + (m.downloaded ? t('llm.downloaded') : '');
     sel.appendChild(o);
   });
   refreshSelect('s_llmdl');
@@ -600,7 +613,7 @@ function showLlmNote() {
   const m = llmCatalog.find(x => x.id === $('s_llmdl').value);
   if (!m) return setLlmNote('');
   setLlmNote(m.downloaded ? (m.note + t('llm.already'))
-                          : (m.note + ' — indirilecek: ' + m.size));
+                          : (m.note + t('llm.willDl') + m.size));
 }
 $('s_llmdl').addEventListener('change', showLlmNote);
 
@@ -642,7 +655,7 @@ $('dlLlm').onclick = async () => {
     toast(t('toast.dlAlready'));
     return;
   }
-  if (!confirm(m.label + ' indirilecek (' + m.size + '). Devam edilsin mi?')) return;
+  if (!confirm(t('llm.confirmDl', {label: m.label, size: m.size}))) return;
 
   $('dlLlm').disabled = true;
   setLlmNote(t('llm.starting'));
@@ -665,6 +678,7 @@ $('rescanGguf').onclick = async () => {
 
 async function openSettings() {
   const s = await api('/api/settings');
+  $('s_theme').value = s.ui_theme || themePref;
   $('s_device').value = s.device;
   $('s_model').value = s.whisper_model;
   $('s_language').value = s.language;
@@ -704,7 +718,7 @@ async function openSettings() {
   $('s_sumlang').value = s.summary_language;
   const sel = $('s_llmmodel'); sel.innerHTML = '';
   const o = document.createElement('option');
-  o.value = s.llm_model; o.textContent = s.llm_model || '(otomatik: ilk model)';
+  o.value = s.llm_model; o.textContent = s.llm_model || t('llm.autoFirst');
   sel.appendChild(o);
 
   [ 's_modelsdir', 's_modelsdir2' ].forEach(id => {
@@ -714,39 +728,61 @@ async function openSettings() {
   setupTplEditor(s);
   $('s_uilang').value = s.ui_language || LANG;
   ['s_device','s_model','s_language','s_llmmodel','s_sumlang','s_llmbackend','s_llmdl',
-   's_uilang'].forEach(refreshSelect);
+   's_uilang','s_theme'].forEach(refreshSelect);
   $('modalBg').classList.add('on');
 }
-// ---- theme (dark / light) ----
-// The parameter is `mode`, not `t` — `t` is the translation lookup.
-function applyTheme(mode) {
-  document.documentElement.setAttribute('data-theme', mode);
-  try { localStorage.setItem('transcriptor-theme', mode); } catch (e) {}
-  // Icon shows the mode you can switch TO.
-  $('themeBtn').textContent = mode === 'light' ? '☾' : '☀';
-}
-$('themeBtn').textContent =
-  document.documentElement.getAttribute('data-theme') === 'light' ? '☾' : '☀';
-$('themeBtn').onclick = () => {
-  const cur = document.documentElement.getAttribute('data-theme') === 'light'
-    ? 'light' : 'dark';
-  applyTheme(cur === 'light' ? 'dark' : 'light');
-};
+// ---- theme (system / light / dark) ----
+// Lives in Settings, not in the header. localStorage drives the pre-paint
+// render in index.html; config.json is the durable store, so the choice follows
+// the app rather than the browser profile. "system" tracks the OS setting live.
+let themePref = 'system';
+const SYS_LIGHT = window.matchMedia
+  ? matchMedia('(prefers-color-scheme: light)') : null;
 
-// ---- UI language (tr / en) ----
-// localStorage drives the pre-paint render in i18n.js; config.json is the
-// durable store, so every change is persisted to both.
+function resolveTheme(pref) {
+  if (pref === 'light' || pref === 'dark') return pref;
+  return (SYS_LIGHT && SYS_LIGHT.matches) ? 'light' : 'dark';
+}
+// The parameter is `pref`, not `t` — `t` is the translation lookup.
+function applyTheme(pref, persist) {
+  themePref = (pref === 'light' || pref === 'dark') ? pref : 'system';
+  document.documentElement.setAttribute('data-theme', resolveTheme(themePref));
+  try { localStorage.setItem('transcriptor-theme', themePref); } catch (e) {}
+  if (persist) post('/api/settings', {ui_theme: themePref});
+}
+if (SYS_LIGHT && SYS_LIGHT.addEventListener) {
+  SYS_LIGHT.addEventListener('change', () => {
+    if (themePref === 'system') applyTheme('system', false);
+  });
+}
+
+// ---- UI language (en / tr) ----
+// Also settings-only. Same two-store arrangement as the theme.
 function setLang(lang, persist) {
   applyLang(lang);
   try { localStorage.setItem('transcriptor-lang', LANG); } catch (e) {}
-  // The button shows the language you can switch TO, like the theme icon.
-  $('langBtn').textContent = LANG === 'en' ? 'TR' : 'EN';
   if ($('s_uilang')) { $('s_uilang').value = LANG; refreshSelect('s_uilang'); }
   if (persist) post('/api/settings', {ui_language: LANG});
 }
 // Re-render the parts of the UI that JS owns rather than the markup.
-window.afterLangChange = () => { loadSources(); initTpl(); };
-$('langBtn').onclick = () => setLang(LANG === 'en' ? 'tr' : 'en', true);
+window.afterLangChange = () => {
+  loadSources(); initTpl(); renderLibraryList(); renderLibraryDetail();
+};
+
+// ---- tabs (studio / library) ----
+function showTab(name) {
+  const lib = name === 'library';
+  $('viewStudio').hidden = lib;
+  $('viewLibrary').hidden = !lib;
+  [['tabStudio', !lib], ['tabLibrary', lib]].forEach(([id, on]) => {
+    $(id).classList.toggle('on', on);
+    $(id).setAttribute('aria-selected', String(on));
+  });
+  // Nothing should keep playing behind a hidden tab; the position is kept.
+  if (lib) loadLibrary(); else $('libAudio').pause();
+}
+$('tabStudio').onclick = () => showTab('studio');
+$('tabLibrary').onclick = () => showTab('library');
 
 $('settingsBtn').onclick = openSettings;
 $('cancelSettings').onclick = () => $('modalBg').classList.remove('on');
@@ -795,11 +831,13 @@ $('saveSettings').onclick = async () => {
     llm_timeout: parseFloat($('s_llmtimeout').value),
     summary_language: $('s_sumlang').value,
     ui_language: $('s_uilang').value,
+    ui_theme: $('s_theme').value,
     system_gain: parseFloat($('s_sysgain').value),
     mic_gain: parseFloat($('s_micgain').value),
   });
-  // Already persisted by the POST above, so only apply it locally.
+  // Already persisted by the POST above, so only apply them locally.
   if ($('s_uilang').value !== LANG) setLang($('s_uilang').value, false);
+  if ($('s_theme').value !== themePref) applyTheme($('s_theme').value, false);
   $('modalBg').classList.remove('on');
   if (r.device) { $('badgeText').textContent = r.device.replace(/^[^A-Za-z]+/, ''); }
   initTpl();  // picks up new/renamed templates and any label language change
@@ -916,6 +954,136 @@ async function onBrowserStop() {
   } catch (e) { toast(t('toast.uploadErr')); }
 }
 
+// ===== Library: past sessions read straight out of the output folder. The
+// server does the scanning; nothing is cached here beyond the current listing.
+let libSessions = [], libCurrent = null, libItem = null;
+
+// Session ids are "YYYY-MM-DD_HH-MM-SS[_n]"; the folder mtime is the fallback
+// for a directory that was not named by us.
+function libDate(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})/.exec(s.id);
+  const d = m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6])
+              : (s.mtime ? new Date(s.mtime * 1000) : null);
+  if (!d || isNaN(d.getTime())) return s.id;
+  return d.toLocaleString(LANG === 'tr' ? 'tr-TR' : 'en-GB',
+    {year: 'numeric', month: 'short', day: 'numeric',
+     hour: '2-digit', minute: '2-digit'});
+}
+function fmtBytes(n) {
+  if (!n) return '';
+  const u = ['B', 'KB', 'MB', 'GB'];
+  let i = 0, v = n;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return (v >= 10 || i === 0 ? Math.round(v) : v.toFixed(1)) + ' ' + u[i];
+}
+
+async function loadLibrary() {
+  $('libList').innerHTML = '<span class="empty">' + esc(t('lib.loading')) + '</span>';
+  let d;
+  try { d = await api('/api/library'); } catch (e) { d = {sessions: []}; }
+  libSessions = d.sessions || [];
+  $('libDir').textContent = d.output_dir || '';
+  // A recording deleted outside the app leaves the detail pane pointing at
+  // nothing; drop the selection rather than showing a stale one.
+  if (libCurrent && !libSessions.some(x => x.id === libCurrent)) {
+    libCurrent = null; libItem = null;
+    $('libAudio').pause();
+  }
+  renderLibraryList();
+  renderLibraryDetail();
+}
+
+function renderLibraryList() {
+  const list = $('libList');
+  if (!list) return;
+  list.innerHTML = '';
+  if (!libSessions.length) {
+    list.innerHTML = '<span class="empty">' + esc(t('lib.none')) + '</span>';
+    return;
+  }
+  libSessions.forEach(s => {
+    const tags = [];
+    if (s.has_transcript) tags.push(t('lib.badges.tx'));
+    if (s.has_summary) tags.push(t('lib.badges.sum'));
+    if (s.audio) tags.push(t('lib.badges.aud') + ' · ' + fmtBytes(s.audio_bytes));
+
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'lib-row' + (s.id === libCurrent ? ' sel' : '');
+    row.innerHTML =
+      '<span class="lib-when">' + esc(libDate(s)) + '</span>' +
+      '<span class="lib-prev">' + esc(s.preview || '—') + '</span>' +
+      '<span class="lib-tags">' +
+        tags.map(x => '<i>' + esc(x) + '</i>').join('') + '</span>';
+    row.onclick = () => openLibraryItem(s.id);
+    list.appendChild(row);
+  });
+}
+
+async function openLibraryItem(id) {
+  let d;
+  try { d = await api('/api/library/item?id=' + encodeURIComponent(id)); }
+  catch (e) { toast(t('lib.loadErr')); return; }
+  if (d.error) { toast(d.error); return; }
+  if (libCurrent !== id) $('libAudio').pause();
+  libCurrent = id; libItem = d;
+  renderLibraryList();     // moves the selection highlight
+  renderLibraryDetail();
+}
+
+function renderLibraryDetail() {
+  if (!$('libBody')) return;
+  const d = libItem;
+  $('libPlaceholder').hidden = !!d;
+  $('libBody').hidden = !d;
+  if (!d) return;
+
+  const s = libSessions.find(x => x.id === d.id);
+  $('libTitle').textContent = s ? libDate(s) : d.id;
+  $('libPath').textContent = d.path || '';
+
+  const audio = $('libAudio');
+  if (d.audio) {
+    // Only reassign when the recording changed: setting src reloads the stream
+    // and would throw away the listening position on a language switch.
+    const src = '/api/library/audio?id=' + encodeURIComponent(d.id);
+    if (audio.getAttribute('src') !== src) audio.setAttribute('src', src);
+    $('libAudioName').textContent = d.audio;
+    $('libAudioWrap').hidden = false;
+    $('libNoAudio').hidden = true;
+  } else {
+    audio.pause();
+    audio.removeAttribute('src');
+    $('libAudioWrap').hidden = true;
+    $('libNoAudio').hidden = false;
+  }
+
+  // transcript.json keeps the speakers and timestamps, so it renders exactly
+  // like the live panel; the .txt is the fallback for older sessions.
+  const tx = $('libTranscript');
+  if (d.transcript && d.transcript.lines && d.transcript.lines.length) {
+    renderTranscript(d.transcript, tx);
+  } else if (d.transcript_text) {
+    tx.innerHTML = '';
+    const raw = document.createElement('div');
+    raw.className = 'lib-raw';
+    raw.textContent = d.transcript_text;
+    tx.appendChild(raw);
+  } else {
+    tx.innerHTML = '<span class="empty">' + esc(t('lib.noTx')) + '</span>';
+  }
+
+  renderSummary(d.summary, $('libSummary'), t('lib.noSum'));
+}
+
+$('libRefresh').onclick = loadLibrary;
+$('libOpen').onclick = async () => {
+  if (!libCurrent) return;
+  const r = await post('/api/library/open', {id: libCurrent});
+  if (r.error) toast(r.error);
+  else if (!r.ok) toast(t('toast.folderErr') + r.path);
+};
+
 // Enhance every native <select> into a themed custom dropdown. Queried rather
 // than listed by id: a hand-kept list silently leaves new selects rendering as
 // the OS widget, light-on-dark and out of place next to the themed ones.
@@ -926,25 +1094,31 @@ loadSources();
 initTpl();
 // config.json is the durable store: reconcile the pre-paint localStorage guess
 // with it, so the choice follows the app rather than the browser profile.
-(async function initLang() {
-  setLang(LANG, false);   // paint the button before the round-trip
+(async function initPrefs() {
+  setLang(LANG, false);   // paint from localStorage before the round-trip
+  try {
+    let saved = localStorage.getItem('transcriptor-theme');
+    themePref = (saved === 'light' || saved === 'dark') ? saved : 'system';
+  } catch (e) { /* private mode; "system" stands */ }
   try {
     const s = await api('/api/settings');
     if (s.ui_language && s.ui_language !== LANG) setLang(s.ui_language, false);
-  } catch (e) { /* server not ready yet; the saved value stands */ }
+    if (s.ui_theme && s.ui_theme !== themePref) applyTheme(s.ui_theme, false);
+  } catch (e) { /* server not ready yet; the saved values stand */ }
 })();
 poll();
 setInterval(poll, 700);
 
 // Design-preview hooks (only via URL hash).
+if (location.hash === '#library') showTab('library');
 if (location.hash === '#settings') openSettings();
 if (location.hash === '#src') setTimeout(() => { const s = $('source'); if (s && s._x) s._x.wrap.classList.add('open'); }, 300);
 if (location.hash === '#demo') {
   renderTranscript({diarized: true, lines: [
-    {speaker:0, speaker_name:'Konuşmacı 1', text:'Merhaba, bugünkü toplantıya hoş geldiniz.'},
-    {speaker:1, speaker_name:'Konuşmacı 2', text:'Teşekkürler. Bütçe kalemlerini konuşalım mı?'},
-    {speaker:0, speaker_name:'Konuşmacı 1', text:'Evet, önce pazarlama giderlerinden başlayalım.'},
-    {speaker:2, speaker_name:'Konuşmacı 3', text:'Rakamları ben derledim, birazdan paylaşırım.'},
+    {speaker:0, speaker_name:'Speaker 1', text:'Hello, and welcome to today\'s meeting.'},
+    {speaker:1, speaker_name:'Speaker 2', text:'Thanks. Shall we go through the budget lines?'},
+    {speaker:0, speaker_name:'Speaker 1', text:'Yes, let\'s start with the marketing spend.'},
+    {speaker:2, speaker_name:'Speaker 3', text:'I pulled the figures together; I\'ll share them shortly.'},
   ]});
-  renderSummary('• Özet: Toplantıda bütçe ve pazarlama giderleri ele alındı; rakamlar hazırlanacak.\n• Ana Noktalar:\n  – Pazarlama bütçesi gözden geçirilecek\n  – Konuşmacı 3 rakamları paylaşacak\n• Aksiyonlar:\n  – Konuşmacı 1 sunumu toparlayacak');
+  renderSummary('• Summary: The meeting covered the budget and marketing spend; figures are to follow.\n• Key Points:\n  – The marketing budget will be reviewed\n  – Speaker 3 will share the figures\n• Action Items:\n  – Speaker 1 will pull the deck together');
 }

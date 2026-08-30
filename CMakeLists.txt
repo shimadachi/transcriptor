@@ -48,6 +48,7 @@ set(TRANSCRIPTOR_SOURCES
     src/device.cpp
     src/util/paths.cpp
     src/util/export.cpp
+    src/util/library.cpp
     src/util/net.cpp
     src/util/models.cpp
     src/audio/sources.cpp

@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cstdlib>
 
+#include "util/lang.h"
+
 namespace transcriptor {
 
 namespace {
@@ -83,6 +85,7 @@ nlohmann::json Settings::to_json() const {
         {"llm_timeout", llm_timeout},
 
         {"ui_language", ui_language},
+        {"ui_theme", ui_theme},
         {"summary_language", summary_language},
         {"summary_template", summary_template},
         {"template_overrides", ov},
@@ -134,7 +137,9 @@ void Settings::from_json(const nlohmann::json& j) {
     get(j, "llm_timeout", &llm_timeout);
 
     get(j, "ui_language", &ui_language);
-    if (ui_language != "en") ui_language = "tr";
+    if (ui_language != "tr") ui_language = "en";
+    get(j, "ui_theme", &ui_theme);
+    if (ui_theme != "light" && ui_theme != "dark") ui_theme = "system";
     get(j, "summary_language", &summary_language);
     get(j, "summary_template", &summary_template);
 
@@ -185,6 +190,9 @@ Settings Settings::load() {
         if (!j.is_discarded()) s.from_json(j);
     }
     s.apply_env();
+    // Everything downstream — decoders, downloads, the summarizer — reads the
+    // language from here rather than being handed a Settings.
+    lang::set(s.ui_language);
     return s;
 }
 

@@ -11,6 +11,7 @@
 #include <llama.h>
 
 #include "llm/templates.h"
+#include "util/lang.h"
 #include "util/paths.h"
 
 namespace transcriptor::llm {
@@ -103,16 +104,21 @@ public:
         const paths::fs::path path = resolve_model_path();
         if (path.empty()) {
             return {false,
-                    "Özet modeli seçilmemiş. Ayarlar → Özetleyici → \"Hazır "
-                    "model indir\" ile bir model indirin ya da " +
+                    L("No summarizer model is selected. Download one from "
+                      "Settings → Summarizer → \"Download a ready-made model\", "
+                      "or drop a .gguf into ",
+                      "Özet modeli seçilmemiş. Ayarlar → Özetleyici → \"Hazır "
+                      "model indir\" ile bir model indirin ya da ") +
                     paths::to_utf8(paths::models_dir()) +
-                    " klasörüne bir .gguf koyun."};
+                    L(".", " klasörüne bir .gguf koyun.")};
         }
         std::error_code ec;
         if (!paths::fs::exists(path, ec)) {
-            return {false, "Özet modeli bulunamadı: " + paths::to_utf8(path)};
+            return {false, L("Summarizer model not found: ",
+                             "Özet modeli bulunamadı: ") + paths::to_utf8(path)};
         }
-        return {true, "Hazır. Model: " + paths::to_utf8(path.filename())};
+        return {true, L("Ready. Model: ", "Hazır. Model: ") +
+                          paths::to_utf8(path.filename())};
     }
 
     void unload() override {
@@ -132,7 +138,10 @@ public:
         abort_.store(false);
 
         const std::string transcript = trim(req.transcript);
-        if (transcript.empty()) throw SummarizerError("Özetlenecek metin yok.");
+        if (transcript.empty()) {
+            throw SummarizerError(L("There is no text to summarize.",
+                                    "Özetlenecek metin yok."));
+        }
 
         std::lock_guard<std::mutex> lock(mutex_);
         load(progress);
@@ -144,8 +153,10 @@ public:
         const int prompt_budget_tokens = n_ctx_ - max_tokens_ - kPromptMargin;
         if (prompt_budget_tokens < 256) {
             throw SummarizerError(
-                "Bağlam penceresi çok küçük. Ayarlar'dan bağlam boyutunu "
-                "artırın veya yanıt uzunluğunu azaltın.");
+                L("The context window is too small. Raise the context size in "
+                  "Settings, or lower the answer length.",
+                  "Bağlam penceresi çok küçük. Ayarlar'dan bağlam boyutunu "
+                  "artırın veya yanıt uzunluğunu azaltın."));
         }
         const auto budget_chars =
             static_cast<std::size_t>(prompt_budget_tokens) * 5 / 2;
@@ -162,10 +173,15 @@ public:
         const auto chunks = split_transcript(transcript, budget_chars);
         std::string notes;
         for (std::size_t i = 0; i < chunks.size(); ++i) {
-            if (abort_.load()) throw SummarizerError("Özetleme iptal edildi.");
+            if (abort_.load()) {
+                throw SummarizerError(L("Summarizing was cancelled.",
+                                        "Özetleme iptal edildi."));
+            }
             if (progress) {
-                progress("Uzun kayıt: bölüm " + std::to_string(i + 1) + "/" +
-                             std::to_string(chunks.size()) + " özetleniyor…",
+                progress(L("Long recording: summarizing part ",
+                           "Uzun kayıt: bölüm ") + std::to_string(i + 1) + "/" +
+                             std::to_string(chunks.size()) +
+                             L("…", " özetleniyor…"),
                          static_cast<double>(i) / static_cast<double>(chunks.size()));
             }
             SummaryRequest part = work;
@@ -175,7 +191,10 @@ public:
             notes += "\n\n";
         }
 
-        if (progress) progress("Bölüm notları birleştiriliyor…", -1.0);
+        if (progress) {
+            progress(L("Merging the section notes…",
+                       "Bölüm notları birleştiriliyor…"), -1.0);
+        }
         SummaryRequest final_req = work;
         final_req.transcript = notes;
         final_req.context.clear();   // already folded into the notes
@@ -221,7 +240,8 @@ private:
         unload_locked();
 
         if (progress) {
-            progress("Özet modeli yükleniyor (" +
+            progress(L("Loading the summarizer model (",
+                       "Özet modeli yükleniyor (") +
                          paths::to_utf8(path.filename()) + ")…", -1.0);
         }
 
@@ -230,7 +250,8 @@ private:
 
         model_ = llama_model_load_from_file(path_utf8.c_str(), mparams);
         if (!model_) {
-            throw SummarizerError("Özet modeli yüklenemedi: " + path_utf8);
+            throw SummarizerError(L("The summarizer model could not be loaded: ",
+                                    "Özet modeli yüklenemedi: ") + path_utf8);
         }
         loaded_path_ = path_utf8;
         vocab_ = llama_model_get_vocab(model_);
@@ -254,7 +275,10 @@ private:
         cparams.n_threads   = threads_;
         cparams.n_threads_batch = threads_;
         ctx_ = llama_init_from_model(model_, cparams);
-        if (!ctx_) throw SummarizerError("LLM bağlamı oluşturulamadı.");
+        if (!ctx_) {
+            throw SummarizerError(L("The LLM context could not be created.",
+                                    "LLM bağlamı oluşturulamadı."));
+        }
     }
 
     std::vector<llama_token> tokenize(const std::string& text, bool add_special) {
@@ -325,12 +349,14 @@ private:
 
         if (static_cast<int>(tokens.size()) >= n_ctx_) {
             throw SummarizerError(
-                "Metin bağlam penceresine sığmadı (" +
+                L("The text does not fit the context window (",
+                  "Metin bağlam penceresine sığmadı (") +
                 std::to_string(tokens.size()) + " / " + std::to_string(n_ctx_) +
-                " token). Ayarlar'dan bağlam boyutunu artırın.");
+                L(" tokens). Raise the context size in Settings.",
+                  " token). Ayarlar'dan bağlam boyutunu artırın."));
         }
 
-        if (progress) progress("Özetleniyor…", 0.0);
+        if (progress) progress(L("Summarizing…", "Özetleniyor…"), 0.0);
 
         // Ingest the prompt in batches the context was sized for.
         constexpr int kBatch = 512;
@@ -339,9 +365,14 @@ private:
                 std::min<std::size_t>(kBatch, tokens.size() - off));
             llama_batch batch = llama_batch_get_one(tokens.data() + off, n);
             if (llama_decode(ctx_, batch) != 0) {
-                throw SummarizerError("LLM istemi işlenemedi (llama_decode).");
+                throw SummarizerError(L("The LLM prompt could not be processed "
+                                        "(llama_decode).",
+                                        "LLM istemi işlenemedi (llama_decode)."));
             }
-            if (abort_.load()) throw SummarizerError("Özetleme iptal edildi.");
+            if (abort_.load()) {
+                throw SummarizerError(L("Summarizing was cancelled.",
+                                        "Özetleme iptal edildi."));
+            }
         }
 
         llama_sampler_chain_params sparams = llama_sampler_chain_default_params();
@@ -371,7 +402,10 @@ private:
         int n_past = static_cast<int>(tokens.size());
 
         for (int i = 0; i < max_tokens_; ++i) {
-            if (abort_.load()) throw SummarizerError("Özetleme iptal edildi.");
+            if (abort_.load()) {
+                throw SummarizerError(L("Summarizing was cancelled.",
+                                        "Özetleme iptal edildi."));
+            }
 
             llama_token id = llama_sampler_sample(sampler, ctx_, -1);
             if (llama_vocab_is_eog(vocab_, id)) break;
@@ -386,7 +420,8 @@ private:
 
             llama_batch batch = llama_batch_get_one(&id, 1);
             if (llama_decode(ctx_, batch) != 0) {
-                throw SummarizerError("LLM üretimi kesildi (llama_decode).");
+                throw SummarizerError(L("LLM generation broke off (llama_decode).",
+                                        "LLM üretimi kesildi (llama_decode)."));
             }
         }
 
@@ -394,7 +429,10 @@ private:
         free_context();
 
         out = trim(out);
-        if (out.empty()) throw SummarizerError("LLM boş yanıt döndürdü.");
+        if (out.empty()) {
+            throw SummarizerError(L("The LLM returned an empty answer.",
+                                    "LLM boş yanıt döndürdü."));
+        }
         if (progress) progress("", 1.0);
         return out;
     }

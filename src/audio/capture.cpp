@@ -5,6 +5,7 @@
 #include <stdexcept>
 
 #include "audio/device_registry.h"
+#include "util/lang.h"
 
 namespace transcriptor::audio {
 
@@ -50,7 +51,8 @@ struct AudioCapture::Impl {
         // Only meaningful when the device stopped on its own (unplugged, sink
         // removed); an explicit stop() clears `started` first.
         if (impl && impl->started.load()) {
-            impl->set_error("Ses aygıtı beklenmedik şekilde durdu.");
+            impl->set_error(L("The audio device stopped unexpectedly.",
+                              "Ses aygıtı beklenmedik şekilde durdu."));
         }
     }
 };
@@ -66,7 +68,8 @@ void AudioCapture::start() {
 
     ResolvedDevice dev;
     if (!resolve_device(source_.id, &dev)) {
-        throw std::runtime_error("Ses kaynağı bulunamadı: " + source_.name);
+        throw std::runtime_error(L("Audio source not found: ",
+                                   "Ses kaynağı bulunamadı: ") + source_.name);
     }
 
     ma_device_config cfg = ma_device_config_init(dev.type);
@@ -83,7 +86,8 @@ void AudioCapture::start() {
 
     ma_result rc = ma_device_init(shared_context(), &cfg, &impl_->device);
     if (rc != MA_SUCCESS) {
-        throw std::runtime_error("Ses aygıtı açılamadı (" + source_.name +
+        throw std::runtime_error(L("The audio device could not be opened (",
+                                   "Ses aygıtı açılamadı (") + source_.name +
                                  "): " + ma_result_description(rc));
     }
     impl_->device_ready = true;
@@ -92,7 +96,8 @@ void AudioCapture::start() {
     if (rc != MA_SUCCESS) {
         ma_device_uninit(&impl_->device);
         impl_->device_ready = false;
-        throw std::runtime_error("Kayıt başlatılamadı (" + source_.name +
+        throw std::runtime_error(L("Recording could not be started (",
+                                   "Kayıt başlatılamadı (") + source_.name +
                                  "): " + ma_result_description(rc));
     }
     impl_->started.store(true);

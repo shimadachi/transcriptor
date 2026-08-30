@@ -1,4 +1,5 @@
 #include "llm/openai_backend.h"
+#include "util/lang.h"
 
 #include <algorithm>
 
@@ -54,11 +55,14 @@ public:
         auto res = client->Get(endpoint_.prefix + "/models", headers());
         if (!res) {
             throw SummarizerError(
-                "LLM sunucusuna ulaşılamadı (" + base_url_ + "). "
-                "Sunucu açık mı? [" + httplib::to_string(res.error()) + "]");
+                L("The LLM server could not be reached (",
+                  "LLM sunucusuna ulaşılamadı (") + base_url_ +
+                L("). Is it running? [", "). Sunucu açık mı? [") +
+                httplib::to_string(res.error()) + "]");
         }
         if (res->status != 200) {
-            throw SummarizerError("Model listesi alınamadı (HTTP " +
+            throw SummarizerError(L("The model list could not be fetched (HTTP ",
+                                    "Model listesi alınamadı (HTTP ") +
                                   std::to_string(res->status) + ").");
         }
 
@@ -83,8 +87,10 @@ public:
             return {false, e.what()};
         }
         if (models.empty()) {
-            return {false, "Sunucu çalışıyor ama yüklü model yok. "
-                           "LM Studio'da bir model yükleyin (ör. Qwen)."};
+            return {false, L("The server is up but has no model loaded. Load one "
+                             "in LM Studio (e.g. Qwen).",
+                             "Sunucu çalışıyor ama yüklü model yok. "
+                             "LM Studio'da bir model yükleyin (ör. Qwen).")};
         }
         if (!model_.empty() &&
             std::find(models.begin(), models.end(), model_) == models.end()) {
@@ -93,21 +99,28 @@ public:
                 if (i) list += ", ";
                 list += models[i];
             }
-            return {false, "Model '" + model_ + "' yüklü değil. Mevcut: " + list};
+            return {false, "Model '" + model_ +
+                               L("' is not loaded. Available: ",
+                                 "' yüklü değil. Mevcut: ") + list};
         }
-        return {true, "Hazır. Model: " + (model_.empty() ? models[0] : model_)};
+        return {true, L("Ready. Model: ", "Hazır. Model: ") +
+                          (model_.empty() ? models[0] : model_)};
     }
 
     std::string summarize(const SummaryRequest& req,
                           const ProgressFn& progress) override {
         if (build_user_message(req).empty()) {
-            throw SummarizerError("Özetlenecek metin yok.");
+            throw SummarizerError(L("There is no text to summarize.",
+                                    "Özetlenecek metin yok."));
         }
 
         std::string model = model_;
         if (model.empty()) {
             auto models = list_models();
-            if (models.empty()) throw SummarizerError("Sunucuda yüklü model yok.");
+            if (models.empty()) {
+                throw SummarizerError(L("The server has no model loaded.",
+                                        "Sunucuda yüklü model yok."));
+            }
             model = models[0];
         }
 
@@ -122,7 +135,9 @@ public:
             })},
         };
 
-        if (progress) progress("Özetleniyor (" + model + ")…", -1.0);
+        if (progress) {
+            progress(L("Summarizing (", "Özetleniyor (") + model + ")…", -1.0);
+        }
 
         auto client = make_client(timeout_);
         if (!client) throw SummarizerError(tls_error());
@@ -130,11 +145,13 @@ public:
         auto res = client->Post(endpoint_.prefix + "/chat/completions", headers(),
                                 payload.dump(), "application/json");
         if (!res) {
-            throw SummarizerError("Özetleme isteği başarısız: " +
+            throw SummarizerError(L("The summary request failed: ",
+                                    "Özetleme isteği başarısız: ") +
                                   httplib::to_string(res.error()));
         }
         if (res->status != 200) {
-            throw SummarizerError("Özetleme isteği başarısız (HTTP " +
+            throw SummarizerError(L("The summary request failed (HTTP ",
+                                    "Özetleme isteği başarısız (HTTP ") +
                                   std::to_string(res->status) + "): " +
                                   res->body.substr(0, 400));
         }
@@ -142,13 +159,15 @@ public:
         auto j = nlohmann::json::parse(res->body, nullptr, false);
         if (j.is_discarded() || !j.contains("choices") || !j["choices"].is_array() ||
             j["choices"].empty()) {
-            throw SummarizerError("Beklenmeyen yanıt biçimi: " +
+            throw SummarizerError(L("Unexpected response format: ",
+                                    "Beklenmeyen yanıt biçimi: ") +
                                   res->body.substr(0, 400));
         }
         const auto& msg = j["choices"][0]["message"];
         if (!msg.is_object() || !msg.contains("content") ||
             !msg["content"].is_string()) {
-            throw SummarizerError("Beklenmeyen yanıt biçimi: " +
+            throw SummarizerError(L("Unexpected response format: ",
+                                    "Beklenmeyen yanıt biçimi: ") +
                                   res->body.substr(0, 400));
         }
 
@@ -157,7 +176,10 @@ public:
         const auto e = content.find_last_not_of(" \t\r\n");
         content = (b == std::string::npos) ? "" : content.substr(b, e - b + 1);
 
-        if (content.empty()) throw SummarizerError("LLM boş yanıt döndürdü.");
+        if (content.empty()) {
+            throw SummarizerError(L("The LLM returned an empty answer.",
+                                    "LLM boş yanıt döndürdü."));
+        }
         return content;
     }
 
@@ -168,8 +190,10 @@ private:
     }
 
     std::string tls_error() const {
-        return "HTTPS adresleri desteklenmiyor (" + base_url_ +
-               "). Yerel sunucular için http:// kullanın.";
+        return L("HTTPS addresses are not supported (",
+                 "HTTPS adresleri desteklenmiyor (") + base_url_ +
+               L("). Use http:// for local servers.",
+                 "). Yerel sunucular için http:// kullanın.");
     }
 
     std::unique_ptr<httplib::Client> make_client(double timeout_sec) {
