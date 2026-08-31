@@ -379,8 +379,24 @@ button.mini.on { border-color: var(--rec); color: var(--rec); }
 .sum-body li::marker { color: var(--muted); }
 .sum-body strong { color: var(--ink); font-weight: 700; }
 .sum-body em { font-style: italic; }
+.sum-body del { text-decoration: line-through; color: var(--muted); }
+.sum-body a { color: var(--ok); text-decoration: underline;
+  text-underline-offset: 2px; overflow-wrap: anywhere; }
 .sum-body code { font-family: var(--mono); font-size: 12.5px; color: var(--ink);
   background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 5px; padding: 1px 5px; }
+/* Fenced code: scroll rather than stretch the panel, and drop the inline
+   chip styling that .sum-body code would otherwise put on every line. */
+.sum-body pre { margin: 0 0 10px; padding: 10px 12px; background: var(--panel-2);
+  border: 1px solid var(--line-2); border-radius: 8px; overflow-x: auto; }
+.sum-body pre code { background: none; border: 0; padding: 0;
+  white-space: pre; color: var(--ink-dim); }
+/* GFM task list: draw the box, since the marker is the state. */
+.sum-body li.task { list-style: none; position: relative; }
+.sum-body li.task::before { content: ""; position: absolute; left: -18px; top: .42em;
+  width: 10px; height: 10px; border: 1px solid var(--line-2); border-radius: 3px; }
+.sum-body li.task.done::before { content: "✓"; border-color: var(--ok-dim);
+  color: var(--ok); font-size: 11px; line-height: 10px; text-align: center;
+  border-radius: 3px; }
 .sum-body blockquote { margin: 0 0 10px; padding: 2px 0 2px 12px;
   border-left: 3px solid var(--line-2); color: var(--ink-dim); }
 .sum-body hr { border: 0; border-top: 1px solid var(--line-2); margin: 14px 0; }

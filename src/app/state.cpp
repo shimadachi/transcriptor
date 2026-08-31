@@ -443,7 +443,9 @@ void AppState::do_summarize() {
         auto progress = [this](const std::string& msg, double fraction) {
             set_phase("summarizing", fraction, msg);
         };
-        std::string summary = backend->summarize(req, progress);
+        // Strip here rather than in either backend: this is the one point the
+        // text passes through on its way to both the UI and summary.txt.
+        std::string summary = llm::strip_reasoning(backend->summarize(req, progress));
 
         paths::fs::path dir;
         {

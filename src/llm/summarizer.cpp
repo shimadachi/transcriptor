@@ -15,7 +15,50 @@ std::string trim(const std::string& s) {
     return s.substr(b, e - b + 1);
 }
 
+// Case-insensitive find, ASCII only — which is all the tag names are.
+std::size_t ifind(const std::string& hay, const std::string& needle, std::size_t from) {
+    const auto lower = [](unsigned char c) {
+        return static_cast<char>(c >= 'A' && c <= 'Z' ? c + 32 : c);
+    };
+    if (needle.empty() || needle.size() > hay.size()) return std::string::npos;
+    for (std::size_t i = from; i + needle.size() <= hay.size(); ++i) {
+        std::size_t j = 0;
+        while (j < needle.size() && lower(hay[i + j]) == lower(needle[j])) ++j;
+        if (j == needle.size()) return i;
+    }
+    return std::string::npos;
+}
+
 }  // namespace
+
+std::string strip_reasoning(const std::string& text) {
+    std::string out = text;
+
+    for (const char* name : {"think", "thinking"}) {
+        const std::string open  = std::string("<") + name;
+        const std::string close = std::string("</") + name + ">";
+
+        for (std::size_t at = ifind(out, open, 0); at != std::string::npos;
+             at = ifind(out, open, at)) {
+            // Only a real tag: "<think>" or "<think ...>", never "<thinker".
+            const std::size_t gt = out.find('>', at + open.size());
+            if (gt == std::string::npos) { out.erase(at); break; }
+            const char after = out[at + open.size()];
+            if (after != '>' && after != ' ' && after != '\t' && after != '\n') {
+                at += open.size();
+                continue;
+            }
+
+            const std::size_t end = ifind(out, close, gt + 1);
+            // No closing tag means generation was cut off mid-reasoning, so
+            // everything from here on is chain of thought, not an answer.
+            if (end == std::string::npos) { out.erase(at); break; }
+            out.erase(at, (end + close.size()) - at);
+        }
+    }
+
+    return trim(out);
+}
 
 std::string resolve_system_prompt(const SummaryRequest& req) {
     const std::string override_prompt = trim(req.system_override);
