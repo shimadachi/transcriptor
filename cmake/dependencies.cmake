@@ -212,6 +212,16 @@ if(TRANSCRIPTOR_DIARIZE)
         set(CMAKE_Fortran_COMPILER NOTFOUND)
     endif()
 
+    # sherpa picks its prebuilt ONNX Runtime by CMAKE_VS_PLATFORM_NAME, which
+    # only the Visual Studio generator sets. Its dispatch actually copes -- an
+    # empty value falls through to the x64 branch, which is the one we want --
+    # but the file that branch selects then re-checks the same variable and
+    # calls it fatal. Naming the architecture we are already building satisfies
+    # the guard without moving the dispatch off x64.
+    if(WIN32 AND NOT CMAKE_VS_PLATFORM_NAME)
+        set(CMAKE_VS_PLATFORM_NAME "x64")
+    endif()
+
     # sherpa's sources include their own headers as "sherpa-onnx/csrc/...", which
     # only resolves if its source root is an include dir. It normally arranges
     # that with include_directories(${CMAKE_SOURCE_DIR}) — wrong tree for us.
