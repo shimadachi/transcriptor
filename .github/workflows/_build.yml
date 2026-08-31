@@ -22,7 +22,13 @@ jobs:
   build:
     name: ${{ inputs.preset }}
     runs-on: ${{ inputs.os }}
-    timeout-minutes: 180
+    # win-cuda is the long pole by a wide margin: nvcc under MSVC compiles the
+    # CUDA kernels once per architecture, and since the CPU baseline fix the
+    # build covers eight of them instead of whatever "native" resolved to on a
+    # GPU-less runner. That took it from ~42 min to ~2h15m, and 180 was close
+    # enough that ordinary runner variance killed the 0.1.3 release run at
+    # exactly the cap. 330 leaves real headroom under GitHub's own 360 ceiling.
+    timeout-minutes: 330
 
     steps:
       - uses: actions/checkout@v4
