@@ -28,13 +28,31 @@ function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt
 
 // ---- minimal, offline Markdown -> HTML (for the summary) ----
 // Input is HTML-escaped first, so model output can never inject markup.
-function mdInline(s){
+function mdEmphasis(s){
   return s
     .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/~~([^~]+)~~/g, '<del>$1</del>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/__([^_]+)__/g, '<strong>$1</strong>')
     .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
     .replace(/(^|[^_])_([^_\n]+)_/g, '$1<em>$2</em>');
+}
+function mdInline(s){
+  // Links come out first and go back in last. A URL is full of the characters
+  // the emphasis rules look for -- underscores especially -- so running those
+  // over an href would quietly corrupt it.
+  const links = [];
+  s = s.replace(/\[([^\]\n]*)\]\(([^)\s]+)\)/g, (whole, text, url) => {
+    // Model output is untrusted: only ever emit schemes that just navigate,
+    // never javascript: or data:.
+    if (!/^(https?:\/\/|mailto:)/i.test(url)) return whole;
+    return '\u0000L' + (links.push({text, url}) - 1) + '\u0000';
+  });
+  return mdEmphasis(s).replace(/\u0000L(\d+)\u0000/g, (_, i) => {
+    const l = links[+i];
+    return `<a href="${l.url}" target="_blank" rel="noopener noreferrer">`
+         + `${mdEmphasis(l.text)}</a>`;
+  });
 }
 // A row is a GFM table separator like `| --- | :--: |` (dashes, optional colons).
 function isTableSep(line){
@@ -74,6 +92,18 @@ function mdToHtml(text){
     html += `<blockquote>${mdToHtml(quote.join('\n'))}</blockquote>`; quote = []; } };
   for (let i = 0; i < lines.length; i++){
     const line = lines[i].replace(/\s+$/, '');
+    // Fenced code block. Checked before everything else: its contents are
+    // literal, and a fence full of pipes would otherwise read as a table.
+    let fence = /^\s*```+\s*[A-Za-z0-9_+-]*\s*$/.exec(line);
+    if (fence){
+      closeList(); flushQuote();
+      const body = [];
+      let j = i + 1;
+      for (; j < lines.length && !/^\s*```+\s*$/.test(lines[j]); j++) body.push(lines[j]);
+      html += `<pre><code>${esc(body.join('\n'))}</code></pre>`;
+      i = j;   // skip the closing fence, or land past the end if unterminated
+      continue;
+    }
     // GFM pipe table: a header row followed by a separator row.
     if (line.includes('|') && i + 1 < lines.length && isTableSep(lines[i + 1])
         && !isTableSep(line)){
@@ -100,7 +130,16 @@ function mdToHtml(text){
       html += `<h${lvl}>${mdInline(m[2])}</h${lvl}>`; continue; }
     m = /^\s*[-*•–]\s+(.*)$/.exec(e);
     if (m){ if (list !== 'ul'){ closeList(); html += '<ul>'; list = 'ul'; }
-      html += `<li>${mdInline(m[1])}</li>`; continue; }
+      // GFM task list. The models reach for these constantly for action items,
+      // and without this the box renders as a literal "[ ]" in front of the text.
+      const task = /^\[([ xX])\]\s+(.*)$/.exec(m[1]);
+      if (task){
+        html += `<li class="task${task[1] === ' ' ? '' : ' done'}">`
+              + `${mdInline(task[2])}</li>`;
+      } else {
+        html += `<li>${mdInline(m[1])}</li>`;
+      }
+      continue; }
     m = /^\s*\d+[.)]\s+(.*)$/.exec(e);
     if (m){ if (list !== 'ol'){ closeList(); html += '<ol>'; list = 'ol'; }
       html += `<li>${mdInline(m[1])}</li>`; continue; }
