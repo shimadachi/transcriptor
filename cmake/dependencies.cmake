@@ -198,6 +198,20 @@ if(TRANSCRIPTOR_DIARIZE)
         set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
     endif()
 
+    # Eigen arrives under kaldi-decoder, and its blas/CMakeLists.txt opens with
+    #   check_language(Fortran)
+    #   if(CMAKE_Fortran_COMPILER)
+    #     enable_language(Fortran)   # not OPTIONAL -- a failure here is fatal
+    # Nothing we build is Fortran, but check_language searches PATH, and the
+    # GitHub Windows image carries a mingw gfortran that cannot link against
+    # MSVC objects: the compiler test then fails and takes configure with it.
+    # The Visual Studio generator never found one, so this only appears under
+    # Ninja. check_language is a no-op when the variable is already defined,
+    # and NOTFOUND is false to if(), so this takes the else branch as intended.
+    if(NOT DEFINED CMAKE_Fortran_COMPILER)
+        set(CMAKE_Fortran_COMPILER NOTFOUND)
+    endif()
+
     # sherpa's sources include their own headers as "sherpa-onnx/csrc/...", which
     # only resolves if its source root is an include dir. It normally arranges
     # that with include_directories(${CMAKE_SOURCE_DIR}) — wrong tree for us.
