@@ -62,8 +62,7 @@
       "name": "win-msvc",
       "displayName": "Windows · MSVC (CPU)",
       "inherits": "base",
-      "generator": "Visual Studio 17 2022",
-      "architecture": "x64",
+      "generator": "Ninja",
       "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
     },
     {
@@ -86,8 +85,8 @@
     { "name": "linux-vulkan", "configurePreset": "linux-vulkan" },
     { "name": "mac-arm64",    "configurePreset": "mac-arm64" },
     { "name": "mac-x64",      "configurePreset": "mac-x64" },
-    { "name": "win-msvc",     "configurePreset": "win-msvc",   "configuration": "Release" },
-    { "name": "win-cuda",     "configurePreset": "win-cuda",   "configuration": "Release" },
-    { "name": "win-vulkan",   "configurePreset": "win-vulkan", "configuration": "Release" }
+    { "name": "win-msvc",     "configurePreset": "win-msvc" },
+    { "name": "win-cuda",     "configurePreset": "win-cuda" },
+    { "name": "win-vulkan",   "configurePreset": "win-vulkan" }
   ]
 }

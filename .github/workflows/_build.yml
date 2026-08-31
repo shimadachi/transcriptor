@@ -96,11 +96,19 @@ jobs:
       # released tags that rarely move, so the objects are reusable across runs
       # — cache them and an unchanged-deps build is mostly a link.
       #
-      # Non-Windows only: win-* use the Visual Studio generator, which ignores
-      # CMAKE_<LANG>_COMPILER_LAUNCHER outright. Getting ccache there means
-      # moving those presets to Ninja first.
+      # Ninja, unlike the Visual Studio generator, does not locate the MSVC
+      # toolchain itself — cl.exe has to already be on PATH. The win-* presets
+      # moved to Ninja so ccache could work at all there (it supports MSVC only
+      # under the Ninja and NMake generators), which makes this step the price
+      # of admission. It also supplies the target architecture that the presets
+      # used to carry in the VS-generator-only "architecture" field.
+      - name: MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: ccache
-        if: runner.os != 'Windows'
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: ${{ inputs.preset }}
@@ -108,10 +116,10 @@ jobs:
 
       # CMake initialises CMAKE_<LANG>_COMPILER_LAUNCHER from the matching
       # environment variable, so this needs no preset or command-line change.
-      # Set on its own step, not job-wide: on Windows ccache is not installed
-      # and configuring a launcher that does not exist breaks the build.
+      # Explicitly bash: the default shell on the Windows runners is pwsh,
+      # where this redirect syntax does not mean what it does here.
       - name: Route compilers through ccache
-        if: runner.os != 'Windows'
+        shell: bash
         run: |
           echo "CMAKE_C_COMPILER_LAUNCHER=ccache"    >> "$GITHUB_ENV"
           echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache"  >> "$GITHUB_ENV"
