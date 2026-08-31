@@ -22,12 +22,13 @@ jobs:
   build:
     name: ${{ inputs.preset }}
     runs-on: ${{ inputs.os }}
-    # win-cuda is the long pole by a wide margin: nvcc under MSVC compiles the
-    # CUDA kernels once per architecture, and since the CPU baseline fix the
-    # build covers eight of them instead of whatever "native" resolved to on a
-    # GPU-less runner. That took it from ~42 min to ~2h15m, and 180 was close
-    # enough that ordinary runner variance killed the 0.1.3 release run at
-    # exactly the cap. 330 leaves real headroom under GitHub's own 360 ceiling.
+    # The CUDA presets are the long pole: nvcc compiles every kernel once per
+    # architecture. The CPU baseline fix set GGML_NATIVE=OFF, which as a side
+    # effect flipped ggml's CUDA default from "native" (one architecture) to a
+    # list of eight, and took win-cuda from ~42 min to ~2h15m.
+    # cmake/dependencies.cmake now pins the list explicitly, decoupled from the
+    # CPU baseline, which brings it back to five. 330 still leaves real headroom
+    # under GitHub's own 360 ceiling for a cold-cache run.
     timeout-minutes: 330
 
     steps:
@@ -47,10 +48,23 @@ jobs:
       # cuBLAS ships as libcublas / libcublas-dev, which do NOT take the
       # "cuda-" prefix the sub-packages input applies — hence the second list.
       # visual_studio_integration is what lets CMake identify nvcc on Windows.
+      #
+      # The toolkit version is pinned, and the window is narrow. CUDA 13 removed
+      # Pascal, Maxwell and Volta outright — building 61-virtual there is a hard
+      # "nvcc fatal : Unsupported gpu architecture", so 13.x would silently drop
+      # every GTX 10xx user. Blackwell SASS, meanwhile, needs 12.8 or newer.
+      # Only 12.8/12.9 satisfies both, and v0.2.19 could not reach it: it tops
+      # out at 12.6.2 and defaulted to 12.6.1, so RTX 50xx was falling back to
+      # JIT. Hence the action bump alongside the pin.
+      #
+      # Staying on 12.x also keeps the driver floor low: the bundled 12.9
+      # runtime runs on any 525+ driver thanks to CUDA minor version
+      # compatibility, where 13.x would demand 580+ from end users.
       - name: CUDA toolkit
         if: inputs.cuda
-        uses: Jimver/cuda-toolkit@v0.2.19
+        uses: Jimver/cuda-toolkit@v0.2.36
         with:
+          cuda: '12.9.2'
           method: network
           sub-packages: >-
             ${{ runner.os == 'Windows'
@@ -75,6 +89,33 @@ jobs:
           install_runtime: true
           cache: true
           stripdown: true
+
+      # Every run recompiles all 126 CUDA translation units from scratch, so a
+      # one-line change under web/ or src/ has been costing the same three
+      # hours as a dependency bump. The pins in cmake/dependencies.cmake are
+      # released tags that rarely move, so the objects are reusable across runs
+      # — cache them and an unchanged-deps build is mostly a link.
+      #
+      # Non-Windows only: win-* use the Visual Studio generator, which ignores
+      # CMAKE_<LANG>_COMPILER_LAUNCHER outright. Getting ccache there means
+      # moving those presets to Ninja first.
+      - name: ccache
+        if: runner.os != 'Windows'
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ inputs.preset }}
+          max-size: 2G
+
+      # CMake initialises CMAKE_<LANG>_COMPILER_LAUNCHER from the matching
+      # environment variable, so this needs no preset or command-line change.
+      # Set on its own step, not job-wide: on Windows ccache is not installed
+      # and configuring a launcher that does not exist breaks the build.
+      - name: Route compilers through ccache
+        if: runner.os != 'Windows'
+        run: |
+          echo "CMAKE_C_COMPILER_LAUNCHER=ccache"    >> "$GITHUB_ENV"
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache"  >> "$GITHUB_ENV"
+          echo "CMAKE_CUDA_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
 
       - name: Configure
         run: cmake --preset ${{ inputs.preset }}

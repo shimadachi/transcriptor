@@ -122,6 +122,36 @@ different major version (`libcudart.so.12: cannot open shared object file`,
 against ~15 MB for the CPU one. Building locally links against your own
 toolkit, so nothing is bundled and the binary stays small.
 
+#### Which NVIDIA GPUs the CUDA builds cover
+
+`cmake/dependencies.cmake` pins `CMAKE_CUDA_ARCHITECTURES` rather than letting
+ggml choose. nvcc compiles every kernel once per architecture, so the length of
+that list is very nearly the whole build time — about 31s per architecture per
+large kernel, across 126 CUDA files.
+
+| Architecture | Cards | Shipped as |
+|---|---|---|
+| Pascal | GTX 10xx | native SASS + PTX |
+| Turing | RTX 20xx, GTX 16xx | native SASS |
+| Ampere | RTX 30xx | native SASS |
+| Ada | RTX 40xx | native SASS |
+| Blackwell | RTX 50xx | native SASS |
+| anything else | V100, A100, H100, future GPUs | PTX, JIT-compiled on first run |
+
+Every consumer card in that table runs code compiled ahead of time, so there is
+no first-launch JIT stall. The Pascal entry also carries PTX, which the driver
+can JIT for any newer GPU that is not listed explicitly — that is what keeps
+datacenter parts and future hardware working.
+
+This is why CI pins its CUDA toolkit to **12.9.2**, and the window is narrow in
+both directions: CUDA 13 removed Pascal outright (asking it for `compute_61` is
+a hard `nvcc fatal`, not a warning), while Blackwell SASS needs 12.8 or newer.
+Staying on 12.x also keeps the driver floor at 525+ rather than the 580+ that
+13.x would demand of end users.
+
+Building with `TRANSCRIPTOR_NATIVE=ON` replaces the list with `native` — one
+architecture, the build machine's. Much faster to build, unusable elsewhere.
+
 ### Build options
 
 | Option | Default | Effect |
