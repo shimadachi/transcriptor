@@ -178,19 +178,26 @@ const BROWSER_SOURCES = [
   {id: 'browser:system', key: 'src.browserSys'},
   {id: 'browser:mic',    key: 'src.browserMic'},
 ];
+let sourcesGen = 0;
 async function loadSources() {
   const sel = $('source');
   // Kept across a reload so refreshing (or switching language) does not throw
   // away the source the user picked.
   const prevSrc = sel.value, prevMic = $('micSource').value;
+  // Fetch first, touch the DOM only afterwards: start-up and the language pass
+  // both load sources, and clearing before the await let the two interleave —
+  // each server source ended up listed twice. The generation guard then drops
+  // a response that a newer load has already overtaken.
+  const gen = ++sourcesGen;
+  let d;
+  try { d = await api('/api/sources'); } catch { d = {sources: []}; }
+  if (gen !== sourcesGen) return;
   sel.innerHTML = '';
   BROWSER_SOURCES.forEach(b => {
     const o = document.createElement('option');
     o.value = b.id; o.textContent = t(b.key);
     sel.appendChild(o);
   });
-  let d;
-  try { d = await api('/api/sources'); } catch { d = {sources: []}; }
   const mics = [];
   if (d && d.sources && d.sources.length) {
     // A real server-side source exists (Linux loopback) -> prefer it.
