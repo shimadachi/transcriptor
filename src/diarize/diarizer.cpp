@@ -1,6 +1,8 @@
 #include "diarize/diarizer.h"
+#include "util/cpu.h"
 #include "util/lang.h"
 
+#include <algorithm>
 #include <map>
 #include <stdexcept>
 #include <thread>
@@ -31,10 +33,21 @@ bool Diarizer::supported() {
 
 namespace {
 
+// One thread per physical core. Measured on 196s of recorded speech, on a
+// Ryzen 7 7735HS -- 8 physical cores, 16 logical -- process time only:
+//
+//    1 thread  115.5s      8 threads   29.1s   <- physical core count
+//    2 threads  65.6s     10 threads   35.9s
+//    4 threads  41.0s     12 threads   42.0s
+//    6 threads  34.0s     16 threads   53.5s
+//
+// The peak sits exactly on the physical count and falls away either side, so
+// the number that matters is cores, not logical processors and not a constant.
+// The old cap of 4 gave away ~30% here; a constant 8 would have been the same
+// mistake in the other direction, since on a 4-core/8-thread laptop it means
+// running two SMT siblings per core -- the 16-thread column above.
 int diar_threads() {
-    const unsigned hw = std::thread::hardware_concurrency();
-    if (hw >= 8) return 4;
-    return hw >= 4 ? 2 : 1;
+    return static_cast<int>(std::max(1u, util::physical_cores()));
 }
 
 struct ProgressBridge {
