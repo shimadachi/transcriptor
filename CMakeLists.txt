@@ -49,6 +49,7 @@ set(TRANSCRIPTOR_SOURCES
     src/main.cpp
     src/config.cpp
     src/device.cpp
+    src/util/cpu.cpp
     src/util/paths.cpp
     src/util/export.cpp
     src/util/library.cpp
