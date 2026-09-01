@@ -1,4 +1,5 @@
 #include "stt/whisper_stt.h"
+#include "util/cpu.h"
 #include "util/lang.h"
 
 #include <algorithm>
@@ -24,9 +25,12 @@ std::string trim(const std::string& s) {
 
 int default_threads(int configured) {
     if (configured > 0) return configured;
-    const unsigned hw = std::thread::hardware_concurrency();
-    // Whisper scales poorly past ~8 threads and we want headroom for the UI.
-    return static_cast<int>(std::clamp<unsigned>(hw ? hw : 4, 1u, 8u));
+    // Physical cores, not logical: SMT siblings share one core's vector units,
+    // so a second thread on the same core contends rather than adds. Counting
+    // logical processors put 8 threads on a 4-core laptop, which is slower than
+    // 4 -- measured on the diarizer, whose ONNX session has the same shape.
+    // The ceiling stays: whisper scales poorly past ~8 either way.
+    return static_cast<int>(std::clamp(util::physical_cores(), 1u, 8u));
 }
 
 struct CallbackState {

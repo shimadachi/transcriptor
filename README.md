@@ -118,9 +118,14 @@ The CUDA packages carry their own `cudart` / `cublas` / `cublasLt`, because
 those come with the CUDA *toolkit* and not with the driver — without them the
 binary will not start on a machine that has only a driver, or a toolkit of a
 different major version (`libcudart.so.12: cannot open shared object file`,
-`cudart64_12.dll was not found`). That is why the CUDA archives are ~450 MB
-against ~15 MB for the CPU one. Building locally links against your own
-toolkit, so nothing is bundled and the binary stays small.
+`cudart64_12.dll was not found`). That is why the CUDA archives are ~650 MB,
+against ~25 MB for Vulkan and ~15 MB for the CPU one — almost all of it is
+NVIDIA's cuBLAS. Building locally links against your own toolkit, so nothing
+is bundled and the binary stays small.
+
+Worth knowing before you pick a download: the Vulkan build also runs on NVIDIA
+cards, since the driver ships a Vulkan implementation. CUDA is faster, but
+Vulkan is a twenty-fifth of the size and needs nothing bundled at all.
 
 #### Which NVIDIA GPUs the CUDA builds cover
 
