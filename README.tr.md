@@ -119,9 +119,47 @@ CUDA paketleri kendi `cudart` / `cublas` / `cublasLt` kütüphanelerini içinde
 taşır; bunlar sürücüyle değil CUDA **toolkit**'iyle gelir. Aksi hâlde yalnızca
 sürücüsü olan ya da farklı ana sürüm toolkit'i olan bir makinede uygulama hiç
 açılmaz (`libcudart.so.12: cannot open shared object file`,
-`cudart64_12.dll was not found`). CUDA arşivlerinin ~450 MB, CPU arşivinin
-~15 MB olmasının sebebi budur. Yerelde derlerseniz kendi toolkit'inize
+`cudart64_12.dll was not found`). CUDA arşivlerinin ~650 MB, Vulkan arşivinin
+~25 MB, CPU arşivinin ~15 MB olmasının sebebi budur; bu boyutun neredeyse
+tamamı NVIDIA'nın cuBLAS'ıdır. Yerelde derlerseniz kendi toolkit'inize
 bağlanır; hiçbir şey paketlenmez, binary küçük kalır.
+
+İndireceğiniz paketi seçmeden önce: Vulkan yapısı NVIDIA kartlarında da
+çalışır, çünkü Vulkan uygulamasını sürücünün kendisi getirir. CUDA daha
+hızlıdır, ama Vulkan yirmi beşte bir boyuttadır ve hiçbir şey paketlemeyi
+gerektirmez.
+
+#### CUDA yapıları hangi NVIDIA GPU'larını kapsar
+
+`cmake/dependencies.cmake`, `CMAKE_CUDA_ARCHITECTURES` değerini ggml'e
+bırakmak yerine sabitler. nvcc her çekirdeği her mimari için ayrı ayrı
+derlediğinden, bu listenin uzunluğu neredeyse tüm derleme süresine eşittir:
+126 CUDA dosyası boyunca, büyük bir çekirdek için mimari başına yaklaşık 31
+saniye.
+
+| Mimari | Kartlar | Nasıl gönderiliyor |
+|---|---|---|
+| Pascal | GTX 10xx | yerel SASS + PTX |
+| Turing | RTX 20xx, GTX 16xx | yerel SASS |
+| Ampere | RTX 30xx | yerel SASS |
+| Ada | RTX 40xx | yerel SASS |
+| Blackwell | RTX 50xx | yerel SASS |
+| diğer her şey | V100, A100, H100, gelecekteki GPU'lar | PTX, ilk çalıştırmada JIT |
+
+Tablodaki her tüketici kartı önceden derlenmiş kod çalıştırır; ilk açılışta
+JIT beklemesi olmaz. Pascal satırı ayrıca PTX taşır ve sürücü bunu listede
+açıkça yer almayan daha yeni GPU'lar için derleyebilir — veri merkezi
+kartlarını ve gelecekteki donanımı çalışır tutan şey budur.
+
+CI'nin CUDA toolkit'ini **12.9.2**'ye sabitlemesinin sebebi budur ve aralık
+iki yönden de dardır: CUDA 13 Pascal'ı tamamen kaldırdı (ondan `compute_61`
+istemek bir uyarı değil, doğrudan `nvcc fatal` hatasıdır), Blackwell SASS ise
+12.8 veya üstünü ister. 12.x'te kalmak ayrıca sürücü tabanını 525+ seviyesinde
+tutar; 13.x son kullanıcıdan 580+ isterdi.
+
+`TRANSCRIPTOR_NATIVE=ON` ile derlerseniz liste yerini `native`'e bırakır: tek
+mimari, derlemeyi yapan makineninki. Derlemesi çok daha hızlıdır, başka yerde
+çalışmaz.
 
 ### Derleme seçenekleri
 

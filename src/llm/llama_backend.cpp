@@ -11,6 +11,7 @@
 #include <llama.h>
 
 #include "llm/templates.h"
+#include "util/cpu.h"
 #include "util/lang.h"
 #include "util/paths.h"
 
@@ -38,8 +39,10 @@ void init_backend_once() {
 
 int default_threads(int configured) {
     if (configured > 0) return configured;
-    const unsigned hw = std::thread::hardware_concurrency();
-    return static_cast<int>(std::max(1u, hw ? hw / 2 : 4u));
+    // Was hardware_concurrency/2, which is the right answer on a two-way SMT
+    // machine and an undercount everywhere else -- it is what util/cpu.cpp
+    // falls back to when it cannot read the topology. Ask properly instead.
+    return static_cast<int>(std::max(1u, util::physical_cores()));
 }
 
 std::string trim(const std::string& s) {
