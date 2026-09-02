@@ -19,7 +19,7 @@ const STR = {
 
   // -- console --------------------------------------------------------------
   'rec.start':      {en: 'Start recording', tr: 'Kaydı başlat'},
-  'rec.recording':  {en: 'Recording', tr: 'Kayıtta'},
+  'rec.stop':       {en: 'Stop recording', tr: 'Kaydı durdur'},
   'src.label':      {en: 'Source', tr: 'Kaynak'},
   'src.micMix':     {en: 'Mix a microphone into this source',
                      tr: 'Mikrofonu bu kaynağa karıştır'},
@@ -32,7 +32,6 @@ const STR = {
   'src.cancel':     {en: '✕ Cancel', tr: '✕ İptal'},
   'src.cancelTitle':{en: 'Cancel and delete the recording / output',
                      tr: 'Kaydı/çıktıyı iptal et ve sil'},
-  'src.stop':       {en: '■ Stop', tr: '■ Durdur'},
   'src.ready':      {en: 'Ready', tr: 'Hazır'},
   'src.browserBoth':  {en: '🎙 Browser — Microphone + System',
                        tr: '🎙 Tarayıcı — Mikrofon + Sistem'},

@@ -309,13 +309,14 @@ async function poll() {
   const amp = Math.max(0.28, Math.min(1, level * 11));
   m.style.transform = rec ? `scaleY(${amp})` : 'scaleY(1)';
 
-  // record button visual
+  // Record button visual. The disc is the whole transport: the dot morphs
+  // into a square while recording, and pressing it again stops.
   $('recWrap').classList.toggle('on', rec);
-  $('recBtn').title = rec ? t('rec.recording') : t('rec.start');
+  $('recBtn').title = rec ? t('rec.stop') : t('rec.start');
+  $('recBtn').setAttribute('aria-pressed', rec ? 'true' : 'false');
 
   const busy = rec || s.processing;
-  $('recBtn').disabled = busy;
-  $('stopBtn').disabled = !rec;
+  $('recBtn').disabled = s.processing;   // only the models can't be interrupted
   $('pauseBtn').disabled = !rec;
   $('pauseBtn').textContent = paused ? t('src.resume') : t('src.pause');
   $('pauseBtn').classList.toggle('on', paused);
@@ -405,6 +406,16 @@ function renderSummary(text, el, emptyText) {
 
 // ---- actions ----
 $('recBtn').onclick = async () => {
+  // One button for both halves of the transport, so a second press within the
+  // 700ms poll window would otherwise read the stale state and start twice.
+  // poll() re-enables the button as soon as it has the real answer.
+  $('recBtn').disabled = true;
+  // Same press stops what it started; poll() keeps .on in sync with the state.
+  if (browserRec || $('recWrap').classList.contains('on')) {
+    if (browserRec) stopBrowserCapture();
+    else post('/api/record/stop');
+    return;
+  }
   const val = $('source').value;
   if (val.startsWith('browser:')) { startBrowserCapture(val.split(':')[1]); return; }
   const mic = $('micSource').value;
@@ -412,10 +423,6 @@ $('recBtn').onclick = async () => {
   if (mic) body.mic_source_id = mic;   // mix this mic into the system audio
   const r = await post('/api/record/start', body);
   if (r.error) toast(r.error);
-};
-$('stopBtn').onclick = () => {
-  if (browserRec) { stopBrowserCapture(); return; }
-  post('/api/record/stop');
 };
 $('pauseBtn').onclick = async () => {
   if (browserRec) { toggleBrowserPause(); return; }
