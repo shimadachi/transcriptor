@@ -1,7 +1,14 @@
-// Windows resources: version info, plus the manifest bits that keep the
-// WebView2 window sharp on high-DPI displays and let it see Windows 10/11.
+// Windows resources: the app icon and version info, plus the manifest bits
+// that keep the WebView2 window sharp on high-DPI displays and let it see
+// Windows 10/11.
 
 #include <windows.h>
+
+// Explorer shows the icon with the lowest ID, and webview's win32 backend
+// asks for IDI_APPLICATION (32512) out of *our* module when it fills in the
+// window class -- so this one ID covers the file icon, the title bar and the
+// taskbar at once. Regenerate app.ico with scripts/make-icon.py.
+32512 ICON "app.ico"
 
 VS_VERSION_INFO VERSIONINFO
   FILEVERSION     0,1,0,0

@@ -75,6 +75,11 @@ if(WIN32)
     # GUI subsystem: no console window behind the app.
     add_executable(transcriptor WIN32 ${TRANSCRIPTOR_SOURCES})
     target_sources(transcriptor PRIVATE src/platform/app.rc)
+    # The resource compiler pulls these in by name, which CMake's dependency
+    # scanner does not follow -- say so, or a new icon never gets rebuilt in.
+    set_property(SOURCE src/platform/app.rc APPEND PROPERTY OBJECT_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/platform/app.ico"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/platform/app.manifest")
     # app.rc already embeds app.manifest as resource 1. The MSVC linker adds its
     # own by default, and two of them are a hard error at link time:
     #   CVT1100: duplicate resource. type:MANIFEST, name:1
@@ -84,6 +89,11 @@ if(WIN32)
     endif()
 elseif(APPLE)
     add_executable(transcriptor MACOSX_BUNDLE ${TRANSCRIPTOR_SOURCES})
+    # Copied into Transcriptor.app/Contents/Resources, where the Info.plist's
+    # CFBundleIconFile points. Regenerate with scripts/make-icns.py.
+    target_sources(transcriptor PRIVATE assets/transcriptor.icns)
+    set_source_files_properties(assets/transcriptor.icns PROPERTIES
+        MACOSX_PACKAGE_LOCATION Resources)
 else()
     add_executable(transcriptor ${TRANSCRIPTOR_SOURCES})
 endif()
@@ -123,6 +133,7 @@ if(APPLE)
         MACOSX_BUNDLE_GUI_IDENTIFIER     "dev.transcriptor.app"
         MACOSX_BUNDLE_BUNDLE_VERSION     "${PROJECT_VERSION}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_ICON_FILE          "transcriptor.icns"
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/src/platform/Info.plist.in")
 endif()
 

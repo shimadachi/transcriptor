@@ -65,6 +65,9 @@ summary.txt
 *.srt
 *.vtt
 
+# The asset scripts are Python
+__pycache__/
+
 # Editors / OS
 .vscode/
 .idea/

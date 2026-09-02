@@ -23,6 +23,25 @@ else()
             COMPONENT app)
 endif()
 
+# Desktop integration on Linux/BSD: the launcher and the icon the shell shows
+# for it (and, via StartupWMClass, for the running window). The scalable SVG is
+# what modern themes prefer; the PNG is there for the panels that still want a
+# bitmap. All three land under the install prefix, so they take effect once the
+# tarball is unpacked over ~/.local or /usr.
+if(NOT WIN32 AND NOT APPLE)
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/src/platform/transcriptor.desktop.in"
+                   "${CMAKE_CURRENT_BINARY_DIR}/transcriptor.desktop" @ONLY)
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/transcriptor.desktop"
+            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/applications"
+            COMPONENT app)
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/assets/logo-mark.svg"
+            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps"
+            RENAME "transcriptor.svg" COMPONENT app)
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/assets/logo-256.png"
+            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps"
+            RENAME "transcriptor.png" COMPONENT app)
+endif()
+
 # Backends built as shared libraries (a CUDA or Vulkan ggml backend can be one)
 # have to travel with the binary.
 if(BUILD_SHARED_LIBS)
