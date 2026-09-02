@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Transcriptor
+Comment=@PROJECT_DESCRIPTION@
+Comment[tr]=Çevrimdışı konuşma metne dökme + konuşmacı ayrımı + yerel LLM özeti
+Exec=transcriptor
+# Resolved against share/icons/hicolor by the icon theme, so no extension here.
+Icon=transcriptor
+Terminal=false
+Categories=AudioVideo;Audio;
+Keywords=transcription;speech;audio;whisper;subtitles;
+# GTK takes WM_CLASS from the program name, so the window matches this entry
+# and the shell shows the icon in the dock and the switcher.
+StartupWMClass=transcriptor
