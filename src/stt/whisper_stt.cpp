@@ -3,9 +3,13 @@
 #include "util/lang.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cstdint>
 #include <cstdio>
 #include <stdexcept>
 #include <thread>
+#include <unordered_map>
+#include <unordered_set>
 
 #include <whisper.h>
 
@@ -21,6 +25,117 @@ std::string trim(const std::string& s) {
     if (b == std::string::npos) return {};
     const auto e = s.find_last_not_of(" \t\r\n");
     return s.substr(b, e - b + 1);
+}
+
+// -- subtitle-credit hallucinations ---------------------------------------
+//
+// Whisper was trained largely on video paired with scraped subtitles, and a
+// large share of those subtitle files ended with a translator credit laid over
+// silence or an end card. That teaches a strong prior: near-silent audio at the
+// end of a clip -> emit the credit. Short recordings hit it hardest, because a
+// few seconds of speech is zero-padded to the encoder's fixed 30 s window, so
+// most of what the decoder sees is exactly the context those credits were
+// trained on. Turkish models land on "Altyazı M.K." almost every time.
+//
+// The decoding-side knobs don't reach this. The phrase is memorised, so it
+// decodes with high confidence and sails past both no_speech_thold and
+// logprob_thold; suppress_nst only masks symbols, and the credits are plain
+// words. Filtering the decoded text is the only thing that reliably catches it.
+
+// Reduces text to a comparison key: Turkish letters mapped to ASCII, case
+// dropped, and everything that isn't a letter or digit removed -- so
+// "Altyazı M.K.", "ALTYAZI: M.K." and "altyazi mk" all fold to "altyazimk".
+std::string fold(const std::string& s) {
+    // Keyed by the two UTF-8 bytes of each Turkish letter, both cases.
+    static const std::unordered_map<std::uint16_t, char> kTurkish = {
+        {0xC3A7, 'c'}, {0xC387, 'c'},   // ç Ç
+        {0xC49F, 'g'}, {0xC49E, 'g'},   // ğ Ğ
+        {0xC4B1, 'i'}, {0xC4B0, 'i'},   // ı İ
+        {0xC3B6, 'o'}, {0xC396, 'o'},   // ö Ö
+        {0xC59F, 's'}, {0xC59E, 's'},   // ş Ş
+        {0xC3BC, 'u'}, {0xC39C, 'u'},   // ü Ü
+    };
+
+    std::string out;
+    out.reserve(s.size());
+    for (std::size_t i = 0; i < s.size();) {
+        const auto c = static_cast<unsigned char>(s[i]);
+        if (c < 0x80) {
+            if (std::isalnum(c)) {
+                out += static_cast<char>(std::tolower(c));
+            }
+            ++i;
+            continue;
+        }
+        if (i + 1 < s.size()) {
+            const auto pair = static_cast<std::uint16_t>(
+                (c << 8) | static_cast<unsigned char>(s[i + 1]));
+            const auto it = kTurkish.find(pair);
+            if (it != kTurkish.end()) {
+                out += it->second;
+                i += 2;
+                continue;
+            }
+        }
+        // Any other non-ASCII character: drop the whole UTF-8 sequence.
+        for (++i; i < s.size() && (static_cast<unsigned char>(s[i]) & 0xC0) == 0x80; ++i) {
+        }
+    }
+    return out;
+}
+
+// Matched against the *whole* of a segment (or of a trailing run of words), never
+// as a substring of running speech -- "Altyazıları açar mısın?" has to survive.
+// Extend this list as new ones turn up; keep entries in folded form.
+bool is_credit(const std::string& key) {
+    static const std::unordered_set<std::string> kCredits = {
+        // Turkish
+        "altyazimk",
+        "altyazimkcom",
+        "altyaziauthor",
+        "aboneolmayiunutmayin",
+        "kanalimaaboneolmayiunutmayin",
+        "videoyubegendiyseniz",
+        "bubolumunbetimlemesi",
+        // English / generic subtitle-site credits
+        "subtitlesbytheamaraorgcommunity",
+        "subtitlesbyamaraorg",
+        "amaraorg",
+        "thanksforwatching",
+        "thankyouforwatching",
+        "pleasesubscribe",
+        "subscribetomychannel",
+    };
+    return !key.empty() && kCredits.count(key) > 0;
+}
+
+// Rebuilds text and end time after words have been removed.
+void resync_from_words(TranscriptSegment& seg) {
+    std::string text;
+    for (const Word& w : seg.words) text += w.text;
+    seg.text = trim(text);
+    if (!seg.words.empty()) seg.end = seg.words.back().end;
+}
+
+// Whisper often appends the credit to real speech in one segment, e.g.
+// "...görüşmek üzere. Altyazı M.K." -- trim just the trailing words so the
+// real text survives. Bounded because a credit is never long.
+void trim_trailing_credit(TranscriptSegment& seg) {
+    // Needs at least one word left over; a lone credit word is the whole-segment
+    // case, already handled before the token loop.
+    if (seg.words.size() < 2) return;
+
+    const std::size_t max_tail = std::min<std::size_t>(8, seg.words.size() - 1);
+    std::string tail;
+    for (std::size_t n = 1; n <= max_tail; ++n) {
+        tail = fold(seg.words[seg.words.size() - n].text) + tail;
+        if (is_credit(tail)) {
+            seg.words.erase(seg.words.end() - static_cast<std::ptrdiff_t>(n),
+                            seg.words.end());
+            resync_from_words(seg);
+            return;
+        }
+    }
 }
 
 int default_threads(int configured) {
@@ -169,6 +284,9 @@ std::vector<TranscriptSegment> WhisperTranscriber::transcribe(
         seg.text = trim(raw ? raw : "");
         if (seg.text.empty()) continue;
 
+        // A segment that is nothing but a credit is pure hallucination.
+        if (is_credit(fold(seg.text))) continue;
+
         // Rebuild words from tokens: whisper emits sub-word pieces, and a piece
         // that starts with a space begins a new word.
         const int n_tokens = whisper_full_n_tokens(impl_->ctx, i);
@@ -204,6 +322,11 @@ std::vector<TranscriptSegment> WhisperTranscriber::transcribe(
                 w.end   = seg.end;
             }
         }
+
+        // ...and a credit tacked onto the end of real speech loses just the tail.
+        trim_trailing_credit(seg);
+        if (seg.text.empty()) continue;
+
         out.push_back(std::move(seg));
     }
 
