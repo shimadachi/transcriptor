@@ -23,6 +23,16 @@ void limit(std::vector<float>* block) {
     }
 }
 
+// What take_mixed() does for two sources, for the one-source path: the gain is
+// a setting either way, and a recording made without a mic must not quietly
+// ignore it.
+void apply_gain(std::vector<float>* block, float gain) {
+    if (gain != 1.0f) {
+        for (float& v : *block) v *= gain;
+    }
+    limit(block);
+}
+
 float rms(const std::vector<float>& block) {
     if (block.empty()) return 0.0f;
     double acc = 0.0;
@@ -92,7 +102,8 @@ void Recorder::run_single() {
             level_.store(0.0f);
             continue;
         }
-        level_.store(rms(block));
+        apply_gain(&block, system_gain_);
+        level_.store(rms(block));   // the meter shows what is being kept
         append(block);
     }
 }
@@ -135,7 +146,7 @@ bool Recorder::take_mixed(std::vector<float>* out) {
         // stale mic backlog so it can't grow unbounded.
         if (carry_[0].empty()) return false;
         out->assign(carry_[0].begin(), carry_[0].end());
-        for (float& v : *out) v *= system_gain_;
+        apply_gain(out, system_gain_);   // limits too, as the mix below does
         carry_[0].clear();
         carry_[1].clear();
         return true;
@@ -185,7 +196,9 @@ std::vector<float> Recorder::stop() {
     // deliberately dropped, matching pause semantics).
     if (!was_paused) {
         if (!mic_capture_) {
-            append(capture_->drain());
+            std::vector<float> tail = capture_->drain();
+            apply_gain(&tail, system_gain_);
+            append(tail);
         } else {
             pump_carry();
             std::vector<float> mixed;
