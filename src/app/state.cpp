@@ -191,6 +191,14 @@ void AppState::start_recording(const audio::AudioSource& source,
             settings_.mic_gain);
         result_.reset();
         summary_.reset();
+        // The last take goes too. A recording too short to process leaves this
+        // buffer untouched, and Transcribe would then run on the take before
+        // it -- audio the user believes they replaced.
+        pending_audio_.reset();
+        // So does the context typed for the last summary. Only the Summarize
+        // button writes it, so without this an auto-summary of this session
+        // would carry the previous one's title, attendees and notes.
+        summary_context_.clear();
         session_dir_.clear();
     }
 
@@ -224,6 +232,7 @@ void AppState::cancel() {
         result_.reset();
         summary_.reset();
         pending_audio_.reset();
+        summary_context_.clear();
     }
     recording_.store(false);
     delete_session_dir();
@@ -265,6 +274,7 @@ bool AppState::process_file(const paths::fs::path& tmp_path,
         result_.reset();
         summary_.reset();
         pending_audio_.reset();
+        summary_context_.clear();
         session_dir_.clear();
     }
     set_phase("transcribe", -1.0, L("Decoding the file…", "Dosya çözülüyor…"));
