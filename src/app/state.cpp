@@ -253,6 +253,13 @@ void AppState::stop_and_process() {
 
 bool AppState::process_file(const paths::fs::path& tmp_path,
                             const std::string& orig_name) {
+    // Claim the job before the decode rather than after it. A long file takes
+    // its time in decode_file(), and until this flag is up the API sees an idle
+    // app: a second upload, or a recording, starts on top of the session state
+    // this call is about to clear. The server's own check is what tells the
+    // user; this one is the guarantee, so it leaves the phase alone.
+    if (processing_.exchange(true)) return false;
+
     {
         std::lock_guard<std::mutex> lock(mutex_);
         result_.reset();
@@ -269,6 +276,7 @@ bool AppState::process_file(const paths::fs::path& tmp_path,
         set_phase("error", -1.0,
                   std::string(L("Could not decode the file: ",
                                 "Dosya çözülemedi: ")) + e.what());
+        processing_.store(false);
         return false;
     }
     begin(std::move(audio), tmp_path, orig_name);
@@ -281,6 +289,9 @@ void AppState::begin(std::vector<float> audio, const paths::fs::path& original_f
 
     if (audio.size() < static_cast<std::size_t>(settings.samplerate / 2)) {
         set_phase("error", -1.0, L("The audio is too short or empty.", "Çok kısa/boş ses."));
+        // Nothing will run, so hand back the claim process_file() took before
+        // its decode. Harmless on the recording path, which never took one.
+        processing_.store(false);
         return;
     }
 
@@ -306,6 +317,7 @@ void AppState::begin(std::vector<float> audio, const paths::fs::path& original_f
     // The audio is saved and held either way; only the pipeline waits.
     if (!settings.auto_transcribe) {
         set_phase("ready");
+        processing_.store(false);   // the claim ends here; Transcribe takes its own
         return;
     }
 
