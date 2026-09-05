@@ -1,8 +1,11 @@
 #include "audio/capture.h"
 
 #include <atomic>
+#include <chrono>
 #include <deque>
+#include <future>
 #include <stdexcept>
+#include <thread>
 
 #include "audio/device_registry.h"
 #include "util/lang.h"
@@ -59,7 +62,7 @@ struct AudioCapture::Impl {
 
 AudioCapture::AudioCapture(AudioSource source, int samplerate)
     : source_(std::move(source)), samplerate_(samplerate),
-      impl_(std::make_unique<Impl>()) {}
+      impl_(std::make_shared<Impl>()) {}
 
 AudioCapture::~AudioCapture() { stop(); }
 
@@ -106,10 +109,30 @@ void AudioCapture::start() {
 void AudioCapture::stop() {
     if (!impl_) return;
     impl_->started.store(false);
-    if (impl_->device_ready) {
-        ma_device_uninit(&impl_->device);   // implies stop
-        impl_->device_ready = false;
-    }
+    if (!impl_->device_ready) return;
+    impl_->device_ready = false;
+
+    // ma_device_uninit() (which implies a stop) waits for the backend to
+    // acknowledge, and a device that has already gone -- a headset unplugged,
+    // a sink removed underneath us -- never does. That wait has no bound: it
+    // held the Stop request for ever, took the recording waiting behind it with
+    // it, and hung the app on the way out because the request thread never came
+    // back to the pool.
+    //
+    // So close it on a thread of its own and give it a moment. A live device
+    // returns immediately and everything is freed as usual. A dead one is
+    // abandoned -- one leaked ma_device against a lost recording -- and the
+    // detached thread keeps the shared Impl alive for as long as it holds it.
+    auto impl = impl_;
+    std::promise<void> closed;
+    std::future<void> done = closed.get_future();
+    std::thread([impl, p = std::move(closed)]() mutable {
+        ma_device_uninit(&impl->device);
+        p.set_value();
+    }).detach();
+
+    // Generous: a healthy backend answers in milliseconds.
+    done.wait_for(std::chrono::seconds(3));
 }
 
 std::vector<float> AudioCapture::drain() {

@@ -51,6 +51,9 @@ const STR = {
   'src.micNone':      {en: '+ No mic', tr: '+ Mik yok'},
   'saved.k':        {en: 'Saved →', tr: 'Kaydedildi →'},
   'saved.open':     {en: 'Open Folder', tr: 'Klasörü Aç'},
+  // Shown when saving was asked for and did not happen: the take is in memory
+  // only, and closing the window ends it.
+  'saved.failed':   {en: 'Not saved →', tr: 'Kaydedilemedi →'},
 
   // -- status / notices -----------------------------------------------------
   'st.browserPaused': {en: 'Browser recording paused…',

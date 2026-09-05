@@ -5,10 +5,12 @@
 #include <cctype>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <map>
 #include <memory>
 #include <optional>
+#include <random>
 #include <thread>
 #include <vector>
 
@@ -54,8 +56,50 @@ void send_error(httplib::Response& res, const std::string& message,
 
 json parse_body(const httplib::Request& req) {
     if (req.body.empty()) return json::object();
+    // JSON bodies only. Parsing whatever arrived regardless of Content-Type was
+    // half of what let a foreign page post one: text/plain keeps a cross-origin
+    // POST "simple", so the browser sends it with no preflight to fail.
+    const std::string type = req.get_header_value("Content-Type");
+    if (type.rfind("application/json", 0) != 0) return json::object();
     json j = json::parse(req.body, nullptr, /*allow_exceptions=*/false);
     return j.is_object() ? j : json::object();
+}
+
+// The header the page proves itself with, and the tag it reads it out of.
+constexpr const char* kTokenHeader = "X-Transcriptor-Token";
+constexpr const char* kTokenPlaceholder = "__CSRF_TOKEN__";
+
+// A fresh secret per run. Never persisted: a page from a previous run has no
+// business driving this one, and reloading it costs nothing.
+std::string random_token() {
+    static const char kDigits[] = "0123456789abcdef";
+    std::random_device rd;
+    std::uniform_int_distribution<int> pick(0, 15);
+    std::string out;
+    out.reserve(32);
+    for (int i = 0; i < 32; ++i) out += kDigits[pick(rd)];
+    return out;
+}
+
+// "http://127.0.0.1:5005" -> host "127.0.0.1". The port is deliberately not
+// checked, so reaching the UI as localhost when it bound 127.0.0.1 still works;
+// what matters is that a page on some other site is not one of these.
+bool is_loopback_origin(const std::string& origin) {
+    const auto scheme = origin.find("://");
+    if (scheme == std::string::npos) return false;
+    std::string host = origin.substr(scheme + 3);
+    const auto slash = host.find('/');
+    if (slash != std::string::npos) host = host.substr(0, slash);
+
+    if (!host.empty() && host.front() == '[') {   // [::1]:5005
+        const auto close = host.find(']');
+        if (close == std::string::npos) return false;
+        host = host.substr(1, close - 1);
+    } else {
+        const auto colon = host.rfind(':');
+        if (colon != std::string::npos) host = host.substr(0, colon);
+    }
+    return host == "127.0.0.1" || host == "localhost" || host == "::1";
 }
 
 std::string get_string(const json& j, const char* key, const std::string& fallback = "") {
@@ -144,12 +188,63 @@ bool Server::start() {
 
     svr.set_payload_max_length(kMaxUpload);
 
+    token_ = random_token();
+    const std::string token = token_;
+
+    // -- request authorization ---------------------------------------------
+    // Everything under /api/ that changes something was open to anything that
+    // could reach loopback -- which, on this machine, is every process and
+    // every page in the user's browser. A tab on an unrelated site could POST a
+    // JSON body as text/plain and the browser would send it; the reply was
+    // unreadable, but the change had already happened. Repointing output_dir
+    // and then calling /api/library/delete turned that into removal of any
+    // directory on disk.
+    //
+    // GET is left alone: it changes nothing, and the same-origin policy already
+    // stops a foreign page reading what comes back. That also keeps the plain
+    // <audio src="/api/library/audio?id=…"> element working.
+    svr.set_pre_routing_handler([token](const httplib::Request& req,
+                                        httplib::Response& res) {
+        using Result = httplib::Server::HandlerResponse;
+        if (req.method != "POST") return Result::Unhandled;
+
+        const std::string origin = req.get_header_value("Origin");
+        if (!origin.empty() && !is_loopback_origin(origin)) {
+            send_error(res, L("That request did not come from this app.",
+                              "Bu istek bu uygulamadan gelmedi."), 403);
+            return Result::Handled;
+        }
+        // The page reads this out of its own <meta> tag, which only same-origin
+        // script can reach. Sending it as a custom header also makes the
+        // request non-simple, so a cross-origin attempt has to clear a
+        // preflight that nothing here answers.
+        if (req.get_header_value(kTokenHeader) != token) {
+            send_error(res, L("This page is out of date — reload it.",
+                              "Bu sayfa güncel değil — yenileyin."), 403);
+            return Result::Handled;
+        }
+        return Result::Unhandled;
+    });
+
     // -- static ------------------------------------------------------------
-    auto serve_asset = [](const std::string& path, httplib::Response& res) {
+    auto serve_asset = [token](const std::string& path, httplib::Response& res) {
         const Asset* asset = find_asset(path);
         if (!asset) {
             res.status = 404;
             res.set_content("not found", "text/plain");
+            return;
+        }
+        if (path == "index.html") {
+            // Stamp this run's token into the page on the way out. Never
+            // cached: a token from a previous run is worse than none, since it
+            // would fail every button silently until the user reloaded.
+            std::string html(asset->data, asset->size);
+            const auto at = html.find(kTokenPlaceholder);
+            if (at != std::string::npos) {
+                html.replace(at, std::strlen(kTokenPlaceholder), token);
+            }
+            res.set_header("Cache-Control", "no-store");
+            res.set_content(html, asset->content_type);
             return;
         }
         res.set_content(asset->data, asset->size, asset->content_type);
@@ -228,6 +323,10 @@ bool Server::start() {
 
         try {
             state->start_recording(*source, mic);
+        } catch (const BusyError& e) {
+            // Lost the race with another start: a 400, like every other "busy"
+            // answer here, not a 500 that reads as a broken device.
+            return send_error(res, e.what());
         } catch (const std::exception& e) {
             return send_error(res, e.what(), 500);
         }
@@ -477,18 +576,24 @@ bool Server::start() {
     // over the audio that stopped short of it.
     svr.Post("/api/transcribe", [state](const httplib::Request&,
                                         httplib::Response& res) {
-        if (state->recording() || state->processing()) {
+        if (state->recording()) {
             return send_error(res, L("A job is already running.", "İşlem sürüyor."));
         }
-        state->start_transcribe();
-        if (state->phase() == "error") return send_error(res, state->message());
+        // No separate processing() check: start_transcribe() takes the job slot
+        // atomically and says no when it cannot. Checking here and starting
+        // there left a window two requests could both walk through.
+        std::string error;
+        if (!state->start_transcribe(&error)) return send_error(res, error);
         send_json(res, json{{"ok", true}});
     });
 
     // -- summarize ---------------------------------------------------------
     svr.Post("/api/summarize", [state](const httplib::Request& req,
                                        httplib::Response& res) {
-        if (state->processing()) {
+        // Recording counts as busy here too: stopping a take mid-summary would
+        // find the job slot taken and have to park the audio instead of
+        // transcribing it, which is a worse answer than "wait a moment".
+        if (state->recording()) {
             return send_error(res, L("A job is already running.", "İşlem sürüyor."));
         }
 
@@ -511,7 +616,11 @@ bool Server::start() {
             context += parts[i];
         }
 
-        state->start_summarize(context, trim(get_string(body, "template")));
+        std::string error;
+        if (!state->start_summarize(context, trim(get_string(body, "template")),
+                                    &error)) {
+            return send_error(res, error);
+        }
         send_json(res, json{{"ok", true}});
     });
 
@@ -754,7 +863,10 @@ bool Server::start() {
                                         httplib::Response& res) {
         const json body = parse_body(req);
         try {
-            auto models = state->list_llm_models(get_string(body, "llm_base_url"));
+            // Both come from the open settings form, which may not have been
+            // saved yet -- the backend as much as the URL.
+            auto models = state->list_llm_models(get_string(body, "llm_backend"),
+                                                 get_string(body, "llm_base_url"));
             send_json(res, json{{"models", models}});
         } catch (const std::exception& e) {
             // 200 with an error field, matching the Flask behaviour the UI expects.

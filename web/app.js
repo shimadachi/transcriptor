@@ -20,8 +20,18 @@ function toast(msg) {
   setTimeout(() => t.classList.remove('on'), 2400);
 }
 async function api(p, o) { return (await fetch(p, o)).json(); }
+
+// This run's authorization, stamped into the page by the server. Every request
+// that changes something carries it: loopback is not a boundary on its own, so
+// without it any page in the browser could drive this app behind the user's
+// back. A custom header also forces a CORS preflight on anything cross-origin,
+// which nothing here answers.
+const CSRF = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
+function authHeaders(extra) {
+  return Object.assign({'X-Transcriptor-Token': CSRF}, extra || {});
+}
 async function post(p, b) {
-  return api(p, {method:'POST', headers:{'Content-Type':'application/json'},
+  return api(p, {method:'POST', headers: authHeaders({'Content-Type':'application/json'}),
     body: b ? JSON.stringify(b) : null});
 }
 function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -315,8 +325,10 @@ async function poll() {
   $('recBtn').title = rec ? t('rec.stop') : t('rec.start');
   $('recBtn').setAttribute('aria-pressed', rec ? 'true' : 'false');
 
-  const busy = rec || s.processing;
-  $('recBtn').disabled = s.processing;   // only the models can't be interrupted
+  const busy = rec || s.processing || browserStarting;
+  // Only the models can't be interrupted — and a capture that is still asking
+  // for permission, which has nothing to stop yet.
+  $('recBtn').disabled = s.processing || browserStarting;
   $('pauseBtn').disabled = !rec;
   $('pauseBtn').textContent = paused ? t('src.resume') : t('src.pause');
   $('pauseBtn').classList.toggle('on', paused);
@@ -333,18 +345,17 @@ async function poll() {
   $('txBtn').disabled = busy || !s.has_audio;
   $('sumBtn').disabled = busy || !s.has_result;
 
-  // Audio is waiting and nothing has been transcribed yet — say so where the
-  // transcript will appear.
-  if (s.has_audio && !s.has_result && !s.processing) {
-    const el = $('transcript');
-    const empty = el.querySelector('.empty');
-    if (empty) empty.textContent = t('tx.waiting');
-  }
-
   // saved output location
   const saved = $('savedRow');
   if (s.output_dir) { saved.style.display = 'flex'; $('savedPath').textContent = s.output_dir; }
   else saved.style.display = 'none';
+
+  // …and what could not be written. Stays up until the next take: a recording
+  // that only exists in memory is one the user loses by closing the window, so
+  // this must not be a toast that scrolls away unseen.
+  const serr = $('saveErr');
+  if (s.save_error) { serr.style.display = 'flex'; $('saveErrMsg').textContent = s.save_error; }
+  else serr.style.display = 'none';
 
   // First-run model notices. Both downloads happen automatically when the
   // pipeline first needs them, so this is informational, not a blocker.
@@ -363,14 +374,28 @@ async function poll() {
   // Watch the revision, not has_result. Transcribing the same audio again never
   // lowers that flag, so a run-to-run change was invisible and the panel kept
   // showing the previous text until a summary happened to land.
-  const resRev = s.result_rev || 0;
+  //
+  // The revision now moves when a result is *cleared* as well — starting a new
+  // recording or upload bumps it — and reloading is no longer conditional on
+  // there being something to load. Skipping the reload when has_result was
+  // false is what left the last session's transcript and summary on screen
+  // beside the new session's audio, indefinitely with auto-transcribe off.
+  const resRev = s.result_rev || 0, sumRev = s.summary_rev || 0;
   const freshResult  = resRev !== prevResultRev;
-  const freshSummary = (s.summary_rev || 0) !== prevSummaryRev;
+  const freshSummary = sumRev !== prevSummaryRev;
 
-  if (freshResult) { prevResultRev = resRev; if (s.has_result) await loadResult(); }
-  // Re-render on every NEW summary (rev changes), even if one already existed.
-  const rev = s.summary_rev || 0;
-  if (rev !== prevSummaryRev) { prevSummaryRev = rev; if (s.has_summary) await loadResult(); }
+  if (freshResult || freshSummary) {
+    prevResultRev = resRev; prevSummaryRev = sumRev;
+    await loadResult();   // renders the empty state too, so a cleared panel clears
+  }
+
+  // Nothing transcribed yet: say what the panel is waiting for. Runs after the
+  // reload above, so a panel cleared on this same tick gets the right line
+  // instead of the library's "no transcript found".
+  if (!s.has_result && !s.processing) {
+    const empty = $('transcript').querySelector('.empty');
+    if (empty) empty.textContent = s.has_audio ? t('tx.waiting') : t('tx.empty');
+  }
 
   // A finished run just wrote a folder; refresh the list if it is on screen.
   if ((freshResult || freshSummary) && !$('viewLibrary').hidden) loadLibrary();
@@ -461,7 +486,8 @@ $('fileInput').onchange = async () => {
   toast(t('toast.uploading') + f.name);
   const fd = new FormData(); fd.append('file', f);
   try {
-    const r = await (await fetch('/api/process_file', {method:'POST', body: fd})).json();
+    const r = await (await fetch('/api/process_file',
+      {method:'POST', headers: authHeaders(), body: fd})).json();
     if (r.error) toast(r.error);
   } catch (e) { toast(t('toast.uploadErr')); }
   $('fileInput').value = '';
@@ -936,7 +962,11 @@ $('settingsBtn').onclick = openSettings;
 $('cancelSettings').onclick = () => $('modalBg').classList.remove('on');
 $('modalBg').onclick = (e) => { if (e.target === $('modalBg')) $('modalBg').classList.remove('on'); };
 $('fetchModels').onclick = async () => {
-  const d = await post('/api/llm/models', {llm_base_url: $('s_llmurl').value});
+  // Send the backend along with the URL. Without it the server fell back to the
+  // saved one, so picking "Remote server" and pressing Fetch before saving
+  // listed the .gguf files on disk and never contacted the server at all.
+  const d = await post('/api/llm/models', {llm_backend: $('s_llmbackend').value,
+                                           llm_base_url: $('s_llmurl').value});
   if (d.error || !d.models.length) { toast(d.error || t('toast.noModel')); return; }
   const sel = $('s_llmmodel'); sel.innerHTML = '';
   d.models.forEach(m => { const o = document.createElement('option'); o.value = m; o.textContent = m; sel.appendChild(o); });
@@ -985,6 +1015,11 @@ $('saveSettings').onclick = async () => {
     system_gain: parseFloat($('s_sysgain').value),
     mic_gain: parseFloat($('s_micgain').value),
   });
+  // Nothing was persisted if the server said no — it refuses while a job runs.
+  // Closing the modal and reporting "Settings saved" regardless threw away every
+  // edit in it, template prompts included, with nothing on screen to say so.
+  if (r.error) { toast(r.error); return; }
+
   // Already persisted by the POST above, so only apply them locally.
   if ($('s_uilang').value !== LANG) setLang($('s_uilang').value, false);
   if ($('s_theme').value !== themePref) applyTheme($('s_theme').value, false);
@@ -1006,7 +1041,11 @@ $('saveSettings').onclick = async () => {
 // uploads to the same offline pipeline. Needed on Windows (and any container
 // that can't reach host audio). getDisplayMedia/getUserMedia need a secure
 // context: use http://localhost or HTTPS.
-let browserRec = false, browserPaused = false, _cancelled = false;
+// browserStarting covers the gap between the click and the permission answer.
+// browserRec cannot: it is only true once the user has granted, and poll() puts
+// the Record button back within 700ms because the *server* is idle — so a
+// second click during the prompt started a second capture over the first.
+let browserRec = false, browserStarting = false, browserPaused = false, _cancelled = false;
 let _startTs = 0, _pausedMs = 0, _pauseTs = 0;
 let _mr = null, _chunks = [], _streams = [], _actx = null, _analyser = null, _abuf = null;
 
@@ -1036,49 +1075,66 @@ function _cleanupStreams() {
   _analyser = null; _abuf = null;
 }
 async function startBrowserCapture(kind) {
-  if (browserRec) return;
+  if (browserRec || browserStarting) return;
   if (!navigator.mediaDevices || !window.MediaRecorder) {
     toast(t('toast.noBrowserRec'));
     return;
   }
-  _streams = [];
+  // Set synchronously, before the first await, so a second click cannot get
+  // past the guard above while this one waits on the permission prompt.
+  browserStarting = true;
+
+  // This attempt's streams stay local until it becomes the live capture. They
+  // used to go straight into the shared _streams, where a second attempt's
+  // reset orphaned the first one's tracks with the microphone still open.
+  const streams = [];
+  const drop = () => streams.forEach(s => s.getTracks().forEach(t => t.stop()));
+  let actx = null;
   try {
-    if (kind === 'mic' || kind === 'both') {
-      _streams.push(await navigator.mediaDevices.getUserMedia(
-        {audio: {echoCancellation: false, noiseSuppression: false}}));
-    }
-    if (kind === 'system' || kind === 'both') {
-      const ds = await navigator.mediaDevices.getDisplayMedia({video: true, audio: true});
-      ds.getVideoTracks().forEach(t => t.stop());  // we only want the audio
-      _streams.push(ds);
-    }
-  } catch (e) { toast(t('toast.noPermission')); _cleanupStreams(); return; }
+    try {
+      if (kind === 'mic' || kind === 'both') {
+        streams.push(await navigator.mediaDevices.getUserMedia(
+          {audio: {echoCancellation: false, noiseSuppression: false}}));
+      }
+      if (kind === 'system' || kind === 'both') {
+        const ds = await navigator.mediaDevices.getDisplayMedia({video: true, audio: true});
+        ds.getVideoTracks().forEach(t => t.stop());  // we only want the audio
+        streams.push(ds);
+      }
+    } catch (e) { toast(t('toast.noPermission')); drop(); return; }
 
-  // Mix every captured stream into one track (mic + system together).
-  _actx = new (window.AudioContext || window.webkitAudioContext)();
-  const dest = _actx.createMediaStreamDestination();
-  let hasAudio = false;
-  _streams.forEach(s => {
-    if (s.getAudioTracks().length) {
-      _actx.createMediaStreamSource(s).connect(dest); hasAudio = true;
+    // Mix every captured stream into one track (mic + system together).
+    actx = new (window.AudioContext || window.webkitAudioContext)();
+    const dest = actx.createMediaStreamDestination();
+    let hasAudio = false;
+    streams.forEach(s => {
+      if (s.getAudioTracks().length) {
+        actx.createMediaStreamSource(s).connect(dest); hasAudio = true;
+      }
+    });
+    if (!hasAudio) {
+      toast(t('toast.noAudio'));
+      drop(); try { actx.close(); } catch {} return;
     }
-  });
-  if (!hasAudio) {
-    toast(t('toast.noAudio'));
-    _cleanupStreams(); return;
+
+    // Past every await and every way out: this attempt is the capture now, so
+    // publish its resources into the globals the rest of the page works with.
+    _streams = streams; _actx = actx;
+    _analyser = _actx.createAnalyser(); _analyser.fftSize = 512;
+    _abuf = new Uint8Array(_analyser.fftSize);
+    _actx.createMediaStreamSource(dest.stream).connect(_analyser);
+
+    _chunks = [];
+    const mime = _pickMime();
+    _mr = new MediaRecorder(dest.stream, mime ? {mimeType: mime} : undefined);
+    _mr.ondataavailable = e => { if (e.data && e.data.size) _chunks.push(e.data); };
+    _mr.onstop = onBrowserStop;
+    _mr.start(1000);
+    browserRec = true; browserPaused = false; _cancelled = false;
+    _startTs = performance.now(); _pausedMs = 0; _pauseTs = 0;
+  } finally {
+    browserStarting = false;
   }
-  _analyser = _actx.createAnalyser(); _analyser.fftSize = 512;
-  _abuf = new Uint8Array(_analyser.fftSize);
-  _actx.createMediaStreamSource(dest.stream).connect(_analyser);
-
-  _chunks = [];
-  const mime = _pickMime();
-  _mr = new MediaRecorder(dest.stream, mime ? {mimeType: mime} : undefined);
-  _mr.ondataavailable = e => { if (e.data && e.data.size) _chunks.push(e.data); };
-  _mr.onstop = onBrowserStop;
-  _mr.start(1000);
-  browserRec = true; browserPaused = false; _cancelled = false;
-  _startTs = performance.now(); _pausedMs = 0; _pauseTs = 0;
   poll();
 }
 function toggleBrowserPause() {
@@ -1107,7 +1163,8 @@ async function onBrowserStop() {
   const fd = new FormData(); fd.append('file', blob, 'recording.' + ext);
   toast(t('toast.processing'));
   try {
-    const r = await (await fetch('/api/process_file', {method: 'POST', body: fd})).json();
+    const r = await (await fetch('/api/process_file',
+      {method: 'POST', headers: authHeaders(), body: fd})).json();
     if (r.error) toast(r.error);
   } catch (e) { toast(t('toast.uploadErr')); }
 }

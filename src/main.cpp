@@ -164,7 +164,8 @@ int run_check(const Settings& settings) {
 
     app::AppState probe(settings);
     try {
-        for (const std::string& m : probe.list_llm_models("")) {
+        // No overrides: --check reports on the configuration as saved.
+        for (const std::string& m : probe.list_llm_models("", "")) {
             std::printf("  -> %s\n", m.c_str());
         }
     } catch (const std::exception& e) {

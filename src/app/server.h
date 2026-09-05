@@ -35,6 +35,10 @@ private:
     AppState*             state_;
     std::string           host_;
     int                   port_;
+    // Minted by start(), stamped into index.html, and demanded back on every
+    // mutating request. Loopback is not a boundary on its own: anything on this
+    // machine can reach it, including a page the user did not open.
+    std::string           token_;
     std::unique_ptr<Impl> impl_;
 };
 

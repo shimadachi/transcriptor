@@ -335,6 +335,10 @@ select.grow { flex: 1; }
 .saved-k { color: var(--ok); letter-spacing: .06em; }
 .saved code { color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   flex: 1; min-width: 0; }
+/* The same row, for the take that was asked to be saved and could not. Wraps
+   rather than ellipsizes: the path and the reason are both the message. */
+.save-err .saved-k { color: var(--rec); }
+.save-err code { white-space: normal; overflow: visible; color: var(--rec-2); }
 
 /* ---------- transcript ---------- */
 /* Same reasoning as .src-row: a long template name must push the buttons onto

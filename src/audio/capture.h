@@ -38,9 +38,12 @@ public:
 private:
     struct Impl;
 
-    AudioSource           source_;
-    int                   samplerate_;
-    std::unique_ptr<Impl> impl_;
+    AudioSource source_;
+    int         samplerate_;
+    // Shared, not unique: closing a device that has gone away can block for
+    // ever inside miniaudio, and stop() abandons it to a detached thread rather
+    // than wait. That thread is still holding this, so it has to outlive us.
+    std::shared_ptr<Impl> impl_;
 };
 
 }  // namespace transcriptor::audio

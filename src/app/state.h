@@ -5,9 +5,11 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <thread>
 
@@ -26,6 +28,14 @@ namespace transcriptor::app {
 
 // Default status line per phase, in the UI's language ("tr" or "en").
 std::string phase_message(const std::string& phase, const std::string& lang);
+
+// "The app is already doing that." Separate from a device or filesystem failure
+// so the API can answer 400 (come back in a moment) rather than 500 (something
+// is broken): the two read very differently to whoever gets the message.
+class BusyError : public std::runtime_error {
+public:
+    explicit BusyError(const std::string& what) : std::runtime_error(what) {}
+};
 
 class AppState {
 public:
@@ -51,11 +61,16 @@ public:
 
     // -- transcribe -------------------------------------------------------
     // Runs the pipeline over the audio that is waiting because
-    // settings.auto_transcribe is off. Sets the error phase when nothing waits.
-    void start_transcribe();
+    // settings.auto_transcribe is off. Returns false and fills `error` when
+    // nothing waits or a job already holds the worker; the phase is left alone
+    // in that case, so a request that loses the race cannot overwrite the
+    // status line of the job that won it.
+    bool start_transcribe(std::string* error);
 
     // -- summarize --------------------------------------------------------
-    void start_summarize(const std::string& context, const std::string& template_id);
+    // Same contract as start_transcribe().
+    bool start_summarize(const std::string& context, const std::string& template_id,
+                         std::string* error);
 
     // -- settings ---------------------------------------------------------
     Settings settings_copy() const;
@@ -80,8 +95,12 @@ public:
     std::string     message() const;
     paths::fs::path session_dir() const;
 
-    // Backend health, for the settings panel's "fetch models" button.
-    std::vector<std::string> list_llm_models(const std::string& base_url_override);
+    // Backend health, for the settings panel's "fetch models" button. Both
+    // overrides come from the still-unsaved settings form: the backend has to
+    // travel with the URL, or picking "Remote server" and pressing Fetch before
+    // saving would list the GGUF files on disk instead of the server's models.
+    std::vector<std::string> list_llm_models(const std::string& backend_override,
+                                             const std::string& base_url_override);
 
     // -- summarizer model download ----------------------------------------
     // Downloads a catalog GGUF into the models dir in the background and, once
@@ -106,8 +125,12 @@ private:
 
     using AudioBuffer = std::shared_ptr<const std::vector<float>>;
 
+    // `device_error` is non-empty when the capture died mid-take: the audio is
+    // still saved and held, but nothing runs on it unasked. `claimed` says the
+    // caller already holds the job slot (see claim_job).
     void begin(std::vector<float> audio, const paths::fs::path& original_file,
-               const std::string& original_name);
+               const std::string& original_name, const std::string& device_error,
+               bool claimed);
     void process_worker(AudioBuffer audio);
     void do_summarize();
 
@@ -116,7 +139,28 @@ private:
     void            delete_session_dir();
     void            save_transcript();
 
-    void join_worker();
+    // A summary belongs to the transcript it was made from. Drop it -- from
+    // memory and from the folder -- when that transcript is replaced.
+    void discard_summary();
+
+    // First failure wins: the folder that could not be created explains every
+    // write that follows it, so later errors would only bury it.
+    void note_save_error(const std::string& message);
+    void clear_save_error();
+
+    // One job at a time. Every path that starts a worker takes this slot first,
+    // so the check and the claim cannot be split by another request thread:
+    // two callers passing a plain processing() test would both go on to assign
+    // worker_, and assigning over a joinable thread calls std::terminate.
+    bool claim_job();
+
+    // Run `body` on the worker thread, releasing the job slot when it returns.
+    // Owns the thread handle, so joining the previous worker and installing the
+    // next one happen under job_mutex_ and can never interleave.
+    void start_job(std::function<void()> body);
+
+    void join_worker();          // takes job_mutex_
+    void join_worker_locked();   // caller holds job_mutex_
     void join_download();
 
     // The rebuild itself, with mutex_ already held.
@@ -131,6 +175,11 @@ private:
     void release_backends();
 
     mutable std::mutex mutex_;
+
+    // Guards worker_ alone -- the handle, not the state the job touches. Never
+    // taken while mutex_ is held, so the two can never deadlock against each
+    // other; a running job takes mutex_ freely without ever wanting this one.
+    std::mutex job_mutex_;
 
     Settings   settings_;          // guarded by mutex_
     DeviceInfo device_;            // guarded by mutex_
@@ -166,6 +215,12 @@ private:
 
     std::string summary_context_;
     std::string summary_template_;
+
+    // Why the last take could not be written to disk, "" when it could. The
+    // pipeline runs either way -- the audio is still in memory -- but a phase
+    // of "Ready" with nothing saved is a recording the user will lose on exit,
+    // so the page says so.
+    std::string save_error_;   // guarded by mutex_
 
     // Summarizer model download, guarded by mutex_ except for the flag.
     std::string dl_model_;         // catalog id, "" when never started

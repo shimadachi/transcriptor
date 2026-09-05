@@ -24,6 +24,11 @@ namespace {
 // template's own tokens, and the answer we are about to generate.
 constexpr int kPromptMargin = 512;
 
+// How many times the section notes may be reduced before the merge. Three
+// passes take an 8k model from roughly 500 sections to one; beyond that the
+// notes are not shrinking and another pass would only burn tokens.
+constexpr int kMaxReducePasses = 3;
+
 std::once_flag g_backend_once;
 
 void quiet_log(ggml_log_level level, const char* text, void* /*user_data*/) {
@@ -176,37 +181,75 @@ public:
         // Too long for one pass: summarize chunk by chunk, then summarize the
         // notes. Keeps a two-hour meeting usable on an 8k-context model.
         const auto chunks = split_transcript(transcript, budget_chars);
-        std::string notes;
-        for (std::size_t i = 0; i < chunks.size(); ++i) {
-            if (abort_.load()) {
-                throw SummarizerError(L("Summarizing was cancelled.",
-                                        "Özetleme iptal edildi."));
+        std::string notes = summarize_sections(work, chunks, req.language,
+                                               L("Long recording: summarizing part ",
+                                                 "Uzun kayıt: bölüm "), progress);
+
+        // Reduce until the merge actually fits. Every section can emit up to
+        // max_tokens_, so enough of them overflow the window on the merge
+        // alone -- and the old code only found out inside generate(), after
+        // every section had already been paid for. Each pass is the same work
+        // one level up, so the notes shrink geometrically; the cap is there
+        // because a pass that cannot split is a pass that cannot shrink.
+        SummaryRequest final_req = work;
+        final_req.context.clear();   // already folded into the notes
+        for (int pass = 0; pass < kMaxReducePasses; ++pass) {
+            final_req.transcript = notes;
+            if (count_tokens(build_user_message(final_req)) <= prompt_budget_tokens) {
+                break;
             }
-            if (progress) {
-                progress(L("Long recording: summarizing part ",
-                           "Uzun kayıt: bölüm ") + std::to_string(i + 1) + "/" +
-                             std::to_string(chunks.size()) +
-                             L("…", " özetleniyor…"),
-                         static_cast<double>(i) / static_cast<double>(chunks.size()));
-            }
-            SummaryRequest part = work;
-            part.transcript = chunks[i];
-            notes += generate(partial_prompt(req.language),
-                              build_user_message(part), nullptr);
-            notes += "\n\n";
+            const auto groups = split_transcript(notes, budget_chars);
+            if (groups.size() <= 1) break;   // generate() reports what is left
+
+            const std::size_t before = notes.size();
+            notes = summarize_sections(work, groups, req.language,
+                                       L("Condensing the notes: part ",
+                                         "Notlar yoğunlaştırılıyor: bölüm "),
+                                       progress);
+            // A pass is only worth repeating if it actually shrank something.
+            // A verbose model summarizing short notes can hand back more than
+            // it was given; looping on that burns the user's time to arrive at
+            // the same error. Stop and let generate() say what does not fit.
+            if (notes.size() >= before) break;
         }
+        final_req.transcript = notes;
 
         if (progress) {
             progress(L("Merging the section notes…",
                        "Bölüm notları birleştiriliyor…"), -1.0);
         }
-        SummaryRequest final_req = work;
-        final_req.transcript = notes;
-        final_req.context.clear();   // already folded into the notes
         return generate(system, build_user_message(final_req), progress);
     }
 
 private:
+    // Note-taking pass over one list of sections. Shared by the first pass over
+    // the transcript and by every reduction of the notes that follows.
+    std::string summarize_sections(const SummaryRequest& work,
+                                   const std::vector<std::string>& sections,
+                                   const std::string& language,
+                                   const std::string& label,
+                                   const ProgressFn& progress) {
+        std::string notes;
+        for (std::size_t i = 0; i < sections.size(); ++i) {
+            if (abort_.load()) {
+                throw SummarizerError(L("Summarizing was cancelled.",
+                                        "Özetleme iptal edildi."));
+            }
+            if (progress) {
+                progress(label + std::to_string(i + 1) + "/" +
+                             std::to_string(sections.size()) +
+                             L("…", " özetleniyor…"),
+                         static_cast<double>(i) / static_cast<double>(sections.size()));
+            }
+            SummaryRequest part = work;
+            part.transcript = sections[i];
+            notes += generate(partial_prompt(language), build_user_message(part),
+                              nullptr);
+            notes += "\n\n";
+        }
+        return notes;
+    }
+
     static std::string partial_prompt(const std::string& language) {
         if (language == "tr") {
             return "Uzun bir kaydın bir bölümünü alıyorsun. Bu bölümdeki "

@@ -3,6 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Stamped per run by the server; sent back on every mutating request. Only
+       same-origin script can read it, which is what makes it an authorization
+       rather than decoration. -->
+  <meta name="csrf-token" content="__CSRF_TOKEN__">
   <title data-i18n="app.title">Transcriptor · audio · text · summary</title>
   <link rel="stylesheet" href="/static/fonts.css">
   <link rel="stylesheet" href="/static/style.css">
@@ -78,6 +82,10 @@
         </div>
       </div>
       <div id="diarHint" class="hint" style="display:none;"></div>
+      <div id="saveErr" class="saved save-err" style="display:none;">
+        <span class="saved-k" data-i18n="saved.failed">Not saved →</span>
+        <code id="saveErrMsg"></code>
+      </div>
       <div id="savedRow" class="saved" style="display:none;">
         <span class="saved-k" data-i18n="saved.k">Saved →</span>
         <code id="savedPath"></code>

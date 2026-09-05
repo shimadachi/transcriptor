@@ -2,6 +2,8 @@
 #include "util/lang.h"
 
 #include <algorithm>
+#include <atomic>
+#include <mutex>
 
 #include <nlohmann/json.hpp>
 
@@ -48,9 +50,21 @@ public:
           timeout_(s.llm_timeout), temperature_(s.llm_temperature),
           max_tokens_(s.llm_max_tokens) {}
 
+    // Closing the window has to be able to end a request that is in flight.
+    // Without this the backend inherited the base class's do-nothing abort:
+    // shutdown() asked, then joined a worker parked inside the POST below, and
+    // the process outlived its own window by up to llm_timeout -- ten minutes
+    // by default, an hour at the top of the range.
+    void request_abort() override {
+        abort_.store(true);
+        std::lock_guard<std::mutex> lock(client_mutex_);
+        if (active_) active_->stop();   // closes the socket; the call returns
+    }
+
     std::vector<std::string> list_models() override {
         auto client = make_client(10.0);
         if (!client) throw SummarizerError(tls_error());
+        ActiveClient live(this, client.get());
 
         auto res = client->Get(endpoint_.prefix + "/models", headers());
         if (!res) {
@@ -109,6 +123,7 @@ public:
 
     std::string summarize(const SummaryRequest& req,
                           const ProgressFn& progress) override {
+        abort_.store(false);
         if (build_user_message(req).empty()) {
             throw SummarizerError(L("There is no text to summarize.",
                                     "Özetlenecek metin yok."));
@@ -141,10 +156,17 @@ public:
 
         auto client = make_client(timeout_);
         if (!client) throw SummarizerError(tls_error());
+        ActiveClient live(this, client.get());
 
         auto res = client->Post(endpoint_.prefix + "/chat/completions", headers(),
                                 payload.dump(), "application/json");
         if (!res) {
+            // A socket closed by request_abort() lands here too; say which it
+            // was, rather than reporting the shutdown as a server failure.
+            if (abort_.load()) {
+                throw SummarizerError(L("Summarizing was cancelled.",
+                                        "Özetleme iptal edildi."));
+            }
             throw SummarizerError(L("The summary request failed: ",
                                     "Özetleme isteği başarısız: ") +
                                   httplib::to_string(res.error()));
@@ -194,6 +216,30 @@ public:
     }
 
 private:
+    // Publishes the client for the length of one call, so request_abort() has
+    // something to close and never a dangling pointer after it returns.
+    class ActiveClient {
+    public:
+        ActiveClient(OpenAIBackend* owner, httplib::Client* client)
+            : owner_(owner) {
+            std::lock_guard<std::mutex> lock(owner_->client_mutex_);
+            owner_->active_ = client;
+            // An abort that landed while this call was being set up would
+            // otherwise be missed entirely; stop() now, and the request fails
+            // immediately instead of running to its timeout.
+            if (owner_->abort_.load()) client->stop();
+        }
+        ~ActiveClient() {
+            std::lock_guard<std::mutex> lock(owner_->client_mutex_);
+            owner_->active_ = nullptr;
+        }
+        ActiveClient(const ActiveClient&) = delete;
+        ActiveClient& operator=(const ActiveClient&) = delete;
+
+    private:
+        OpenAIBackend* owner_;
+    };
+
     httplib::Headers headers() const {
         return {{"Authorization", "Bearer " + api_key_},
                 {"Content-Type", "application/json"}};
@@ -226,6 +272,12 @@ private:
     float       temperature_;
     int         max_tokens_;
     Endpoint    endpoint_;
+
+    // The request in flight, and the flag that says a stop was asked for. Both
+    // are touched from the shutdown thread while the worker sits in the call.
+    std::mutex        client_mutex_;
+    httplib::Client*  active_ = nullptr;
+    std::atomic<bool> abort_{false};
 };
 
 }  // namespace

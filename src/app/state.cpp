@@ -83,7 +83,37 @@ void AppState::shutdown() {
 }
 
 void AppState::join_worker() {
+    std::lock_guard<std::mutex> lock(job_mutex_);
+    join_worker_locked();
+}
+
+void AppState::join_worker_locked() {
     if (worker_.joinable()) worker_.join();
+}
+
+bool AppState::claim_job() {
+    // Nothing new starts once the app is on its way out: shutdown() joins the
+    // worker, and a job admitted after that join would never be waited for.
+    if (shutting_down_.load()) return false;
+    return !processing_.exchange(true);
+}
+
+void AppState::start_job(std::function<void()> body) {
+    std::lock_guard<std::mutex> lock(job_mutex_);
+    // The previous job lowered processing_ before its thread finished unwinding,
+    // so there can still be one to join -- but only ever one, and only ours:
+    // claim_job() let exactly one caller get here.
+    join_worker_locked();
+    claim_backends();
+    worker_ = std::thread([this, body = std::move(body)] {
+        try {
+            body();
+        } catch (const std::exception& e) {
+            set_phase("error", -1.0, e.what());
+        }
+        release_backends();
+        processing_.store(false);
+    });
 }
 
 void AppState::join_download() {
@@ -181,6 +211,19 @@ void AppState::release_backends() {
 
 void AppState::start_recording(const audio::AudioSource& source,
                                const std::optional<audio::AudioSource>& mic_source) {
+    // Claim the recorder before anything else. Two starts landing together
+    // would otherwise both build a Recorder, both join the worker, and the
+    // second would drop the first's device on the floor mid-take.
+    if (recording_.exchange(true)) {
+        throw BusyError(L("Already recording.", "Zaten kayıtta."));
+    }
+    // A job still holds the pipeline; the recording it is working on must not
+    // be cleared out from under it.
+    if (processing_.load()) {
+        recording_.store(false);
+        throw BusyError(L("A job is already running.", "İşlem sürüyor."));
+    }
+
     join_worker();
 
     std::unique_ptr<audio::Recorder> recorder;
@@ -191,6 +234,12 @@ void AppState::start_recording(const audio::AudioSource& source,
             settings_.mic_gain);
         result_.reset();
         summary_.reset();
+        // Bump both revisions on the way out. The page watches these to know
+        // when to re-read /api/result; without a bump, clearing a result looks
+        // exactly like nothing having happened, and the previous session's
+        // transcript stays on screen next to this session's recording.
+        ++result_rev_;
+        ++summary_rev_;
         // The last take goes too. A recording too short to process leaves this
         // buffer untouched, and Transcribe would then run on the take before
         // it -- audio the user believes they replaced.
@@ -200,15 +249,22 @@ void AppState::start_recording(const audio::AudioSource& source,
         // would carry the previous one's title, attendees and notes.
         summary_context_.clear();
         session_dir_.clear();
+        save_error_.clear();   // a new take, and a new chance to write it
     }
 
-    recorder->start();   // throws on failure; state stays clean
+    try {
+        recorder->start();
+    } catch (...) {
+        // Hand the claim back before the message reaches the user, or a device
+        // that failed to open would leave the app permanently "recording".
+        recording_.store(false);
+        throw;
+    }
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
         recorder_ = std::move(recorder);
     }
-    recording_.store(true);
     set_phase("recording");
 }
 
@@ -231,8 +287,11 @@ void AppState::cancel() {
         }
         result_.reset();
         summary_.reset();
+        ++result_rev_;
+        ++summary_rev_;
         pending_audio_.reset();
         summary_context_.clear();
+        save_error_.clear();
     }
     recording_.store(false);
     delete_session_dir();
@@ -253,11 +312,14 @@ void AppState::stop_and_process() {
     const std::string err = recorder->error();
     recorder.reset();
 
-    if (!err.empty()) {
-        set_phase("error", -1.0, L("Audio error: ", "Ses hatası: ") + err);
-        return;
-    }
-    begin(std::move(audio), {}, {});
+    // A device that dies mid-take -- an unplugged headset, a sink that went
+    // away -- still leaves everything captured before it did, and stop()
+    // returns all of it. Reporting the error and returning used to drop that
+    // vector on the floor: an hour of meeting lost to the last second of it.
+    // Hand it to begin() instead, which saves it and holds it for Transcribe;
+    // the error travels with it and becomes the status line.
+    const bool claimed = claim_job();
+    begin(std::move(audio), {}, {}, err, claimed);
 }
 
 bool AppState::process_file(const paths::fs::path& tmp_path,
@@ -267,15 +329,18 @@ bool AppState::process_file(const paths::fs::path& tmp_path,
     // app: a second upload, or a recording, starts on top of the session state
     // this call is about to clear. The server's own check is what tells the
     // user; this one is the guarantee, so it leaves the phase alone.
-    if (processing_.exchange(true)) return false;
+    if (!claim_job()) return false;
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
         result_.reset();
         summary_.reset();
+        ++result_rev_;   // see start_recording(): a cleared panel must clear
+        ++summary_rev_;
         pending_audio_.reset();
         summary_context_.clear();
         session_dir_.clear();
+        save_error_.clear();
     }
     set_phase("transcribe", -1.0, L("Decoding the file…", "Dosya çözülüyor…"));
 
@@ -289,32 +354,50 @@ bool AppState::process_file(const paths::fs::path& tmp_path,
         processing_.store(false);
         return false;
     }
-    begin(std::move(audio), tmp_path, orig_name);
+    begin(std::move(audio), tmp_path, orig_name, {}, /*claimed=*/true);
     return true;
 }
 
 void AppState::begin(std::vector<float> audio, const paths::fs::path& original_file,
-                     const std::string& original_name) {
+                     const std::string& original_name,
+                     const std::string& device_error, bool claimed) {
     const Settings settings = settings_copy();
+    // Whatever went wrong with the device outranks anything below it: it is
+    // both the cause and the thing the user has to act on.
+    const std::string device_msg =
+        device_error.empty() ? std::string()
+                             : L("Audio error: ", "Ses hatası: ") + device_error;
 
     if (audio.size() < static_cast<std::size_t>(settings.samplerate / 2)) {
-        set_phase("error", -1.0, L("The audio is too short or empty.", "Çok kısa/boş ses."));
-        // Nothing will run, so hand back the claim process_file() took before
-        // its decode. Harmless on the recording path, which never took one.
-        processing_.store(false);
+        set_phase("error", -1.0,
+                  device_msg.empty()
+                      ? std::string(L("The audio is too short or empty.",
+                                      "Çok kısa/boş ses."))
+                      : device_msg);
+        // Nothing will run, so hand the job slot back.
+        if (claimed) processing_.store(false);
         return;
     }
 
     const paths::fs::path dir = ensure_session_dir();
     if (!dir.empty() && settings.save_audio) {
-        std::error_code ec;
+        // Every one of these reports failure, and every one of them used to be
+        // discarded: a full disk produced a "Saved →" row, a "Ready" phase and
+        // an empty folder, and closing the app took the only copy with it.
+        bool ok = false;
         if (!original_file.empty()) {
             // Keep the user's original file as-is rather than re-encoding it.
             const std::string name = original_name.empty() ? "audio" : original_name;
-            paths::fs::copy_file(original_file, dir / paths::from_utf8(name),
-                                 paths::fs::copy_options::overwrite_existing, ec);
+            std::error_code ec;
+            ok = paths::fs::copy_file(original_file, dir / paths::from_utf8(name),
+                                      paths::fs::copy_options::overwrite_existing,
+                                      ec) && !ec;
         } else {
-            exporter::save_audio_wav(dir / "audio.wav", audio, settings.samplerate);
+            ok = exporter::save_audio_wav(dir / "audio.wav", audio, settings.samplerate);
+        }
+        if (!ok) {
+            note_save_error(L("The audio could not be written to ",
+                              "Ses şuraya yazılamadı: ") + paths::to_utf8(dir));
         }
     }
 
@@ -324,40 +407,56 @@ void AppState::begin(std::vector<float> audio, const paths::fs::path& original_f
         pending_audio_ = buffer;
     }
 
-    // The audio is saved and held either way; only the pipeline waits.
-    if (!settings.auto_transcribe) {
-        set_phase("ready");
-        processing_.store(false);   // the claim ends here; Transcribe takes its own
+    // The audio is saved and held either way; only the pipeline waits. A take
+    // that ended on a device failure waits too, whatever auto_transcribe says:
+    // running straight on would replace the one message explaining what
+    // happened with a progress line.
+    if (!settings.auto_transcribe || !device_msg.empty() || !claimed) {
+        if (!device_msg.empty()) {
+            set_phase("error", -1.0,
+                      device_msg + L(" The recording so far was kept — press "
+                                     "Transcribe.",
+                                     " O ana kadarki kayıt saklandı — Metne "
+                                     "Dönüştür'e basın."));
+        } else if (!claimed) {
+            set_phase("ready", -1.0,
+                      L("A job is running; press Transcribe when it finishes.",
+                        "İşlem sürüyor; bitince Metne Dönüştür'e basın."));
+        } else {
+            set_phase("ready");
+        }
+        if (claimed) processing_.store(false);   // Transcribe takes its own
         return;
     }
 
-    join_worker();
-    claim_backends();
-    processing_.store(true);
-    worker_ = std::thread(&AppState::process_worker, this, std::move(buffer));
+    start_job([this, buffer] { process_worker(buffer); });
 }
 
-void AppState::start_transcribe() {
+bool AppState::start_transcribe(std::string* error) {
     AudioBuffer audio;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         audio = pending_audio_;
     }
     if (!audio || audio->empty()) {
-        set_phase("error", -1.0,
-                  L("There is no audio to transcribe.", "Metne dönüştürülecek ses yok."));
-        return;
+        if (error) {
+            *error = L("There is no audio to transcribe.",
+                       "Metne dönüştürülecek ses yok.");
+        }
+        return false;
+    }
+    if (!claim_job()) {
+        if (error) *error = L("A job is already running.", "İşlem sürüyor.");
+        return false;
     }
 
-    join_worker();
-    claim_backends();
-    processing_.store(true);
-    worker_ = std::thread(&AppState::process_worker, this, std::move(audio));
+    start_job([this, audio] { process_worker(audio); });
+    return true;
 }
 
 void AppState::process_worker(AudioBuffer audio) {
     const Settings settings = settings_copy();
-    try {
+    {
         // VRAM handoff: drop the summarizer's weights before the STT models load.
         if (settings.manage_vram) {
             set_phase("transcribe", -1.0, L("Freeing VRAM (LLM)…", "VRAM boşaltılıyor (LLM)…"));
@@ -387,16 +486,20 @@ void AppState::process_worker(AudioBuffer audio) {
             result_ = std::move(result);
             ++result_rev_;
         }
+        // The summary on screen described the transcript this one just
+        // replaced. Re-running the audio with another model or with speakers
+        // switched on left the two side by side -- the new text under the old
+        // summary, and summary.txt next to a transcript.txt it no longer
+        // matches. Drop it; auto_summarize below writes the new one.
+        discard_summary();
 
         save_transcript();
         set_phase("done", 1.0);
 
         if (settings.auto_summarize) do_summarize();
-    } catch (const std::exception& e) {
-        set_phase("error", -1.0, e.what());
     }
-    release_backends();
-    processing_.store(false);
+    // The tail -- catch, release_backends(), processing_ -- belongs to
+    // start_job(), which owns the thread this runs on.
 }
 
 bool AppState::any_save() const {
@@ -404,15 +507,36 @@ bool AppState::any_save() const {
            settings_.save_summary;
 }
 
-paths::fs::path AppState::ensure_session_dir() {
+void AppState::note_save_error(const std::string& message) {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!session_dir_.empty() || !any_save()) return session_dir_;
-    try {
-        session_dir_ = exporter::new_session_dir(settings_.output_dir);
-    } catch (const std::exception&) {
-        session_dir_.clear();
+    if (save_error_.empty()) save_error_ = message;
+}
+
+void AppState::clear_save_error() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    save_error_.clear();
+}
+
+paths::fs::path AppState::ensure_session_dir() {
+    std::string failure;
+    paths::fs::path dir;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!session_dir_.empty() || !any_save()) return session_dir_;
+        try {
+            session_dir_ = exporter::new_session_dir(settings_.output_dir);
+        } catch (const std::exception& e) {
+            session_dir_.clear();
+            // Swallowed, this is the start of a silent data loss: every save
+            // below is skipped because the folder is empty, and the phase still
+            // reads "Ready". Keep the reason and let the page show it. It
+            // already names the folder and the OS error, so pass it straight on.
+            failure = e.what();
+        }
+        dir = session_dir_;
     }
-    return session_dir_;
+    if (!failure.empty()) note_save_error(failure);
+    return dir;
 }
 
 void AppState::delete_session_dir() {
@@ -427,31 +551,65 @@ void AppState::delete_session_dir() {
     if (!dir.empty()) exporter::remove_session_dir(dir, base);
 }
 
+void AppState::discard_summary() {
+    paths::fs::path dir;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!summary_.has_value()) return;
+        summary_.reset();
+        ++summary_rev_;
+        dir = session_dir_;
+    }
+    if (!dir.empty()) {
+        std::error_code ec;
+        paths::fs::remove(dir / "summary.txt", ec);   // best effort
+    }
+}
+
 void AppState::save_transcript() {
     const paths::fs::path dir = ensure_session_dir();
 
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (dir.empty() || !result_.has_value() || !settings_.save_transcript) return;
+    bool failed = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (dir.empty() || !result_.has_value() || !settings_.save_transcript) return;
 
-    const std::string lang = settings_.summary_language;
-    exporter::save_text(dir / "transcript.txt", result_->plain_text(lang, true));
-    exporter::save_json(dir / "transcript.json", result_->to_json(lang));
+        const std::string lang = settings_.summary_language;
+        failed = !exporter::save_text(dir / "transcript.txt",
+                                      result_->plain_text(lang, true));
+        failed |= !exporter::save_json(dir / "transcript.json",
+                                       result_->to_json(lang));
+    }
+    if (failed) {
+        note_save_error(L("The transcript could not be written to ",
+                          "Metin şuraya yazılamadı: ") + paths::to_utf8(dir));
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Summarize
 // ---------------------------------------------------------------------------
 
-void AppState::start_summarize(const std::string& context,
-                               const std::string& template_id) {
+bool AppState::start_summarize(const std::string& context,
+                               const std::string& template_id,
+                               std::string* error) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!result_.has_value()) {
-            phase_ = "error";
-            progress_ = -1.0;
-            message_ = L("There is no text to summarize.", "Özetlenecek metin yok.");
-            return;
+            if (error) {
+                *error = L("There is no text to summarize.", "Özetlenecek metin yok.");
+            }
+            return false;
         }
+    }
+    // Claimed before the settings below are touched: a caller that loses the
+    // race must not rewrite the template the running job is summarizing with.
+    if (!claim_job()) {
+        if (error) *error = L("A job is already running.", "İşlem sürüyor.");
+        return false;
+    }
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
         summary_context_ = context;
         if (llm::is_template(template_id) ||
             settings_.custom_templates.count(template_id)) {
@@ -463,18 +621,8 @@ void AppState::start_summarize(const std::string& context,
         }
     }
 
-    join_worker();
-    claim_backends();
-    processing_.store(true);
-    worker_ = std::thread([this] {
-        try {
-            do_summarize();
-        } catch (const std::exception& e) {
-            set_phase("error", -1.0, e.what());
-        }
-        release_backends();
-        processing_.store(false);
-    });
+    start_job([this] { do_summarize(); });
+    return true;
 }
 
 void AppState::do_summarize() {
@@ -558,8 +706,10 @@ void AppState::do_summarize() {
             ++summary_rev_;
         }
         dir = ensure_session_dir();
-        if (!dir.empty() && save_summary) {
-            exporter::save_text(dir / "summary.txt", summary);
+        if (!dir.empty() && save_summary &&
+            !exporter::save_text(dir / "summary.txt", summary)) {
+            note_save_error(L("The summary could not be written to ",
+                              "Özet şuraya yazılamadı: ") + paths::to_utf8(dir));
         }
         set_phase("done", 1.0);
     } catch (const llm::SummarizerError& e) {
@@ -568,12 +718,24 @@ void AppState::do_summarize() {
 }
 
 std::vector<std::string> AppState::list_llm_models(
-    const std::string& base_url_override) {
-    Settings settings = settings_copy();
+    const std::string& backend_override, const std::string& base_url_override) {
+    Settings   settings;
+    DeviceInfo device;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        settings = settings_;
+        device   = device_;
+    }
+    // Follow the form, not the saved config. Overriding only the URL meant that
+    // picking "Remote server" and pressing Fetch before saving still built the
+    // embedded backend: the dropdown filled with the .gguf files on disk, and
+    // the server was never contacted at all.
+    if (!backend_override.empty()) settings.llm_backend = backend_override;
+    if (settings.llm_backend != "remote") settings.llm_backend = "embedded";
     if (!base_url_override.empty()) settings.llm_base_url = base_url_override;
 
     // A throwaway backend: never disturbs the loaded summarizer.
-    auto probe = llm::make_backend(settings, device_);
+    auto probe = llm::make_backend(settings, device);
     return probe->list_models();
 }
 
@@ -709,6 +871,8 @@ nlohmann::json AppState::state_json() const {
         {"output_dir", session_dir_.empty()
                            ? nlohmann::json(nullptr)
                            : nlohmann::json(paths::to_utf8(session_dir_))},
+        {"save_error", save_error_.empty() ? nlohmann::json(nullptr)
+                                           : nlohmann::json(save_error_)},
         {"auto_transcribe", settings_.auto_transcribe},
         {"auto_summarize", settings_.auto_summarize},
         {"summary_template", summary_template_},

@@ -108,20 +108,76 @@ ProcResult run_win(const std::vector<std::string>& argv, double timeout_sec,
         TerminateProcess(pi.hProcess, 1);
     }
 
-    char chunk[1024];
+    // Drain and time out in the same loop, the way the POSIX path does. Reading
+    // the pipe dry first and only then starting the timeout meant the timeout
+    // never started at all for a silent child: ReadFile blocked until the write
+    // end closed, so a stalled ffmpeg or curl held this thread for as long as it
+    // liked and WaitForSingleObject was reached with nothing left to wait for.
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(
+                              static_cast<long long>(timeout_sec * 1000));
+    char  chunk[1024];
     DWORD got = 0;
-    while (ReadFile(read_end, chunk, sizeof(chunk), &got, nullptr) && got > 0) {
-        if (res.output.size() < kMaxCapturedOutput) res.output.append(chunk, got);
+    bool  timed_out = false;
+    bool  exited = false;
+
+    for (;;) {
+        // Peek first: ReadFile on an empty pipe blocks, and this loop must stay
+        // free to notice the deadline and the child's exit.
+        DWORD avail = 0;
+        if (PeekNamedPipe(read_end, nullptr, 0, nullptr, &avail, nullptr) &&
+            avail > 0) {
+            const DWORD want = avail < sizeof(chunk) ? avail
+                                                     : static_cast<DWORD>(sizeof(chunk));
+            if (!ReadFile(read_end, chunk, want, &got, nullptr) || got == 0) break;
+            if (res.output.size() < kMaxCapturedOutput) res.output.append(chunk, got);
+            continue;   // take everything buffered before waiting again
+        }
+
+        // Nothing to read. Give the child a moment to exit or say something;
+        // 20 ms is short enough that the deadline below stays close.
+        if (WaitForSingleObject(pi.hProcess, 20) == WAIT_OBJECT_0) {
+            exited = true;
+            break;      // the tail after the loop drains what it left behind
+        }
+        if (timeout_sec > 0 && std::chrono::steady_clock::now() >= deadline) {
+            timed_out = true;
+            break;
+        }
+    }
+
+    // The child is gone but the pipe may still hold its last words.
+    if (exited) {
+        DWORD avail = 0;
+        while (PeekNamedPipe(read_end, nullptr, 0, nullptr, &avail, nullptr) &&
+               avail > 0) {
+            const DWORD want = avail < sizeof(chunk) ? avail
+                                                     : static_cast<DWORD>(sizeof(chunk));
+            if (!ReadFile(read_end, chunk, want, &got, nullptr) || got == 0) break;
+            if (res.output.size() < kMaxCapturedOutput) res.output.append(chunk, got);
+        }
     }
     CloseHandle(read_end);
 
-    DWORD wait_ms = timeout_sec > 0 ? static_cast<DWORD>(timeout_sec * 1000)
-                                    : INFINITE;
-    if (WaitForSingleObject(pi.hProcess, wait_ms) == WAIT_TIMEOUT) {
+    // The loop can also end on a broken pipe with the child still running --
+    // it closed stdout and carried on. Still its deadline, not for ever.
+    if (!timed_out && !exited) {
+        DWORD left = INFINITE;
+        if (timeout_sec > 0) {
+            const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                deadline - std::chrono::steady_clock::now()).count();
+            left = ms > 0 ? static_cast<DWORD>(ms) : 0;
+        }
+        if (WaitForSingleObject(pi.hProcess, left) == WAIT_TIMEOUT) timed_out = true;
+    }
+
+    if (timed_out) {
         TerminateProcess(pi.hProcess, 1);
+        WaitForSingleObject(pi.hProcess, INFINITE);   // it is ours to reap
         res.exit_code = -2;
     } else {
         DWORD code = 1;
+        WaitForSingleObject(pi.hProcess, INFINITE);   // already signalled
         GetExitCodeProcess(pi.hProcess, &code);
         res.exit_code = static_cast<int>(code);
     }
