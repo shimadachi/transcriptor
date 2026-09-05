@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -33,6 +34,22 @@
 namespace {
 
 using namespace transcriptor;
+
+// Set by Ctrl-C so the browser-mode loop below can fall out and shut down the
+// way closing the window does. Without it the process died where it stood, and
+// a model download in flight left its half-written .part file behind.
+volatile std::sig_atomic_t g_quit = 0;
+
+void on_quit_signal(int sig) {
+    // A second Ctrl-C means the polite exit is taking too long: restore the
+    // default action and re-raise, so the user is never stuck with it.
+    if (g_quit) {
+        std::signal(sig, SIG_DFL);
+        std::raise(sig);
+        return;
+    }
+    g_quit = 1;
+}
 
 struct Options {
     bool check      = false;   // headless diagnostics, then exit
@@ -194,9 +211,12 @@ int run(const std::vector<std::string>& args) {
         app::open_in_browser(url);
         std::printf(L("No window available; opened in the browser. Ctrl-C to quit.\n",
                       "Pencere açılamadı; tarayıcıda açıldı. Kapatmak için Ctrl-C.\n"));
-        for (;;) {
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+        std::signal(SIGINT, on_quit_signal);
+        std::signal(SIGTERM, on_quit_signal);
+        while (!g_quit) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
+        std::printf(L("\nShutting down…\n", "\nKapatılıyor…\n"));
     }
 
     state.shutdown();
