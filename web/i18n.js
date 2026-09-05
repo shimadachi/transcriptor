@@ -17,6 +17,15 @@ const STR = {
   'tab.studio':     {en: 'Studio', tr: 'Stüdyo'},
   'tab.library':    {en: 'Library', tr: 'Arşiv'},
 
+  // -- update banner --------------------------------------------------------
+  'upd.k':          {en: 'Update', tr: 'Güncelleme'},
+  'upd.new':        {en: 'A newer version is available:',
+                     tr: 'Daha yeni bir sürüm var:'},
+  'upd.get':        {en: 'Release notes', tr: 'Sürüm notları'},
+  'upd.hide':       {en: 'Dismiss', tr: 'Kapat'},
+  'upd.hideTitle':  {en: 'Hide this until the next release',
+                     tr: 'Sonraki sürüme kadar gizle'},
+
   // -- console --------------------------------------------------------------
   'rec.start':      {en: 'Start recording', tr: 'Kaydı başlat'},
   'rec.stop':       {en: 'Stop recording', tr: 'Kaydı durdur'},
@@ -61,6 +70,11 @@ const STR = {
   'tx.empty':       {en: 'Start and stop a recording — the transcript appears here.',
                      tr: 'Kaydı başlatıp durdurun — deşifre burada belirir.'},
   'tx.none':        {en: 'No transcript found.', tr: 'Metin bulunamadı.'},
+  'tx.go':          {en: '✦ Transcribe', tr: '✦ Metne dönüştür'},
+  'tx.goTitle':     {en: 'Run Whisper over the recording',
+                     tr: 'Kaydı Whisper ile metne dönüştür'},
+  'tx.waiting':     {en: 'Recorded — press Transcribe.',
+                     tr: 'Kayıt alındı — Metne dönüştür\'e basın.'},
   'sum.label':      {en: 'Summary', tr: 'Özet'},
   'sum.tplTitle':   {en: 'Note template', tr: 'Not şablonu'},
   'sum.ctx':        {en: '＋ Context', tr: '＋ Bağlam'},
@@ -90,6 +104,12 @@ const STR = {
   'lib.badges.sum': {en: 'summary', tr: 'özet'},
   'lib.badges.aud': {en: 'audio', tr: 'ses'},
   'lib.loadErr':    {en: 'That recording could not be opened', tr: 'Kayıt açılamadı'},
+  'lib.delete':     {en: '🗑 Delete', tr: '🗑 Sil'},
+  'lib.deleteTitle':{en: 'Delete this recording folder and everything in it',
+                     tr: 'Bu kaydın klasörünü içindekilerle birlikte sil'},
+  'lib.deleteAsk':  {en: 'Delete {name} and everything in it?\n\n{path}\n\nThis cannot be undone.',
+                     tr: '{name} klasörü içindekilerle birlikte silinsin mi?\n\n{path}\n\nBu işlem geri alınamaz.'},
+  'lib.deleted':    {en: 'Recording deleted', tr: 'Kayıt silindi'},
 
   // -- toasts ---------------------------------------------------------------
   'toast.cancelled':    {en: 'Cancelled', tr: 'İptal edildi'},
@@ -120,6 +140,14 @@ const STR = {
   'set.cancel':     {en: 'Cancel', tr: 'İptal'},
   'set.save':       {en: 'Save', tr: 'Kaydet'},
 
+  // Tab labels: short on purpose — five of them share the modal width. The
+  // longer "…Grp" strings below still title the group inside each tab.
+  'set.tabGeneral': {en: 'General', tr: 'Genel'},
+  'set.tabOutput':  {en: 'Output', tr: 'Çıktı'},
+  'set.tabLlm':     {en: 'Summarizer', tr: 'Özetleyici'},
+  'set.tabTpl':     {en: 'Templates', tr: 'Şablonlar'},
+  'set.tabAdv':     {en: 'Advanced', tr: 'Gelişmiş'},
+
   'set.generalGrp': {en: 'General', tr: 'Genel'},
   'set.uiLang':     {en: 'Interface language', tr: 'Arayüz dili'},
   'set.theme':      {en: 'Appearance', tr: 'Görünüm'},
@@ -131,6 +159,9 @@ const STR = {
   'set.sumLang':    {en: 'Summary language', tr: 'Özet dili'},
   'set.whisper':    {en: 'Whisper model', tr: 'Whisper modeli'},
   'set.diarOn':     {en: 'Separate speakers', tr: 'Konuşmacıları ayır'},
+  'set.updates':    {en: 'Check GitHub for new releases (once a day; nothing else is sent)',
+                     tr: 'Yeni sürümler için GitHub\'a bak (günde bir; başka hiçbir şey gönderilmez)'},
+  'set.version':    {en: 'This build:', tr: 'Bu sürüm:'},
 
   'set.outGrp':     {en: 'Output & Automation', tr: 'Çıktı & Otomasyon'},
   'set.outDir':     {en: 'Output folder', tr: 'Kayıt klasörü'},
@@ -138,6 +169,8 @@ const STR = {
   'set.saveTx':     {en: 'Save the transcript (transcript.txt/.json)',
                      tr: 'Metni kaydet (transcript.txt/.json)'},
   'set.saveSum':    {en: 'Save the summary (summary.txt)', tr: 'Özeti kaydet (summary.txt)'},
+  'set.autoTx':     {en: 'Transcribe automatically when the recording stops',
+                     tr: 'Kayıt bitince metne otomatik dönüştür'},
   'set.autoSum':    {en: 'Summarize automatically when processing finishes',
                      tr: 'İşleme bitince özeti otomatik çıkar'},
   'set.outNote':    {en: 'Every recording gets its own timestamped folder here. The Library tab reads this folder.',

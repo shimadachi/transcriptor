@@ -95,8 +95,10 @@ nlohmann::json Settings::to_json() const {
         {"save_audio", save_audio},
         {"save_transcript", save_transcript},
         {"save_summary", save_summary},
+        {"auto_transcribe", auto_transcribe},
         {"auto_summarize", auto_summarize},
         {"manage_vram", manage_vram},
+        {"check_updates", check_updates},
 
         {"host", host},
         {"port", port},
@@ -175,8 +177,10 @@ void Settings::from_json(const nlohmann::json& j) {
     get(j, "save_audio", &save_audio);
     get(j, "save_transcript", &save_transcript);
     get(j, "save_summary", &save_summary);
+    get(j, "auto_transcribe", &auto_transcribe);
     get(j, "auto_summarize", &auto_summarize);
     get(j, "manage_vram", &manage_vram);
+    get(j, "check_updates", &check_updates);
 
     get(j, "host", &host);
     get(j, "port", &port);

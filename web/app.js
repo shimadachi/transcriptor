@@ -323,12 +323,23 @@ async function poll() {
   // Cancel: while recording, or when there's a junk result/error to discard
   // (but not mid-processing — the models can't be interrupted safely).
   $('cancelBtn').disabled = s.processing ||
-    !(rec || s.has_result || s.has_summary || s.phase === 'error');
+    !(rec || s.has_audio || s.has_result || s.has_summary || s.phase === 'error');
   disableSelect('source', busy);
   disableSelect('micSource', busy);
   $('refreshSrc').disabled = busy;
   $('fileBtn').disabled = busy;
+  // Transcribe stays live after a run: the same audio can go through again
+  // with another model, or with speaker separation switched on.
+  $('txBtn').disabled = busy || !s.has_audio;
   $('sumBtn').disabled = busy || !s.has_result;
+
+  // Audio is waiting and nothing has been transcribed yet — say so where the
+  // transcript will appear.
+  if (s.has_audio && !s.has_result && !s.processing) {
+    const el = $('transcript');
+    const empty = el.querySelector('.empty');
+    if (empty) empty.textContent = t('tx.waiting');
+  }
 
   // saved output location
   const saved = $('savedRow');
@@ -451,6 +462,10 @@ $('fileInput').onchange = async () => {
     if (r.error) toast(r.error);
   } catch (e) { toast(t('toast.uploadErr')); }
   $('fileInput').value = '';
+};
+$('txBtn').onclick = async () => {
+  const r = await post('/api/transcribe', {});
+  if (r.error) toast(r.error);
 };
 $('sumBtn').onclick = async () => {
   const r = await post('/api/summarize', {
@@ -741,6 +756,10 @@ async function openSettings() {
 
   $('s_diar').checked = s.enable_diarization;
   $('s_diar').disabled = !s.diar_supported;
+  $('s_updates').checked = s.check_updates;
+  $('s_version').textContent = s.version || '';
+  APP_VERSION = s.version || APP_VERSION;
+  APP_REPO = s.repo || APP_REPO;
   $('s_nspk').value = s.num_speakers;
   $('s_clthr').value = s.cluster_threshold;
   $('s_segmodel').value = s.diar_segmentation_model || '';
@@ -750,6 +769,7 @@ async function openSettings() {
   $('s_saveaudio').checked = s.save_audio;
   $('s_savetx').checked = s.save_transcript;
   $('s_savesum').checked = s.save_summary;
+  $('s_autotx').checked = s.auto_transcribe;
   $('s_autosum').checked = s.auto_summarize;
   $('s_vram').checked = s.manage_vram;
 
@@ -782,6 +802,7 @@ async function openSettings() {
   $('s_uilang').value = s.ui_language || LANG;
   ['s_device','s_model','s_language','s_llmmodel','s_sumlang','s_llmbackend','s_llmdl',
    's_uilang','s_theme'].forEach(refreshSelect);
+  showSetTab('general');
   $('modalBg').classList.add('on');
 }
 // ---- theme (system / light / dark) ----
@@ -837,6 +858,25 @@ function showTab(name) {
 $('tabStudio').onclick = () => showTab('studio');
 $('tabLibrary').onclick = () => showTab('library');
 
+// ---- settings tabs ----
+// Same markup and underline as the tabs above; the modal shows one section at
+// a time instead of one long scroll. openSettings() resets it to the first.
+const SET_TABS = ['general', 'output', 'llm', 'tpl', 'adv'];
+function showSetTab(name) {
+  SET_TABS.forEach(n => {
+    const on = n === name;
+    $('setView_' + n).hidden = !on;
+    const btn = $('setTab_' + n);
+    btn.classList.toggle('on', on);
+    btn.setAttribute('aria-selected', String(on));
+  });
+  // The modal itself is the scroller — a tall tab must not leave the next one
+  // scrolled halfway down.
+  const modal = document.querySelector('.modal');
+  if (modal) modal.scrollTop = 0;
+}
+SET_TABS.forEach(n => { $('setTab_' + n).onclick = () => showSetTab(n); });
+
 $('settingsBtn').onclick = openSettings;
 $('cancelSettings').onclick = () => $('modalBg').classList.remove('on');
 $('modalBg').onclick = (e) => { if (e.target === $('modalBg')) $('modalBg').classList.remove('on'); };
@@ -873,7 +913,9 @@ $('saveSettings').onclick = async () => {
 
     output_dir: $('s_outdir').value, save_audio: $('s_saveaudio').checked,
     save_transcript: $('s_savetx').checked, save_summary: $('s_savesum').checked,
+    auto_transcribe: $('s_autotx').checked,
     auto_summarize: $('s_autosum').checked, manage_vram: $('s_vram').checked,
+    check_updates: $('s_updates').checked,
 
     llm_backend: $('s_llmbackend').value,
     llm_model_path: $('s_llmpath').value,
@@ -891,6 +933,14 @@ $('saveSettings').onclick = async () => {
   // Already persisted by the POST above, so only apply them locally.
   if ($('s_uilang').value !== LANG) setLang($('s_uilang').value, false);
   if ($('s_theme').value !== themePref) applyTheme($('s_theme').value, false);
+  // Switching the check off takes the banner down now rather than at the next
+  // launch; switching it on looks straight away, so the setting visibly does
+  // something either way.
+  if ($('s_updates').checked) {
+    checkUpdates({check_updates: true, version: APP_VERSION, repo: APP_REPO});
+  } else {
+    $('updBar').style.display = 'none';
+  }
   $('modalBg').classList.remove('on');
   if (r.device) { $('badgeText').textContent = r.device.replace(/^[^A-Za-z]+/, ''); }
   initTpl();  // picks up new/renamed templates and any label language change
@@ -1136,6 +1186,109 @@ $('libOpen').onclick = async () => {
   if (r.error) toast(r.error);
   else if (!r.ok) toast(t('toast.folderErr') + r.path);
 };
+// Deleting takes the folder off the disk, so it asks first and names what goes.
+$('libDelete').onclick = async () => {
+  if (!libCurrent || !libItem) return;
+  const s = libSessions.find(x => x.id === libCurrent);
+  const name = s ? libDate(s) : libCurrent;
+  if (!confirm(t('lib.deleteAsk', {name: name, path: libItem.path || libCurrent}))) return;
+
+  const r = await post('/api/library/delete', {id: libCurrent});
+  if (r.error) { toast(r.error); return; }
+  // Stop playback before the list reload drops the selection — the <audio>
+  // still points at a file that is gone.
+  $('libAudio').pause();
+  $('libAudio').removeAttribute('src');
+  libCurrent = null; libItem = null;
+  toast(t('lib.deleted'));
+  loadLibrary();
+};
+
+// ===== update check =====
+// The only request this app makes to anything but its own server. GitHub's
+// releases API sends Access-Control-Allow-Origin: *, so the page can ask it
+// directly — no key, no update service, and nothing about the user goes out
+// with the request. Every failure path here is silent: a missed update notice
+// is not worth an error in someone's face.
+const UPD_TTL = 24 * 60 * 60 * 1000;      // ask GitHub at most once a day
+const UPD_SEEN = 'transcriptor-update';       // {ts, tag} — the cached answer
+const UPD_HID  = 'transcriptor-update-hid';   // the tag the user dismissed
+let APP_VERSION = '', APP_REPO = '';
+
+// Numeric, component by component, so 0.1.10 correctly beats 0.1.9 — a string
+// compare has it the other way round. A missing component counts as 0, so
+// "0.2" and "0.2.0" are the same version, and a non-numeric suffix on a
+// component ("0.2.0-rc1") reads as its leading number.
+function cmpVersion(a, b) {
+  const pa = String(a).split('.'), pb = String(b).split('.');
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = parseInt(pa[i], 10) || 0, y = parseInt(pb[i], 10) || 0;
+    if (x !== y) return x < y ? -1 : 1;
+  }
+  return 0;
+}
+
+function updRead(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function updWrite(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
+function showUpdate(tag, current) {
+  if (!tag || !current || cmpVersion(tag, current) <= 0) return;
+  if (updRead(UPD_HID) === tag) return;          // dismissed, and still the same one
+  $('updVer').textContent = tag;
+  $('updBar').style.display = 'flex';
+}
+
+async function checkUpdates(s) {
+  if (!s || !s.version) return;
+  APP_VERSION = s.version;
+  APP_REPO = s.repo || APP_REPO;
+  if (!s.check_updates) return;
+
+  // A cached answer still raises the banner; only the network call is rationed,
+  // which also keeps a shared IP well under GitHub's 60-per-hour anonymous cap.
+  let seen = null;
+  try { seen = JSON.parse(updRead(UPD_SEEN) || 'null'); } catch (e) {}
+  if (seen && seen.tag && Date.now() - (seen.ts || 0) < UPD_TTL) {
+    showUpdate(seen.tag, s.version);
+    return;
+  }
+  if (!APP_REPO) return;
+
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 8000);
+  try {
+    const r = await fetch('https://api.github.com/repos/' + APP_REPO + '/releases/latest',
+                          {headers: {'Accept': 'application/vnd.github+json'},
+                           signal: ctl.signal, cache: 'no-store'});
+    // 403 rate-limited, 404 no releases yet, 5xx — all just mean "not today".
+    if (!r.ok) return;
+    // /releases/latest already skips drafts and prereleases. Tags here are bare
+    // ("0.1.5"), but tolerate a "v" prefix in case that ever changes.
+    const tag = String((await r.json()).tag_name || '').trim().replace(/^v/i, '');
+    if (!tag) return;
+    // Stamped even when it is not newer, so an up-to-date machine also asks
+    // only once a day.
+    updWrite(UPD_SEEN, JSON.stringify({ts: Date.now(), tag: tag}));
+    showUpdate(tag, s.version);
+  } catch (e) {
+    /* offline, DNS-blocked, aborted, malformed JSON — all the same: stay quiet */
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+$('updGet').onclick = async () => {
+  // The native webview drops target="_blank", so the server hands the URL to
+  // the real browser. If that is unreachable, fall back to the page itself.
+  try {
+    const r = await post('/api/open_releases');
+    if (r && !r.ok && r.url) window.open(r.url, '_blank', 'noopener');
+  } catch (e) { /* nothing sensible left to try */ }
+};
+$('updHide').onclick = () => {
+  updWrite(UPD_HID, $('updVer').textContent);
+  $('updBar').style.display = 'none';
+};
 
 // Enhance every native <select> into a themed custom dropdown. Queried rather
 // than listed by id: a hand-kept list silently leaves new selects rendering as
@@ -1157,6 +1310,7 @@ initTpl();
     const s = await api('/api/settings');
     if (s.ui_language && s.ui_language !== LANG) setLang(s.ui_language, false);
     if (s.ui_theme && s.ui_theme !== themePref) applyTheme(s.ui_theme, false);
+    checkUpdates(s);   // deliberately not awaited: never hold up the first paint
   } catch (e) { /* server not ready yet; the saved values stand */ }
 })();
 poll();
@@ -1165,6 +1319,10 @@ setInterval(poll, 700);
 // Design-preview hooks (only via URL hash).
 if (location.hash === '#library') showTab('library');
 if (location.hash === '#settings') openSettings();
+if (location.hash === '#update') {
+  $('updVer').textContent = '9.9.9';
+  $('updBar').style.display = 'flex';
+}
 if (location.hash === '#src') setTimeout(() => { const s = $('source'); if (s && s._x) s._x.wrap.classList.add('open'); }, 300);
 if (location.hash === '#demo') {
   renderTranscript({diarized: true, lines: [

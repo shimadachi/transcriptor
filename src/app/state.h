@@ -48,6 +48,11 @@ public:
     // returns false if the file could not be decoded.
     bool process_file(const paths::fs::path& tmp_path, const std::string& orig_name);
 
+    // -- transcribe -------------------------------------------------------
+    // Runs the pipeline over the audio that is waiting because
+    // settings.auto_transcribe is off. Sets the error phase when nothing waits.
+    void start_transcribe();
+
     // -- summarize --------------------------------------------------------
     void start_summarize(const std::string& context, const std::string& template_id);
 
@@ -63,6 +68,10 @@ public:
     // util/lang.h rather than from settings_, so it is safe to call with mutex_
     // already held, and from the request threads.
     std::string ui_language() const { return lang::english() ? "en" : "tr"; }
+
+    // Drop the "Saved →" pointer when that folder is the one just deleted from
+    // the library, so nothing writes into it again.
+    void forget_session_dir(const paths::fs::path& dir);
 
     bool            recording() const { return recording_.load(); }
     bool            processing() const { return processing_.load(); }
@@ -89,9 +98,11 @@ private:
     void set_phase(const std::string& phase, double progress = -1.0,
                    const std::string& message = "");
 
+    using AudioBuffer = std::shared_ptr<const std::vector<float>>;
+
     void begin(std::vector<float> audio, const paths::fs::path& original_file,
                const std::string& original_name);
-    void process_worker(std::vector<float> audio);
+    void process_worker(AudioBuffer audio);
     void do_summarize();
 
     bool            any_save() const;
@@ -114,6 +125,11 @@ private:
     std::string phase_ = "idle";
     std::string message_;
     double      progress_ = -1.0;
+
+    // The recording (or decoded file) the Transcribe button runs on. Kept after
+    // a run so the same audio can be transcribed again — with another model, or
+    // with speaker separation switched on.
+    AudioBuffer pending_audio_;
 
     std::optional<pipeline::ProcessResult> result_;
     std::optional<std::string>             summary_;

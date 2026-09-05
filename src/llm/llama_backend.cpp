@@ -431,8 +431,21 @@ private:
         // The weights are the biggest thing on the GPU; drop the KV cache now.
         free_context();
 
-        out = trim(out);
+        // Reasoning comes off here, at the one point raw model output becomes a
+        // string: a thinking model's <think> block is not an answer, and the
+        // chunked path feeds these straight back in as the notes to merge.
+        const bool had_text = !trim(out).empty();
+        out = strip_reasoning(out);
         if (out.empty()) {
+            // All reasoning and no answer: the token budget ran out inside the
+            // <think> block. Say that, rather than "empty answer".
+            if (had_text) {
+                throw SummarizerError(
+                    L("The model used the whole answer budget on reasoning. "
+                      "Raise the maximum answer length in Settings.",
+                      "Model, yanıt bütçesinin tamamını düşünmeye harcadı. "
+                      "Ayarlar'dan maksimum yanıt uzunluğunu artırın."));
+            }
             throw SummarizerError(L("The LLM returned an empty answer.",
                                     "LLM boş yanıt döndürdü."));
         }
