@@ -237,7 +237,18 @@ std::vector<TranscriptSegment> WhisperTranscriber::transcribe(
     wparams.beam_search.beam_size = 5;
     wparams.n_threads             = default_threads(threads_);
     wparams.translate             = false;
-    wparams.no_context            = false;  // condition on previous text
+    // Conditioning each window on the text decoded so far reads well until the
+    // model repeats itself once: the repeat is then in the prompt, which makes
+    // the next window likelier to repeat it, and the loop has no way out. A
+    // 1h53m recording came back as one sentence 1717 times, from 02:47 to the
+    // end of the file.
+    //
+    // Both switches are needed. no_context only clears the carried prompt once,
+    // as whisper_full starts, which separates one run from the next; the rolling
+    // context *within* a run is rebuilt from each window's own output and gated
+    // on n_max_text_ctx instead (whisper.cpp's -mc). Zero is what turns it off.
+    wparams.no_context            = true;
+    wparams.n_max_text_ctx        = 0;
     wparams.single_segment        = false;
     wparams.print_special         = false;
     wparams.print_progress        = false;
