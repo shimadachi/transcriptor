@@ -253,7 +253,10 @@
         <div id="llmEmbedded">
           <div class="field"><label data-i18n="set.llmDl">Download a ready-made model (optional, one time)</label>
             <div class="row"><select id="s_llmdl" class="grow"></select>
-              <button id="dlLlm" class="mini" type="button" data-i18n="set.llmDlBtn">Download</button></div>
+              <button id="dlLlm" class="mini" type="button" data-i18n="set.llmDlBtn">Download</button>
+              <button id="cancelLlmDl" class="mini danger" type="button"
+                      data-i18n-title="set.llmDlCancelTitle" data-i18n="set.llmDlCancel"
+                      style="display:none;">✕ Cancel</button></div>
             <div id="llmDlNote" class="dlnote"></div></div>
           <div class="field"><label data-i18n="set.gguf">GGUF model</label>
             <div class="row"><select id="s_ggufsel" class="grow"></select>

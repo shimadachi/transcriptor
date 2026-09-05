@@ -15,6 +15,7 @@
 #include "device.h"
 #include "diarize/diarizer.h"
 #include "stt/whisper_stt.h"
+#include "util/net.h"
 
 namespace transcriptor::pipeline {
 
@@ -63,11 +64,17 @@ public:
     // Release Whisper + diarization memory (rebuilt lazily on the next run).
     void unload();
 
+    // Also stops a first-run model download in its tracks: without this the
+    // Cancel button did nothing until curl had finished fetching gigabytes.
     void request_abort();
 
 private:
     Settings   settings_;
     DeviceInfo device_;
+
+    // Kills the curl behind a first-run model fetch. Cleared at the top of
+    // run(), so a cancelled run does not stop the next one from downloading.
+    net::Canceller dl_cancel_;
 
     std::unique_ptr<stt::WhisperTranscriber> transcriber_;
     std::unique_ptr<diarize::Diarizer>       diarizer_;

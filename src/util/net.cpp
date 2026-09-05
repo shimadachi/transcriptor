@@ -11,6 +11,7 @@
 #  include <windows.h>
 #else
 #  include <errno.h>
+#  include <poll.h>
 #  include <signal.h>
 #  include <sys/wait.h>
 #  include <unistd.h>
@@ -24,6 +25,16 @@ namespace transcriptor::net {
 namespace {
 
 constexpr std::size_t kMaxCapturedOutput = 8192;
+
+// Kill a child the hard way. curl has no polite stop, and by the time anyone
+// cancels, the useful state is the .part file the caller is about to delete.
+void kill_child(std::intptr_t child) {
+#ifdef _WIN32
+    TerminateProcess(reinterpret_cast<HANDLE>(child), 1);
+#else
+    ::kill(static_cast<pid_t>(child), SIGKILL);
+#endif
+}
 
 #ifdef _WIN32
 
@@ -56,8 +67,11 @@ std::wstring build_command_line(const std::vector<std::string>& argv) {
     return out;
 }
 
-ProcResult run_win(const std::vector<std::string>& argv, double timeout_sec) {
+ProcResult run_win(const std::vector<std::string>& argv, double timeout_sec,
+                   Canceller* cancel) {
     ProcResult res;
+    // Already cancelled: never start the child at all.
+    if (cancel && cancel->requested()) { res.cancelled = true; return res; }
 
     SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
     HANDLE read_end = nullptr, write_end = nullptr;
@@ -86,6 +100,14 @@ ProcResult run_win(const std::vector<std::string>& argv, double timeout_sec) {
     }
     res.launched = true;
 
+    // Same window as the POSIX path: a cancel that landed between the check at
+    // the top and CreateProcessW must still take this child down. Terminating
+    // it also unblocks the ReadFile below, which is what makes cancel work here
+    // even though that loop has no timeout of its own.
+    if (cancel && !cancel->adopt(reinterpret_cast<std::intptr_t>(pi.hProcess))) {
+        TerminateProcess(pi.hProcess, 1);
+    }
+
     char chunk[1024];
     DWORD got = 0;
     while (ReadFile(read_end, chunk, sizeof(chunk), &got, nullptr) && got > 0) {
@@ -103,16 +125,23 @@ ProcResult run_win(const std::vector<std::string>& argv, double timeout_sec) {
         GetExitCodeProcess(pi.hProcess, &code);
         res.exit_code = static_cast<int>(code);
     }
+    // Before the handle is closed, for the same reason the POSIX path releases
+    // before reaping: a cancel must never reach a handle that is already gone.
+    if (cancel) cancel->release();
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
+    if (cancel && cancel->requested()) res.cancelled = true;
     return res;
 }
 
 #else
 
-ProcResult run_posix(const std::vector<std::string>& argv, double timeout_sec) {
+ProcResult run_posix(const std::vector<std::string>& argv, double timeout_sec,
+                     Canceller* cancel) {
     ProcResult res;
     if (argv.empty()) return res;
+    // Already cancelled: never start the child at all.
+    if (cancel && cancel->requested()) { res.cancelled = true; return res; }
 
     int fds[2];
     if (pipe(fds) != 0) return res;
@@ -145,27 +174,65 @@ ProcResult run_posix(const std::vector<std::string>& argv, double timeout_sec) {
     }
     close(fds[1]);
 
+    // From here another thread can kill this child. adopt() fails when a cancel
+    // landed in the window between the check above and the fork -- take it down
+    // now rather than leave curl running with nobody waiting on it.
+    if (cancel && !cancel->adopt(static_cast<std::intptr_t>(pid))) {
+        ::kill(pid, SIGKILL);
+    }
+
     const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::milliseconds(
                               static_cast<long long>(timeout_sec * 1000));
+    // Wait on the pipe rather than inside read(), so the deadline is honoured
+    // whether or not the child ever says anything. Testing it after a read only
+    // worked for a talkative child: a silent one -- ffmpeg on a clean decode,
+    // curl stalled after connecting -- left this blocked in read() for as long
+    // as it cared to run, and the timeout was never even looked at.
     char chunk[1024];
-    ssize_t got;
-    while ((got = read(fds[0], chunk, sizeof(chunk))) > 0) {
+    bool timed_out = false;
+    for (;;) {
+        int wait_ms = -1;   // timeout_sec <= 0: block until output or exit
+        if (timeout_sec > 0) {
+            const auto left = deadline - std::chrono::steady_clock::now();
+            wait_ms = static_cast<int>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(left).count());
+            if (wait_ms <= 0) { timed_out = true; break; }
+        }
+
+        struct pollfd pfd = {fds[0], POLLIN, 0};
+        const int n = poll(&pfd, 1, wait_ms);
+        if (n == 0) { timed_out = true; break; }   // deadline, child still quiet
+        if (n < 0) {
+            if (errno == EINTR) continue;          // a signal, not a failure
+            break;
+        }
+
+        // POLLHUP without POLLIN still needs the read: it returns 0 and ends
+        // the loop, which is how a child that exits without output finishes.
+        const ssize_t got = read(fds[0], chunk, sizeof(chunk));
+        if (got < 0) {
+            if (errno == EINTR) continue;
+            break;
+        }
+        if (got == 0) break;                       // write end closed
         if (res.output.size() < kMaxCapturedOutput) {
             res.output.append(chunk, static_cast<std::size_t>(got));
         }
-        if (timeout_sec > 0 && std::chrono::steady_clock::now() > deadline) {
-            kill(pid, SIGKILL);
-            break;
-        }
     }
+    if (timed_out) kill(pid, SIGKILL);
     close(fds[0]);
 
+    // Hand the child back before reaping it: once waitpid returns, the pid is
+    // free to be reused, and a cancel arriving after that would hit a stranger.
+    if (cancel) cancel->release();
+
     int status = 0;
-    waitpid(pid, &status, 0);
+    while (waitpid(pid, &status, 0) < 0 && errno == EINTR) { }
     // exec failure shows up as the 127 the child exited with.
     res.launched  = !(WIFEXITED(status) && WEXITSTATUS(status) == 127);
     res.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    if (cancel && cancel->requested()) res.cancelled = true;
     return res;
 }
 
@@ -179,11 +246,41 @@ std::uint64_t size_on_disk(const paths::fs::path& p) {
 
 }  // namespace
 
-ProcResult run(const std::vector<std::string>& argv, double timeout_sec) {
+void Canceller::request() {
+    std::lock_guard<std::mutex> lock(m_);
+    requested_ = true;
+    if (child_) kill_child(child_);
+}
+
+bool Canceller::requested() const {
+    std::lock_guard<std::mutex> lock(m_);
+    return requested_;
+}
+
+void Canceller::reset() {
+    std::lock_guard<std::mutex> lock(m_);
+    requested_ = false;
+    child_ = 0;
+}
+
+bool Canceller::adopt(std::intptr_t child) {
+    std::lock_guard<std::mutex> lock(m_);
+    if (requested_) return false;
+    child_ = child;
+    return true;
+}
+
+void Canceller::release() {
+    std::lock_guard<std::mutex> lock(m_);
+    child_ = 0;
+}
+
+ProcResult run(const std::vector<std::string>& argv, double timeout_sec,
+               Canceller* cancel) {
 #ifdef _WIN32
-    return run_win(argv, timeout_sec);
+    return run_win(argv, timeout_sec, cancel);
 #else
-    return run_posix(argv, timeout_sec);
+    return run_posix(argv, timeout_sec, cancel);
 #endif
 }
 
@@ -193,7 +290,8 @@ bool can_download() {
 }
 
 DownloadResult download(const std::string& url, const paths::fs::path& dest,
-                        std::uint64_t expected_bytes, const ProgressFn& progress) {
+                        std::uint64_t expected_bytes, const ProgressFn& progress,
+                        Canceller* cancel) {
     DownloadResult out;
 
     std::error_code ec;
@@ -221,11 +319,20 @@ DownloadResult download(const std::string& url, const paths::fs::path& dest,
 
     ProcResult r = run({"curl", "-fL", "--retry", "3", "--retry-delay", "2",
                         "--connect-timeout", "20", "-sS",
-                        "-o", paths::to_utf8(tmp), url});
+                        "-o", paths::to_utf8(tmp), url},
+                       0, cancel);
 
     done.store(true);
     if (watcher.joinable()) watcher.join();
 
+    // Checked before the failure branches below: a killed curl also looks like
+    // a failed one, and being told a download you stopped "failed" is noise.
+    if (r.cancelled) {
+        paths::fs::remove(tmp, ec);
+        out.cancelled = true;
+        out.error = L("Download cancelled.", "İndirme iptal edildi.");
+        return out;
+    }
     if (!r.launched) {
         paths::fs::remove(tmp, ec);
         out.error = L("curl was not found — download the model by hand and point "
