@@ -385,6 +385,7 @@ void AppState::process_worker(AudioBuffer audio) {
         {
             std::lock_guard<std::mutex> lock(mutex_);
             result_ = std::move(result);
+            ++result_rev_;
         }
 
         save_transcript();
@@ -699,6 +700,7 @@ nlohmann::json AppState::state_json() const {
         {"has_audio", pending_audio_ && !pending_audio_->empty()},
         {"has_result", result_.has_value()},
         {"has_summary", summary_.has_value()},
+        {"result_rev", result_rev_},
         {"summary_rev", summary_rev_},
         {"diarization_enabled", settings_.enable_diarization},
         {"diar_supported", diarize::Diarizer::supported()},

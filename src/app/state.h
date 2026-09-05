@@ -157,6 +157,10 @@ private:
 
     std::optional<pipeline::ProcessResult> result_;
     std::optional<std::string>             summary_;
+    // Bumped on every transcript written, so the page can tell a re-run from
+    // the text already on screen: has_result never falls back to false in
+    // between, which is all a transition-watcher can see.
+    int                                    result_rev_ = 0;
     int                                    summary_rev_ = 0;
     paths::fs::path                        session_dir_;
 
