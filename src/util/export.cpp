@@ -12,6 +12,7 @@
 #  include <windows.h>
 #  include <shellapi.h>
 #else
+#  include <errno.h>
 #  include <unistd.h>
 #  include <sys/wait.h>
 #endif
@@ -117,17 +118,24 @@ bool open_in_file_manager(const fs::path& path) {
     const char* opener = "xdg-open";
 #  endif
     const std::string p = paths::to_utf8(path);
+    // Double-fork, so that reaping the process we wait on costs nothing while
+    // the file manager still outlives us. WNOHANG on a single fork reaped
+    // nothing -- the child is always still alive that soon after forking -- and
+    // left a <defunct> entry behind on every "Open Folder".
     pid_t pid = fork();
     if (pid < 0) return false;
     if (pid == 0) {
         // Detach from the app so the file manager outlives us.
         setsid();
-        execlp(opener, opener, p.c_str(), static_cast<char*>(nullptr));
-        _exit(127);
+        if (fork() == 0) {
+            execlp(opener, opener, p.c_str(), static_cast<char*>(nullptr));
+            _exit(127);
+        }
+        _exit(0);
     }
-    // Don't block on the file manager; just reap so it can't become a zombie.
+    // The middle process is already on its way out, so this does not block.
     int status = 0;
-    waitpid(pid, &status, WNOHANG);
+    while (waitpid(pid, &status, 0) < 0 && errno == EINTR) { }
     return true;
 #endif
 }
