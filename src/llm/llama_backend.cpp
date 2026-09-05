@@ -8,6 +8,7 @@
 #include <mutex>
 #include <thread>
 
+#include <ggml-backend.h>
 #include <llama.h>
 
 #include "llm/templates.h"
@@ -95,6 +96,7 @@ public:
     LlamaBackend(const Settings& s, const DeviceInfo& device)
         : model_path_(s.llm_model_path), n_ctx_(std::max(1024, s.llm_ctx)),
           n_gpu_layers_(device.use_gpu() ? s.llm_gpu_layers : 0),
+          gpu_registry_index_(device.use_gpu() ? device.registry_index : -1),
           threads_(default_threads(s.llm_threads)),
           max_tokens_(std::max(64, s.llm_max_tokens)),
           temperature_(s.llm_temperature) {}
@@ -250,6 +252,16 @@ private:
 
         llama_model_params mparams = llama_model_default_params();
         mparams.n_gpu_layers = n_gpu_layers_;
+
+        // Offload to the card the user picked, not to whatever llama would
+        // rank first. The list is NULL-terminated and read during the load, so
+        // it only has to outlive this call.
+        ggml_backend_dev_t chosen[2] = {nullptr, nullptr};
+        if (gpu_registry_index_ >= 0 &&
+            static_cast<size_t>(gpu_registry_index_) < ggml_backend_dev_count()) {
+            chosen[0] = ggml_backend_dev_get(static_cast<size_t>(gpu_registry_index_));
+            if (chosen[0]) mparams.devices = chosen;
+        }
 
         model_ = llama_model_load_from_file(path_utf8.c_str(), mparams);
         if (!model_) {
@@ -456,6 +468,7 @@ private:
     std::string   model_path_;
     int           n_ctx_;
     int           n_gpu_layers_;
+    int           gpu_registry_index_;   // -1 = CPU only
     int           threads_;
     int           max_tokens_;
     float         temperature_;
