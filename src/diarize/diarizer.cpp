@@ -127,7 +127,12 @@ std::vector<Turn> Diarizer::diarize(const std::vector<float>& audio, int sampler
                        "Konuşmacı modelleri yükleniyor…"), -1.0);
         }
 
-        const char* provider = device_.use_gpu() ? "cuda" : "cpu";
+        // onnxruntime's execution providers are its own list, not ggml's: the
+        // only GPU one this build ships is CUDA, so a Vulkan or Metal device
+        // still diarizes on the CPU rather than asking for a provider that
+        // isn't there.
+        const char* provider =
+            (device_.use_gpu() && device_.backend == "CUDA") ? "cuda" : "cpu";
 
         SherpaOnnxOfflineSpeakerDiarizationConfig config{};
         config.segmentation.pyannote.model = seg.c_str();
