@@ -118,7 +118,9 @@ int run_check(const Settings& settings) {
                 models::whisper_ready(settings) ? ready : will_get);
     if (diarize::Diarizer::supported()) {
         std::printf(L("  Speaker separation : %s\n", "  Konuşmacı ayrımı : %s\n"),
-                    models::diarization_ready(settings) ? ready : will_get);
+                    !settings.enable_diarization
+                        ? L("off", "kapalı")
+                        : models::diarization_ready(settings) ? ready : will_get);
     } else {
         std::printf(L("  Speaker separation : not compiled in\n",
                       "  Konuşmacı ayrımı : derlenmemiş\n"));

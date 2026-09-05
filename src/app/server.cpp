@@ -16,9 +16,11 @@
 #include <nlohmann/json.hpp>
 
 #include "app/assets.h"
+#include "app/shell.h"
 #include "audio/sources.h"
 #include "diarize/diarizer.h"
 #include "llm/llama_backend.h"
+#include "llm/summarizer.h"
 #include "llm/templates.h"
 #include "util/export.h"
 #include "util/lang.h"
@@ -32,6 +34,13 @@ namespace {
 using json = nlohmann::json;
 
 constexpr size_t kMaxUpload = 4ull * 1024 * 1024 * 1024;   // 4 GB audio/video
+
+// Where updates come from. The UI builds the releases API URL from the slug;
+// /api/open_releases hands the page below to the browser. Both live here so
+// the two never drift apart.
+constexpr const char* kRepoSlug = "shimadachi/transcriptor";
+constexpr const char* kReleasesUrl =
+    "https://github.com/shimadachi/transcriptor/releases/latest";
 
 void send_json(httplib::Response& res, const json& body, int status = 200) {
     res.status = status;
@@ -285,6 +294,15 @@ bool Server::start() {
         send_json(res, json{{"ok", ok}, {"path", paths::to_utf8(dir)}});
     });
 
+    // The update banner's button. Takes no parameters on purpose: the URL is
+    // fixed above, so nothing from the page is ever handed to the OS opener.
+    // Needed because target="_blank" goes nowhere inside the native webview.
+    svr.Post("/api/open_releases", [](const httplib::Request&,
+                                      httplib::Response& res) {
+        send_json(res, json{{"ok", open_in_browser(kReleasesUrl)},
+                            {"url", kReleasesUrl}});
+    });
+
     // -- library (past sessions in the output folder) -----------------------
     // The folder is the only store: nothing is indexed, so a session copied in
     // by hand shows up and one deleted outside the app quietly disappears.
@@ -336,8 +354,15 @@ bool Server::start() {
         }
         body["transcript_text"] =
             paths::read_file(dir / "transcript.txt", &raw) ? json(raw) : json(nullptr);
-        body["summary"] =
-            paths::read_file(dir / "summary.txt", &raw) ? json(raw) : json(nullptr);
+        body["summary"] = json(nullptr);
+        if (paths::read_file(dir / "summary.txt", &raw)) {
+            // Summaries written before the backends stripped reasoning still
+            // carry the model's <think> block. Clean the file itself, once,
+            // rather than filtering it on the way out for ever.
+            const std::string clean = llm::strip_reasoning(raw);
+            if (clean != raw) paths::write_file(dir / "summary.txt", clean);
+            body["summary"] = json(clean);
+        }
 
         const std::string audio = library::find_audio(dir);
         body["audio"] = audio.empty() ? json(nullptr) : json(audio);
@@ -402,6 +427,45 @@ bool Server::start() {
         }
         const bool ok = exporter::open_in_file_manager(dir);
         send_json(res, json{{"ok", ok}, {"path", paths::to_utf8(dir)}});
+    });
+
+    // Deletes one session folder and everything in it. resolve() only ever
+    // yields a direct child of the output folder, and remove_session_dir()
+    // checks the same boundary again before touching the disk.
+    svr.Post("/api/library/delete", [state](const httplib::Request& req,
+                                            httplib::Response& res) {
+        const Settings s = state->settings_copy();
+        const paths::fs::path dir =
+            library::resolve(s.output_dir, get_string(parse_body(req), "id"));
+        if (dir.empty()) {
+            return send_error(res, L("That recording is no longer there.",
+                                     "Bu kayıt artık yerinde değil."), 404);
+        }
+        // The live session is still being written to; deleting it underneath
+        // the pipeline would leave half a folder behind.
+        if (state->processing() && state->session_dir() == dir) {
+            return send_error(res, L("That recording is still being written.",
+                                     "Bu kayıt hâlâ yazılıyor."));
+        }
+        if (!exporter::remove_session_dir(dir, s.output_dir)) {
+            return send_error(res, L("The folder could not be deleted.",
+                                     "Klasör silinemedi."), 500);
+        }
+        state->forget_session_dir(dir);
+        send_json(res, json{{"ok", true}, {"id", paths::to_utf8(dir.filename())}});
+    });
+
+    // -- transcribe --------------------------------------------------------
+    // The manual counterpart of settings.auto_transcribe: runs the pipeline
+    // over the audio that stopped short of it.
+    svr.Post("/api/transcribe", [state](const httplib::Request&,
+                                        httplib::Response& res) {
+        if (state->recording() || state->processing()) {
+            return send_error(res, L("A job is already running.", "İşlem sürüyor."));
+        }
+        state->start_transcribe();
+        if (state->phase() == "error") return send_error(res, state->message());
+        send_json(res, json{{"ok", true}});
     });
 
     // -- summarize ---------------------------------------------------------
@@ -524,10 +588,15 @@ bool Server::start() {
             {"save_audio", s.save_audio},
             {"save_transcript", s.save_transcript},
             {"save_summary", s.save_summary},
+            {"auto_transcribe", s.auto_transcribe},
             {"auto_summarize", s.auto_summarize},
             {"manage_vram", s.manage_vram},
             {"mic_gain", s.mic_gain},
             {"system_gain", s.system_gain},
+
+            {"check_updates", s.check_updates},
+            {"version", TRANSCRIPTOR_VERSION},
+            {"repo", kRepoSlug},
         });
     });
 
@@ -586,8 +655,10 @@ bool Server::start() {
         flag("save_audio", &s.save_audio);
         flag("save_transcript", &s.save_transcript);
         flag("save_summary", &s.save_summary);
+        flag("auto_transcribe", &s.auto_transcribe);
         flag("auto_summarize", &s.auto_summarize);
         flag("manage_vram", &s.manage_vram);
+        flag("check_updates", &s.check_updates);
 
         clamped_float("mic_gain", &s.mic_gain, 0.0f, 4.0f);
         clamped_float("system_gain", &s.system_gain, 0.0f, 4.0f);

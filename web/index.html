@@ -31,6 +31,16 @@
       <button id="settingsBtn" class="ghost mini" data-i18n="hdr.settings">⚙ Settings</button>
     </header>
 
+    <!-- Shown only when GitHub reports a release newer than this build. -->
+    <div id="updBar" class="updbar" style="display:none;">
+      <span class="updbar-k" data-i18n="upd.k">Update</span>
+      <span class="updbar-txt"><span data-i18n="upd.new">A newer version is available:</span>
+        <b id="updVer"></b></span>
+      <button id="updGet" class="mini ok" type="button" data-i18n="upd.get">Release notes</button>
+      <button id="updHide" class="ghost mini" type="button"
+              data-i18n-title="upd.hideTitle" data-i18n="upd.hide">Dismiss</button>
+    </div>
+
     <nav class="tabs" role="tablist">
       <button id="tabStudio" class="tab on" type="button" role="tab"
               aria-selected="true" aria-controls="viewStudio"
@@ -80,6 +90,7 @@
     <section class="panel">
       <div class="tx-head">
         <span class="label" data-i18n="tx.label">Transcript</span>
+        <button id="txBtn" class="ok" data-i18n-title="tx.goTitle" data-i18n="tx.go" disabled>✦ Transcribe</button>
       </div>
       <div id="transcript" class="tx-body"><span class="empty" data-i18n="tx.empty">Start and stop a recording — the transcript appears here.</span></div>
     </section>
@@ -128,6 +139,7 @@
                 <code id="libPath" class="lib-path"></code>
               </div>
               <button id="libOpen" class="mini" data-i18n="saved.open">Open Folder</button>
+              <button id="libDelete" class="mini danger" data-i18n-title="lib.deleteTitle" data-i18n="lib.delete">🗑 Delete</button>
             </div>
 
             <div id="libAudioWrap" class="lib-audio">
@@ -156,13 +168,33 @@
   </div>
 
   <!-- ==================== Settings ==================== -->
-  <!-- Ordered general -> specific: the things most people touch sit at the top,
-       and every knob that only matters once something is wrong lives under
-       "Advanced". -->
+  <!-- One tab per section, ordered general -> specific: the things most people
+       touch come first, and every knob that only matters once something is
+       wrong lives in the last tab, "Advanced". -->
   <div class="modal-bg" id="modalBg">
     <div class="modal">
       <h2 data-i18n="set.title">Settings</h2>
 
+      <nav class="tabs set-tabs" role="tablist">
+        <button id="setTab_general" class="tab on" type="button" role="tab"
+                aria-selected="true" aria-controls="setView_general"
+                data-i18n="set.tabGeneral">General</button>
+        <button id="setTab_output" class="tab" type="button" role="tab"
+                aria-selected="false" aria-controls="setView_output"
+                data-i18n="set.tabOutput">Output</button>
+        <button id="setTab_llm" class="tab" type="button" role="tab"
+                aria-selected="false" aria-controls="setView_llm"
+                data-i18n="set.tabLlm">Summarizer</button>
+        <button id="setTab_tpl" class="tab" type="button" role="tab"
+                aria-selected="false" aria-controls="setView_tpl"
+                data-i18n="set.tabTpl">Templates</button>
+        <button id="setTab_adv" class="tab" type="button" role="tab"
+                aria-selected="false" aria-controls="setView_adv"
+                data-i18n="set.tabAdv">Advanced</button>
+      </nav>
+
+      <div id="setView_general" class="set-view" role="tabpanel"
+           aria-labelledby="setTab_general">
       <div class="grp">
         <div class="t" data-i18n="set.generalGrp">General</div>
         <div class="field"><label data-i18n="set.uiLang">Interface language</label>
@@ -185,8 +217,14 @@
           <select id="s_model"><option>tiny</option><option>base</option><option>small</option>
             <option>medium</option><option>large-v3</option></select></div>
         <div class="field check"><input type="checkbox" id="s_diar"><label data-i18n="set.diarOn">Separate speakers</label></div>
+        <div class="field check"><input type="checkbox" id="s_updates"><label data-i18n="set.updates">Check GitHub for new releases (once a day; nothing else is sent)</label></div>
+        <div class="field" style="font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.6;">
+          <span data-i18n="set.version">This build:</span> <code id="s_version">…</code></div>
+      </div>
       </div>
 
+      <div id="setView_output" class="set-view" role="tabpanel"
+           aria-labelledby="setTab_output" hidden>
       <div class="grp">
         <div class="t" data-i18n="set.outGrp">Output &amp; Automation</div>
         <div class="field"><label data-i18n="set.outDir">Output folder</label>
@@ -194,12 +232,16 @@
         <div class="field check"><input type="checkbox" id="s_saveaudio"><label data-i18n="set.saveAudio">Save the audio (audio.wav)</label></div>
         <div class="field check"><input type="checkbox" id="s_savetx"><label data-i18n="set.saveTx">Save the transcript (transcript.txt/.json)</label></div>
         <div class="field check"><input type="checkbox" id="s_savesum"><label data-i18n="set.saveSum">Save the summary (summary.txt)</label></div>
+        <div class="field check"><input type="checkbox" id="s_autotx"><label data-i18n="set.autoTx">Transcribe automatically when the recording stops</label></div>
         <div class="field check"><input type="checkbox" id="s_autosum"><label data-i18n="set.autoSum">Summarize automatically when processing finishes</label></div>
         <div class="field" data-i18n="set.outNote" style="font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.6;">
           Every recording gets its own timestamped folder here. The Library tab reads
           this folder.</div>
       </div>
+      </div>
 
+      <div id="setView_llm" class="set-view" role="tabpanel"
+           aria-labelledby="setTab_llm" hidden>
       <div class="grp">
         <div class="t" data-i18n="set.llmGrp">Summarizer · llama.cpp</div>
         <div class="field"><label data-i18n="set.llmMode">Mode</label>
@@ -226,7 +268,10 @@
               <button id="fetchModels" class="mini" type="button" data-i18n="set.fetch">Fetch</button></div></div>
         </div>
       </div>
+      </div>
 
+      <div id="setView_tpl" class="set-view" role="tabpanel"
+           aria-labelledby="setTab_tpl" hidden>
       <div class="grp">
         <div class="t" data-i18n="set.tplGrp">Note templates · edit</div>
         <div class="field"><label data-i18n="set.tplPick">Template to edit</label>
@@ -242,10 +287,11 @@
           <button id="s_tplreset" class="mini" type="button" data-i18n="set.tplReset">Reset the instruction to default</button>
           <button id="s_tpldel" class="mini danger" type="button" data-i18n="set.tplDel">Delete</button></div>
       </div>
+      </div>
 
-      <details class="adv" id="advBox">
-        <summary><span data-i18n="set.advGrp">Advanced</span>
-          <span class="adv-hint" data-i18n="set.advHint">hardware, model files, fine-tuning</span></summary>
+      <div id="setView_adv" class="set-view" role="tabpanel"
+           aria-labelledby="setTab_adv" hidden>
+        <div class="adv-hint" data-i18n="set.advHint">hardware, model files, fine-tuning</div>
 
         <div class="grp">
           <div class="t" data-i18n="set.sttGrp">Transcription · STT</div>
@@ -304,7 +350,7 @@
           </div>
           <div class="field check"><input type="checkbox" id="s_vram"><label data-i18n="set.vram">Sequence VRAM: unload the LLM during transcription and the STT model during summarizing (for 8 GB cards)</label></div>
         </div>
-      </details>
+      </div>
 
       <div class="modal-actions">
         <button id="cancelSettings" class="ghost" data-i18n="set.cancel">Cancel</button>

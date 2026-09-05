@@ -43,7 +43,7 @@ struct Settings {
     int         stt_threads   = 0;            // 0 = hardware_concurrency
 
     // -- diarization (sherpa-onnx) ---------------------------------------
-    bool        enable_diarization = true;
+    bool        enable_diarization = false;
     std::string diar_segmentation_model;      // empty = managed download
     std::string diar_embedding_model;
     int         num_speakers      = 0;        // 0 = estimate from clustering
@@ -76,11 +76,21 @@ struct Settings {
     bool save_audio      = true;
     bool save_transcript = true;
     bool save_summary    = true;
+    // Off = the recording waits in memory until the Transcribe button is
+    // pressed; the same gate the summarizer has always had.
+    bool auto_transcribe = true;
     bool auto_summarize  = false;
 
     // Sequence VRAM: unload whisper before the LLM loads, and vice versa, so a
     // single 8 GB card never has to hold both at once.
     bool manage_vram = true;
+
+    // -- updates ----------------------------------------------------------
+    // Once a day the UI asks GitHub for the newest release tag and shows a
+    // banner when it is newer than this build. It is the only request the app
+    // makes on its own — every other transfer is something the user started —
+    // so it gets its own switch. Off means the check never runs at all.
+    bool check_updates = true;
 
     // -- local server -----------------------------------------------------
     std::string host = "127.0.0.1";

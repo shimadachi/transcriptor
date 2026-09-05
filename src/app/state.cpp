@@ -24,6 +24,7 @@ const std::map<std::string, PhaseText>& phase_messages() {
     static const std::map<std::string, PhaseText> kMessages = {
         {"idle",        {"Ready",               "Hazır"}},
         {"recording",   {"Recording…",          "Kayıt sürüyor…"}},
+        {"ready",       {"Ready to transcribe", "Metne dönüştürmeye hazır"}},
         {"transcribe",  {"Transcribing…",       "Metne dönüştürülüyor…"}},
         {"diarize",     {"Separating speakers…","Konuşmacılar ayrılıyor…"}},
         {"attribute",   {"Matching speakers…",  "Konuşmacılar eşleştiriliyor…"}},
@@ -108,6 +109,11 @@ paths::fs::path AppState::session_dir() const {
     return session_dir_;
 }
 
+void AppState::forget_session_dir(const paths::fs::path& dir) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!dir.empty() && session_dir_ == dir) session_dir_.clear();
+}
+
 Settings AppState::settings_copy() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return settings_;
@@ -178,6 +184,7 @@ void AppState::cancel() {
         }
         result_.reset();
         summary_.reset();
+        pending_audio_.reset();
     }
     recording_.store(false);
     delete_session_dir();
@@ -211,6 +218,7 @@ bool AppState::process_file(const paths::fs::path& tmp_path,
         std::lock_guard<std::mutex> lock(mutex_);
         result_.reset();
         summary_.reset();
+        pending_audio_.reset();
         session_dir_.clear();
     }
     set_phase("transcribe", -1.0, L("Decoding the file…", "Dosya çözülüyor…"));
@@ -250,12 +258,41 @@ void AppState::begin(std::vector<float> audio, const paths::fs::path& original_f
         }
     }
 
+    auto buffer = std::make_shared<const std::vector<float>>(std::move(audio));
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        pending_audio_ = buffer;
+    }
+
+    // The audio is saved and held either way; only the pipeline waits.
+    if (!settings.auto_transcribe) {
+        set_phase("ready");
+        return;
+    }
+
+    join_worker();
+    processing_.store(true);
+    worker_ = std::thread(&AppState::process_worker, this, std::move(buffer));
+}
+
+void AppState::start_transcribe() {
+    AudioBuffer audio;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        audio = pending_audio_;
+    }
+    if (!audio || audio->empty()) {
+        set_phase("error", -1.0,
+                  L("There is no audio to transcribe.", "Metne dönüştürülecek ses yok."));
+        return;
+    }
+
     join_worker();
     processing_.store(true);
     worker_ = std::thread(&AppState::process_worker, this, std::move(audio));
 }
 
-void AppState::process_worker(std::vector<float> audio) {
+void AppState::process_worker(AudioBuffer audio) {
     const Settings settings = settings_copy();
     try {
         // VRAM handoff: drop the summarizer's weights before the STT models load.
@@ -279,7 +316,7 @@ void AppState::process_worker(std::vector<float> audio) {
                 std::lock_guard<std::mutex> lock(mutex_);
                 processor = processor_.get();
             }
-            result = processor->run(audio, settings.samplerate, progress);
+            result = processor->run(*audio, settings.samplerate, progress);
         }
 
         {
@@ -577,6 +614,7 @@ nlohmann::json AppState::state_json() const {
         {"cuda", device_.gpu_available},
         {"elapsed", std::round(elapsed * 10.0) / 10.0},
         {"level", std::round(level * 10000.0) / 10000.0},
+        {"has_audio", pending_audio_ && !pending_audio_->empty()},
         {"has_result", result_.has_value()},
         {"has_summary", summary_.has_value()},
         {"summary_rev", summary_rev_},
@@ -587,6 +625,7 @@ nlohmann::json AppState::state_json() const {
         {"output_dir", session_dir_.empty()
                            ? nlohmann::json(nullptr)
                            : nlohmann::json(paths::to_utf8(session_dir_))},
+        {"auto_transcribe", settings_.auto_transcribe},
         {"auto_summarize", settings_.auto_summarize},
         {"summary_template", summary_template_},
         {"llm_backend", settings_.llm_backend},

@@ -171,11 +171,21 @@ public:
                                   res->body.substr(0, 400));
         }
 
-        std::string content = msg["content"].get<std::string>();
-        const auto b = content.find_first_not_of(" \t\r\n");
-        const auto e = content.find_last_not_of(" \t\r\n");
-        content = (b == std::string::npos) ? "" : content.substr(b, e - b + 1);
+        // Reasoning comes off here, where the model's text arrives: a served
+        // model that inlines <think> in the content is no different from the
+        // embedded one, and no caller should have to remember.
+        const std::string served = msg["content"].get<std::string>();
+        std::string content = strip_reasoning(served);
 
+        // All reasoning and no answer: the token budget ran out inside the
+        // <think> block. Say that, rather than "empty answer".
+        if (content.empty() && served.find_first_not_of(" \t\r\n") != std::string::npos) {
+            throw SummarizerError(
+                L("The model used the whole answer budget on reasoning. "
+                  "Raise the maximum answer length in Settings.",
+                  "Model, yanıt bütçesinin tamamını düşünmeye harcadı. "
+                  "Ayarlar'dan maksimum yanıt uzunluğunu artırın."));
+        }
         if (content.empty()) {
             throw SummarizerError(L("The LLM returned an empty answer.",
                                     "LLM boş yanıt döndürdü."));

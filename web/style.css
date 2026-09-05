@@ -215,6 +215,24 @@ select.grow { flex: 1; }
 .xsel-opt .xsel-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @keyframes pop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 
+/* ---------- update banner ---------- */
+/* Between the header and the tabs, so it is there whichever view is open. The
+   bottom margin cancels the -10px the tabs pull up by, leaving the same 16px
+   gap the header would have had on its own. Amber, not red: a new release is
+   news, not a fault. */
+.updbar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin: 0 0 26px; padding: 10px 8px 10px 14px;
+  background: var(--panel); border: 1px solid var(--line-2);
+  border-left: 3px solid var(--vu); border-radius: 10px;
+  font-family: var(--mono); font-size: 12px;
+  animation: rise .6s var(--ease) both;
+}
+.updbar-k { color: var(--vu); font-size: 10px; letter-spacing: .18em;
+  text-transform: uppercase; }
+.updbar-txt { color: var(--ink-dim); flex: 1; min-width: 0; }
+.updbar-txt b { color: var(--ink); }
+
 /* ---------- tabs (studio / library) ---------- */
 .tabs { display: flex; gap: 4px; margin: -10px 0 18px;
   border-bottom: 1px solid var(--line); animation: rise .6s var(--ease) both;
@@ -287,24 +305,9 @@ select.grow { flex: 1; }
 /* A session saved before transcript.json existed only has the flat .txt. */
 .lib-raw { white-space: pre-wrap; color: var(--ink); font-size: 14px; }
 
-/* ---------- settings: advanced disclosure ---------- */
-details.adv { margin-bottom: 16px; }
-details.adv > summary {
-  display: flex; align-items: center; gap: 10px; cursor: pointer;
-  list-style: none; font-family: var(--mono); font-size: 11px;
-  letter-spacing: .18em; text-transform: uppercase; color: var(--vu);
-  background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px;
-  padding: 15px 16px; transition: border-color .18s var(--ease); }
-details.adv > summary::-webkit-details-marker { display: none; }
-details.adv > summary:hover { border-color: var(--line-2); }
-details.adv > summary::after { content: ""; width: 7px; height: 7px;
-  margin-left: auto; margin-top: -3px; flex-shrink: 0;
-  border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted);
-  transform: rotate(45deg); transition: transform .2s var(--ease); }
-details.adv[open] > summary::after { transform: rotate(225deg); margin-top: 3px; }
-details.adv[open] > summary { margin-bottom: 16px; }
+/* ---------- settings: advanced tab hint ---------- */
 .adv-hint { font-family: var(--mono); font-size: 10px; letter-spacing: .06em;
-  text-transform: none; color: var(--faint); }
+  text-transform: none; color: var(--faint); margin-bottom: 12px; }
 
 /* readout + meter */
 .readout { display: flex; align-items: center; gap: 14px; font-family: var(--mono); font-size: 13px; }
@@ -417,6 +420,13 @@ button.mini.on { border-color: var(--rec); color: var(--rec); }
   background: var(--panel); border: 1px solid var(--line-2); border-radius: 18px; padding: 24px;
   animation: rise .32s var(--ease); }
 .modal h2 { font-family: var(--display); font-weight: 800; font-size: 24px; margin: 0 0 20px; letter-spacing: -.02em; }
+/* Settings tabs: the studio/library underline, tightened so five labels fit a
+   540px modal, and scrollable sideways rather than wrapping if they do not. */
+.set-tabs { margin: -6px 0 16px; animation: none;
+  overflow-x: auto; scrollbar-width: none; }
+.set-tabs::-webkit-scrollbar { display: none; }
+.set-tabs .tab { padding: 9px 10px 11px; letter-spacing: .12em; white-space: nowrap; }
+.set-tabs .tab::after { left: 6px; right: 6px; }
 .grp { border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; background: var(--bg-2); }
 .grp .t { font-family: var(--mono); font-size: 11px; letter-spacing: .18em; text-transform: uppercase;
   color: var(--vu); margin-bottom: 14px; }
