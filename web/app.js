@@ -636,6 +636,35 @@ function syncLlmBackend() {
 $('s_llmbackend').addEventListener('change', syncLlmBackend);
 
 // Fill the GGUF dropdown from the paths the server found in the models dir.
+// The GPUs ggml reports, named the way the badge names them. Built fresh every
+// time Settings opens: an eGPU can come and go between two visits, and a stale
+// id would otherwise sit there pointing at nothing.
+function fillDeviceList(devices, selected) {
+  const sel = $('s_device');
+  sel.innerHTML = '';
+  const mk = (value, label) => {
+    const o = document.createElement('option');
+    o.value = value; o.textContent = label;
+    if (value === selected) o.selected = true;
+    sel.appendChild(o);
+  };
+  mk('auto', t('set.auto'));
+  (devices || []).forEach(d => {
+    const gb = d.vram ? ' · ' + (d.vram / 1073741824).toFixed(1) + ' GB' : '';
+    const kind = d.integrated ? ' · ' + t('set.integrated') : '';
+    mk(d.id, d.name + ' (' + d.backend + ')' + gb + kind);
+  });
+  mk('cpu', 'CPU');
+  // A card named in the settings but missing now: keep it visible rather than
+  // silently snapping to Automatic, so it is clear what the app is doing.
+  if (selected && selected !== 'auto' && selected !== 'cpu' &&
+      !(devices || []).some(d => d.id === selected)) {
+    mk(selected, selected + ' · ' + t('set.deviceGone'));
+    sel.value = selected;
+  }
+  refreshSelect('s_device');
+}
+
 function fillGgufList(paths, selected) {
   const sel = $('s_ggufsel');
   sel.innerHTML = '';
@@ -773,7 +802,7 @@ $('rescanGguf').onclick = async () => {
 async function openSettings() {
   const s = await api('/api/settings');
   $('s_theme').value = s.ui_theme || themePref;
-  $('s_device').value = s.device;
+  fillDeviceList(s.devices, s.device);
   $('s_model').value = s.whisper_model;
   $('s_language').value = s.language;
   $('s_whisperpath').value = s.whisper_model_path || '';
