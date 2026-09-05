@@ -216,6 +216,11 @@
         <div class="field"><label data-i18n="set.whisper">Whisper model</label>
           <select id="s_model"><option>tiny</option><option>base</option><option>small</option>
             <option>medium</option><option>large-v3</option></select></div>
+        <div class="field"><label data-i18n="set.device">Device</label>
+          <select id="s_device"><option value="auto" data-i18n="set.auto">Automatic</option>
+            <option value="cpu">CPU</option></select>
+          <div data-i18n="set.deviceNote" style="font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.6;margin-top:6px;">Used for transcription and for the
+            built-in summarizer. Automatic prefers a discrete card over an integrated one.</div></div>
         <div class="field check"><input type="checkbox" id="s_diar"><label data-i18n="set.diarOn">Separate speakers</label></div>
         <div class="field check"><input type="checkbox" id="s_updates"><label data-i18n="set.updates">Check GitHub for new releases (once a day; nothing else is sent)</label></div>
         <div class="field" style="font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.6;">
@@ -298,9 +303,6 @@
 
         <div class="grp">
           <div class="t" data-i18n="set.sttGrp">Transcription · STT</div>
-          <div class="field"><label data-i18n="set.device">Device</label>
-            <select id="s_device"><option value="auto" data-i18n="set.auto">Automatic</option>
-              <option value="cuda">GPU (CUDA)</option><option value="cpu">CPU</option></select></div>
           <div class="field"><label data-i18n="set.modelFile">Model file (empty = download automatically)</label>
             <input type="text" id="s_whisperpath" placeholder="…/ggml-large-v3.bin"></div>
         </div>

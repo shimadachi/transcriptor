@@ -71,6 +71,23 @@ std::string trim(const std::string& s) {
     return s.substr(b, e - b + 1);
 }
 
+// The accelerators the settings panel offers, named the way ggml names them.
+// Sent on every settings read rather than cached: a laptop can gain or lose a
+// card between one launch and the next.
+json device_list_json() {
+    json out = json::array();
+    for (const ComputeDevice& d : list_devices()) {
+        out.push_back({
+            {"id", d.id},
+            {"name", d.name},
+            {"backend", d.backend},
+            {"integrated", d.integrated},
+            {"vram", d.vram_total},
+        });
+    }
+    return out;
+}
+
 // Strip directory components and anything hostile from an uploaded filename.
 std::string safe_filename(const std::string& name) {
     std::string base = name;
@@ -554,6 +571,7 @@ bool Server::start() {
             {"language", s.language},
             {"device", s.device},
             {"compute_type", s.compute_type},
+            {"devices", device_list_json()},
 
             {"enable_diarization", s.enable_diarization},
             {"diar_supported", diarize::Diarizer::supported()},
@@ -636,6 +654,16 @@ bool Server::start() {
         str("whisper_model_path", &s.whisper_model_path);
         str("language", &s.language);
         str("device", &s.device);
+        // Anything but "auto"/"cpu" has to name a device that is actually
+        // here; a card that has gone away falls back to automatic rather than
+        // silently landing on whichever device happens to hold that slot now.
+        if (s.device != "auto" && s.device != "cpu") {
+            bool known = false;
+            for (const ComputeDevice& d : list_devices()) {
+                if (d.id == s.device) { known = true; break; }
+            }
+            if (!known) s.device = "auto";
+        }
         str("compute_type", &s.compute_type);
         str("diar_segmentation_model", &s.diar_segmentation_model);
         str("diar_embedding_model", &s.diar_embedding_model);

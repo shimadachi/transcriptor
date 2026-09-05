@@ -214,6 +214,11 @@ std::vector<TranscriptSegment> WhisperTranscriber::transcribe(
 
         whisper_context_params cparams = whisper_context_default_params();
         cparams.use_gpu = device_.use_gpu();
+        // Counted over GPU *and* integrated GPU devices, in registry order --
+        // the same walk whisper does internally. Left at the default 0, a
+        // laptop with an iGPU first in the list ran everything on the iGPU no
+        // matter which card the badge named.
+        cparams.gpu_device = device_.gpu_index;
 
         impl_->ctx = whisper_init_from_file_with_params(path_utf8.c_str(), cparams);
         if (!impl_->ctx) {

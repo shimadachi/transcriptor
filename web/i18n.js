@@ -220,6 +220,12 @@ const STR = {
   'set.sttGrp':     {en: 'Transcription · STT', tr: 'Metin · STT'},
   'set.device':     {en: 'Device', tr: 'Cihaz'},
   'set.auto':       {en: 'Automatic', tr: 'Otomatik'},
+  'set.deviceNote': {en: 'Used for transcription and for the built-in summarizer. ' +
+                         'Automatic prefers a discrete card over an integrated one.',
+                     tr: 'Metne dönüştürme ve yerleşik özetleyici için kullanılır. ' +
+                         'Otomatik, tümleşik yerine ayrık ekran kartını seçer.'},
+  'set.integrated': {en: 'integrated', tr: 'tümleşik'},
+  'set.deviceGone': {en: 'not found now', tr: 'şu an yok'},
   'set.modelFile':  {en: 'Model file (empty = download automatically)',
                      tr: 'Model dosyası (boş = otomatik indir)'},
 
