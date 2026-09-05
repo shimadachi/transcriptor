@@ -32,7 +32,7 @@ bool has_file(const paths::fs::path& p) {
 }
 
 std::string fetch(const ModelSpec& spec, const paths::fs::path& dest,
-                  const ProgressFn& progress) {
+                  const ProgressFn& progress, net::Canceller* cancel) {
     if (spec.url.empty()) {
         return L("Unknown model: ", "Bilinmeyen model: ") + spec.id +
                L(" — set the file path by hand in Settings.",
@@ -57,7 +57,8 @@ std::string fetch(const ModelSpec& spec, const paths::fs::path& dest,
         progress(msg, frac);
     };
 
-    net::DownloadResult r = net::download(spec.url, dest, spec.approx_bytes, on_bytes);
+    net::DownloadResult r =
+        net::download(spec.url, dest, spec.approx_bytes, on_bytes, cancel);
     return r.ok ? std::string{} : r.error;
 }
 
@@ -170,10 +171,12 @@ paths::fs::path llm_model_file(const LlmModelSpec& spec) {
     return paths::models_dir() / paths::from_utf8(spec.filename);
 }
 
-std::string ensure_llm_model(const LlmModelSpec& spec, const ProgressFn& progress) {
+std::string ensure_llm_model(const LlmModelSpec& spec, const ProgressFn& progress,
+                             net::Canceller* cancel) {
     const paths::fs::path dest = llm_model_file(spec);
     if (has_file(dest)) return {};
-    return fetch({spec.id, spec.url, spec.approx_bytes, spec.label}, dest, progress);
+    return fetch({spec.id, spec.url, spec.approx_bytes, spec.label}, dest, progress,
+                 cancel);
 }
 
 bool whisper_ready(const Settings& s) { return has_file(s.whisper_model_file()); }
@@ -182,7 +185,8 @@ bool diarization_ready(const Settings& s) {
     return has_file(s.segmentation_model_file()) && has_file(s.embedding_model_file());
 }
 
-std::string ensure_whisper_model(const Settings& s, const ProgressFn& progress) {
+std::string ensure_whisper_model(const Settings& s, const ProgressFn& progress,
+                                 net::Canceller* cancel) {
     const paths::fs::path dest = s.whisper_model_file();
     if (has_file(dest)) return {};
     if (!s.whisper_model_path.empty()) {
@@ -190,16 +194,17 @@ std::string ensure_whisper_model(const Settings& s, const ProgressFn& progress) 
         return L("Whisper model not found: ", "Whisper modeli bulunamadı: ") +
                paths::to_utf8(dest);
     }
-    return fetch(whisper_spec(s.whisper_model), dest, progress);
+    return fetch(whisper_spec(s.whisper_model), dest, progress, cancel);
 }
 
-std::string ensure_diarization_models(const Settings& s, const ProgressFn& progress) {
+std::string ensure_diarization_models(const Settings& s, const ProgressFn& progress,
+                                      net::Canceller* cancel) {
     const paths::fs::path seg = s.segmentation_model_file();
     if (!has_file(seg)) {
         if (!s.diar_segmentation_model.empty())
             return L("Segmentation model not found: ",
                      "Bölütleme modeli bulunamadı: ") + paths::to_utf8(seg);
-        std::string err = fetch(segmentation_spec(), seg, progress);
+        std::string err = fetch(segmentation_spec(), seg, progress, cancel);
         if (!err.empty()) return err;
     }
     const paths::fs::path emb = s.embedding_model_file();
@@ -207,7 +212,7 @@ std::string ensure_diarization_models(const Settings& s, const ProgressFn& progr
         if (!s.diar_embedding_model.empty())
             return L("Speaker-embedding model not found: ",
                      "Ses izi modeli bulunamadı: ") + paths::to_utf8(emb);
-        std::string err = fetch(embedding_spec(), emb, progress);
+        std::string err = fetch(embedding_spec(), emb, progress, cancel);
         if (!err.empty()) return err;
     }
     return {};

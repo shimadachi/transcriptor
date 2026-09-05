@@ -73,8 +73,12 @@ void AppState::shutdown() {
     }
     recording_.store(false);
     join_worker();
-    // curl runs as a child process and cannot be interrupted mid-file; waiting
-    // is still better than tearing down state the download thread is writing to.
+    // Kill the download rather than wait it out. This used to join and hope:
+    // curl has no transfer timeout, so quitting during a stalled fetch hung
+    // the app until it was force-killed. The child dies, the .part file is
+    // removed, and the thread returns at once -- which is also the only way
+    // the state it writes to is safe to tear down.
+    dl_cancel_.request();
     join_download();
 }
 
@@ -529,6 +533,7 @@ bool AppState::start_llm_download(const std::string& model_id, std::string* erro
     }
 
     join_download();   // the previous thread has already finished
+    dl_cancel_.reset();   // a cancelled download must not block this one
     {
         std::lock_guard<std::mutex> lock(mutex_);
         dl_model_    = spec->id;
@@ -536,6 +541,7 @@ bool AppState::start_llm_download(const std::string& model_id, std::string* erro
         dl_message_  = lang::english() ? "Downloading " + spec->label + "…"
                                        : spec->label + " indiriliyor…";
         dl_error_.clear();
+        dl_cancelled_ = false;
         dl_progress_ = -1.0;
     }
 
@@ -547,13 +553,17 @@ bool AppState::start_llm_download(const std::string& model_id, std::string* erro
             dl_progress_ = fraction;
         };
 
-        const std::string err = models::ensure_llm_model(copy, progress);
+        const std::string err = models::ensure_llm_model(copy, progress, &dl_cancel_);
+        // The error string is the same shape either way; the flag is what tells
+        // the UI to say "cancelled" instead of colouring it as a failure.
+        const bool stopped = dl_cancel_.requested();
         const paths::fs::path file = models::llm_model_file(copy);
 
         Settings next;
         {
             std::lock_guard<std::mutex> lock(mutex_);
             dl_error_ = err;
+            dl_cancelled_ = stopped;
             if (err.empty()) {
                 dl_message_  = copy.label + L(" is ready.", " hazır.");
                 dl_progress_ = 1.0;
@@ -576,6 +586,15 @@ bool AppState::start_llm_download(const std::string& model_id, std::string* erro
     return true;
 }
 
+bool AppState::cancel_llm_download() {
+    if (!downloading_.load()) return false;
+    // Only asks. The download thread notices its child was killed, clears the
+    // partial file and lowers `downloading_` on its way out, so the UI keeps
+    // polling the same status endpoint and needs no special case.
+    dl_cancel_.request();
+    return true;
+}
+
 nlohmann::json AppState::llm_download_json() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return {
@@ -588,6 +607,7 @@ nlohmann::json AppState::llm_download_json() const {
                                       : nlohmann::json(dl_progress_)},
         {"error", dl_error_.empty() ? nlohmann::json(nullptr)
                                     : nlohmann::json(dl_error_)},
+        {"cancelled", dl_cancelled_},
     };
 }
 

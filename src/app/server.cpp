@@ -753,6 +753,17 @@ bool Server::start() {
         send_json(res, state->llm_download_json());
     });
 
+    // Stops a download in flight. The thread tears itself down, so the UI just
+    // keeps polling GET above and sees it go inactive like any other ending.
+    svr.Post("/api/llm/download/cancel", [state](const httplib::Request&,
+                                                 httplib::Response& res) {
+        if (!state->cancel_llm_download()) {
+            return send_error(res, L("No download is running.",
+                                     "Çalışan bir indirme yok."), 409);
+        }
+        send_json(res, json{{"ok", true}});
+    });
+
     // -- bind & serve ------------------------------------------------------
     // Prefer the configured port so bookmarks keep working; fall back to any
     // free port when it is already taken (a second instance, say).

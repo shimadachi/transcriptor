@@ -20,6 +20,7 @@
 #include "llm/summarizer.h"
 #include "pipeline/processor.h"
 #include "util/lang.h"
+#include "util/net.h"
 
 namespace transcriptor::app {
 
@@ -88,6 +89,11 @@ public:
     // when the id is unknown or a download is already running.
     bool start_llm_download(const std::string& model_id, std::string* error);
 
+    // Stops the download in flight, if any. The curl child is killed and the
+    // partial file removed, so the next attempt starts clean. Returns false
+    // when nothing was running.
+    bool cancel_llm_download();
+
     // {active, model, message, progress, error} for /api/state.
     nlohmann::json llm_download_json() const;
 
@@ -144,7 +150,12 @@ private:
     std::string dl_label_;
     std::string dl_message_;
     std::string dl_error_;
+    bool        dl_cancelled_ = false;   // stopped on request, not a failure
     double      dl_progress_ = -1.0;
+
+    // Kills the curl behind the catalog download. Reset when one starts, so a
+    // cancelled download does not block the next.
+    net::Canceller dl_cancel_;
 
     std::atomic<bool> recording_{false};
     std::atomic<bool> processing_{false};

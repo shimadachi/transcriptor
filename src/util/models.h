@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "config.h"
+#include "util/net.h"
 #include "util/paths.h"
 
 namespace transcriptor::models {
@@ -61,13 +62,16 @@ paths::fs::path llm_model_file(const LlmModelSpec& spec);
 
 // Empty string on success, a human-readable error otherwise. Returns
 // immediately when the file is already on disk.
-std::string ensure_llm_model(const LlmModelSpec& spec, const ProgressFn& progress);
+std::string ensure_llm_model(const LlmModelSpec& spec, const ProgressFn& progress,
+                             net::Canceller* cancel = nullptr);
 
 // Each returns an empty string on success, or a human-readable error.
 // If the file already exists, they return immediately without touching the
 // network.
-std::string ensure_whisper_model(const Settings& s, const ProgressFn& progress);
-std::string ensure_diarization_models(const Settings& s, const ProgressFn& progress);
+std::string ensure_whisper_model(const Settings& s, const ProgressFn& progress,
+                                 net::Canceller* cancel = nullptr);
+std::string ensure_diarization_models(const Settings& s, const ProgressFn& progress,
+                                      net::Canceller* cancel = nullptr);
 
 // True when every model the current settings need is already on disk.
 bool whisper_ready(const Settings& s);

@@ -151,11 +151,16 @@ void OfflineProcessor::unload() {
 }
 
 void OfflineProcessor::request_abort() {
+    dl_cancel_.request();
     if (transcriber_) transcriber_->request_abort();
 }
 
 ProcessResult OfflineProcessor::run(const std::vector<float>& audio, int samplerate,
                                     const ProgressFn& progress) {
+    // A cancel from the previous run must not linger and refuse this one's
+    // downloads. Nothing is in flight here: run() is what starts them.
+    dl_cancel_.reset();
+
     auto report = [&progress](const std::string& phase) {
         return [&progress, phase](const std::string& message, double fraction) {
             if (progress) progress(phase, fraction, message);
@@ -170,7 +175,8 @@ ProcessResult OfflineProcessor::run(const std::vector<float>& audio, int sampler
     // -- transcribe --------------------------------------------------------
     if (progress) progress("transcribe", -1.0, "");
 
-    if (std::string err = models::ensure_whisper_model(settings_, report("transcribe"));
+    if (std::string err = models::ensure_whisper_model(settings_, report("transcribe"),
+                                                    &dl_cancel_);
         !err.empty()) {
         throw std::runtime_error(err);
     }
@@ -199,7 +205,8 @@ ProcessResult OfflineProcessor::run(const std::vector<float>& audio, int sampler
     if (progress) progress("diarize", -1.0, "");
 
     if (std::string err = models::ensure_diarization_models(settings_,
-                                                            report("diarize"));
+                                                            report("diarize"),
+                                                            &dl_cancel_);
         !err.empty()) {
         throw std::runtime_error(err);
     }

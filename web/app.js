@@ -685,6 +685,15 @@ function showLlmNote() {
 }
 $('s_llmdl').addEventListener('change', showLlmNote);
 
+// Download and Cancel are the same control in two states: only one of them is
+// ever useful, so only one is ever on screen.
+function setLlmDlActive(on) {
+  $('dlLlm').disabled = on;
+  const c = $('cancelLlmDl');
+  c.style.display = on ? '' : 'none';
+  if (on) c.disabled = false;
+}
+
 // Poll until the download thread finishes, then adopt the fetched file.
 function pollLlmDownload() {
   if (llmDlTimer) return;
@@ -694,11 +703,17 @@ function pollLlmDownload() {
     if (d.active) {
       const pct = d.progress == null ? '' : ' (%' + Math.round(d.progress * 100) + ')';
       setLlmNote((d.message || t('llm.downloading')) + pct);
+      setLlmDlActive(true);
       return;
     }
     clearInterval(llmDlTimer); llmDlTimer = null;
-    $('dlLlm').disabled = false;
-    if (d.error) { setLlmNote(d.error, true); toast(t('toast.dlFailed')); return; }
+    setLlmDlActive(false);
+    if (d.error) {
+      // A download the user stopped is not a failure: same note, not in red.
+      setLlmNote(d.error, !d.cancelled);
+      toast(d.cancelled ? t('toast.dlCancelled') : t('toast.dlFailed'));
+      return;
+    }
 
     setLlmNote(d.message || t('llm.ready'));
     toast(t('toast.dlDone'));
@@ -725,7 +740,7 @@ $('dlLlm').onclick = async () => {
   }
   if (!confirm(t('llm.confirmDl', {label: m.label, size: m.size}))) return;
 
-  $('dlLlm').disabled = true;
+  setLlmDlActive(true);
   setLlmNote(t('llm.starting'));
   const r = await api('/api/llm/download',
                       { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -736,6 +751,14 @@ $('dlLlm').onclick = async () => {
     return;
   }
   pollLlmDownload();
+};
+
+$('cancelLlmDl').onclick = async () => {
+  // Ask, then let the poll above tell the story: the download thread kills its
+  // curl, drops the .part file and goes inactive, which resets both buttons.
+  $('cancelLlmDl').disabled = true;
+  setLlmNote(t('llm.cancelling'));
+  try { await post('/api/llm/download/cancel'); } catch (e) { /* poll recovers */ }
 };
 
 $('rescanGguf').onclick = async () => {
@@ -781,7 +804,7 @@ async function openSettings() {
   fillGgufList(s.gguf_models, s.llm_model_path);
   fillLlmCatalog(s.llm_catalog);
   if (s.llm_download && s.llm_download.active) {
-    $('dlLlm').disabled = true;
+    setLlmDlActive(true);
     pollLlmDownload();
   }
   syncLlmBackend();
