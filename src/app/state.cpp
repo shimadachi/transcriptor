@@ -125,6 +125,18 @@ Settings AppState::settings_copy() const {
 
 void AppState::replace_settings(const Settings& next) {
     std::lock_guard<std::mutex> lock(mutex_);
+    // A worker is running against the processor and the summarizer this would
+    // delete. The settings API refuses to get here at all while a job runs, but
+    // a finished download comes in on its own thread with no such gate, so park
+    // the change; the job adopts it on its way out.
+    if (worker_live_) {
+        pending_settings_ = next;
+        return;
+    }
+    replace_settings_locked(next);
+}
+
+void AppState::replace_settings_locked(const Settings& next) {
     const std::string old_lang = ui_language();
     settings_ = next;
     lang::set(next.ui_language);
@@ -138,6 +150,29 @@ void AppState::replace_settings(const Settings& next) {
     // Rebuild lazily: the new device/model only takes effect on the next run.
     processor_ = std::make_unique<pipeline::OfflineProcessor>(settings_, device_);
     llm_ = llm::make_backend(settings_, device_);
+}
+
+void AppState::claim_backends() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    // Adopt before the worker starts, never during: this is the one moment the
+    // backends are known to be idle, since every caller has just joined the
+    // previous worker.
+    if (pending_settings_) {
+        replace_settings_locked(*pending_settings_);
+        pending_settings_.reset();
+    }
+    worker_live_ = true;
+}
+
+void AppState::release_backends() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    worker_live_ = false;
+    // A download that finished mid-job parked its change; take it now so the
+    // model it fetched is live without waiting for another run.
+    if (pending_settings_) {
+        replace_settings_locked(*pending_settings_);
+        pending_settings_.reset();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -275,6 +310,7 @@ void AppState::begin(std::vector<float> audio, const paths::fs::path& original_f
     }
 
     join_worker();
+    claim_backends();
     processing_.store(true);
     worker_ = std::thread(&AppState::process_worker, this, std::move(buffer));
 }
@@ -292,6 +328,7 @@ void AppState::start_transcribe() {
     }
 
     join_worker();
+    claim_backends();
     processing_.store(true);
     worker_ = std::thread(&AppState::process_worker, this, std::move(audio));
 }
@@ -313,8 +350,8 @@ void AppState::process_worker(AudioBuffer audio) {
 
         pipeline::ProcessResult result;
         {
-            // The processor is only replaced from replace_settings(), which the
-            // API refuses while processing, so holding a raw pointer is safe.
+            // Safe to hold raw: claim_backends() marked the backends in use, so
+            // replace_settings() parks its change instead of deleting this.
             pipeline::OfflineProcessor* processor = nullptr;
             {
                 std::lock_guard<std::mutex> lock(mutex_);
@@ -335,6 +372,7 @@ void AppState::process_worker(AudioBuffer audio) {
     } catch (const std::exception& e) {
         set_phase("error", -1.0, e.what());
     }
+    release_backends();
     processing_.store(false);
 }
 
@@ -403,6 +441,7 @@ void AppState::start_summarize(const std::string& context,
     }
 
     join_worker();
+    claim_backends();
     processing_.store(true);
     worker_ = std::thread([this] {
         try {
@@ -410,6 +449,7 @@ void AppState::start_summarize(const std::string& context,
         } catch (const std::exception& e) {
             set_phase("error", -1.0, e.what());
         }
+        release_backends();
         processing_.store(false);
     });
 }

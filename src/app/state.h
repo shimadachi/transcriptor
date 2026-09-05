@@ -119,10 +119,28 @@ private:
     void join_worker();
     void join_download();
 
+    // The rebuild itself, with mutex_ already held.
+    void replace_settings_locked(const Settings& next);
+
+    // Bracket a worker that will hold processor_/llm_ raw pointers. claim_
+    // adopts any settings change parked while the last job ran and marks the
+    // backends in use; release_ clears that and adopts anything parked since.
+    // Both do it under one lock, so a download finishing cannot slip between
+    // the check and the rebuild.
+    void claim_backends();
+    void release_backends();
+
     mutable std::mutex mutex_;
 
     Settings   settings_;          // guarded by mutex_
     DeviceInfo device_;            // guarded by mutex_
+
+    // A settings change that landed mid-job. replace_settings() destroys the
+    // processor and the summarizer, and a worker holds raw pointers to both --
+    // which is why the settings API refuses while a job runs. The download
+    // thread has no such gate, so its change waits here instead.
+    std::optional<Settings> pending_settings_;   // guarded by mutex_
+    bool                    worker_live_ = false;
 
     std::unique_ptr<pipeline::OfflineProcessor> processor_;   // guarded by mutex_
     std::unique_ptr<llm::Backend>               llm_;         // guarded by mutex_
