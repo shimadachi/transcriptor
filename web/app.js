@@ -1,7 +1,7 @@
 const $ = (id) => document.getElementById(id);
 const SC = ['--s0','--s1','--s2','--s3','--s4','--s5','--s6','--s7'];
 const cssv = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
-let prevResult = false, prevSummaryRev = 0;
+let prevResultRev = 0, prevSummaryRev = 0;
 
 // Build the VU meter bars once.
 const METER_BARS = 40;
@@ -360,11 +360,14 @@ async function poll() {
     hint.innerHTML = notes.join('<br>');
   } else hint.style.display = 'none';
 
-  const freshResult  = s.has_result && !prevResult;
+  // Watch the revision, not has_result. Transcribing the same audio again never
+  // lowers that flag, so a run-to-run change was invisible and the panel kept
+  // showing the previous text until a summary happened to land.
+  const resRev = s.result_rev || 0;
+  const freshResult  = resRev !== prevResultRev;
   const freshSummary = (s.summary_rev || 0) !== prevSummaryRev;
 
-  if (freshResult) { prevResult = true; await loadResult(); }
-  if (!s.has_result) prevResult = false;
+  if (freshResult) { prevResultRev = resRev; if (s.has_result) await loadResult(); }
   // Re-render on every NEW summary (rev changes), even if one already existed.
   const rev = s.summary_rev || 0;
   if (rev !== prevSummaryRev) { prevSummaryRev = rev; if (s.has_summary) await loadResult(); }
@@ -444,8 +447,8 @@ $('cancelBtn').onclick = async () => {
   if (browserRec) cancelBrowserCapture();   // stop + skip upload
   const r = await post('/api/cancel');       // clear result + delete empty folder
   if (r && r.error) { toast(r.error); return; }
-  // Reset the panels to their empty state.
-  prevResult = false;
+  // Reset the panels to their empty state. The revision is left alone: it only
+  // ever climbs, so the next run's transcript still reads as new.
   $('transcript').innerHTML =
     '<span class="empty" data-i18n="tx.empty">' + esc(t('tx.empty')) + '</span>';
   renderSummary(null);
