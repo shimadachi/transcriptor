@@ -2,6 +2,11 @@ const $ = (id) => document.getElementById(id);
 const SC = ['--s0','--s1','--s2','--s3','--s4','--s5','--s6','--s7'];
 const cssv = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 let prevResultRev = 0, prevSummaryRev = 0;
+// Whether the studio transcript actually holds words. has_result only says a
+// run finished: a take of silence finishes with a result whose lines are empty
+// (or absent altogether), and summarizing that asks a model to load and think
+// about nothing, to arrive at "There is no text to summarize."
+let txHasText = false;
 
 // Build the VU meter bars once.
 const METER_BARS = 40;
@@ -166,6 +171,43 @@ const ICON = {
   mic: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><line x1="12" y1="18" x2="12" y2="21"/></svg>',
 };
 function closeAllSelects(){ document.querySelectorAll('.xsel.open').forEach(w => w.classList.remove('open')); }
+
+// ---- the page's own confirm ----
+// window.confirm() is rendered by the webview host rather than by the page: it
+// drops in at the top of the window in the system's own colours, and no
+// stylesheet here can touch it. This is the same question asked in the app's
+// language. Returns a promise, so callers read the way they did before.
+let askResolve = null;
+function ask(opts) {
+  return new Promise(resolve => {
+    askClose(false);            // never leave one hanging behind another
+    askResolve = resolve;
+    $('askTitle').textContent = opts.title || '';
+    $('askBody').textContent  = opts.body || '';
+    $('askYes').textContent   = opts.yes || t('ask.yes');
+    $('askNo').textContent    = opts.no || t('set.cancel');
+    $('askBg').classList.add('on');
+    $('askYes').focus();
+  });
+}
+function askClose(answer) {
+  if (!askResolve) return;
+  const resolve = askResolve;
+  askResolve = null;
+  $('askBg').classList.remove('on');
+  resolve(answer);
+}
+$('askYes').onclick = () => askClose(true);
+$('askNo').onclick  = () => askClose(false);
+// Clicking the backdrop is a decline, the same as Cancel — and the same as the
+// settings modal, so the two dialogs do not disagree about what a stray click
+// outside them means.
+$('askBg').onclick = (e) => { if (e.target === $('askBg')) askClose(false); };
+document.addEventListener('keydown', (e) => {
+  if (!askResolve) return;
+  if (e.key === 'Escape') { e.preventDefault(); askClose(false); }
+  else if (e.key === 'Enter') { e.preventDefault(); askClose(true); }
+});
 document.addEventListener('click', closeAllSelects);
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAllSelects(); });
 
@@ -333,18 +375,25 @@ async function poll() {
   $('pauseBtn').disabled = !rec;
   $('pauseBtn').textContent = paused ? t('src.resume') : t('src.pause');
   $('pauseBtn').classList.toggle('on', paused);
-  // Cancel: while recording, or when there's a junk result/error to discard
-  // (but not mid-processing — the models can't be interrupted safely).
-  $('cancelBtn').disabled = s.processing || browserUploading ||
-    !(rec || s.has_audio || s.has_result || s.has_summary || s.phase === 'error');
+  // Cancel: while a job runs it stops the models; otherwise it discards the
+  // take or result on screen. The engines have always been able to give up
+  // mid-run — it is what closing the window does — so the only thing missing
+  // was a way to ask them.
+  $('cancelBtn').disabled = browserUploading ||
+    !(s.processing || rec || s.has_audio || s.has_result || s.has_summary ||
+      s.phase === 'error');
+  $('cancelBtn').title = s.processing ? t('btn.cancelJob') : '';
   disableSelect('source', busy);
   disableSelect('micSource', busy);
   $('refreshSrc').disabled = busy;
   $('fileBtn').disabled = busy;
-  // Transcribe stays live after a run: the same audio can go through again
-  // with another model, or with speaker separation switched on.
-  $('txBtn').disabled = busy || !s.has_audio;
-  $('sumBtn').disabled = busy || !s.has_result;
+  // Transcribe stays live after a run — the same audio can go through again
+  // with another model, or with speaker separation switched on — but not
+  // without the weights on disk: pressing it used to start a job whose first
+  // minutes were a silent 3 GB download.
+  $('txBtn').disabled = busy || !s.has_audio || !s.stt_cached;
+  $('txBtn').title = s.stt_cached ? '' : t('note.sttBtn');
+  syncSumBtn(s, busy);
 
   // saved output location
   const saved = $('savedRow');
@@ -358,13 +407,28 @@ async function poll() {
   if (s.save_error) { serr.style.display = 'flex'; $('saveErrMsg').textContent = s.save_error; }
   else serr.style.display = 'none';
 
-  // First-run model notices. Both downloads happen automatically when the
-  // pipeline first needs them, so this is informational, not a blocker.
+  // First-run model notices, both of them a way in rather than a line of text
+  // to read and wonder what to do with. The speech one opens the panel that
+  // picks a model, because there is a choice to make; the speaker models have
+  // no choice attached, so that one just fetches them and reports here.
   const hint = $('diarHint');
   const notes = [];
-  if (!s.stt_cached) notes.push(t('note.sttMissing'));
+  const dl = s.model_download || {};
+  if (!s.stt_cached) {
+    notes.push('<a href="#settings" class="caution" data-go="stt">' +
+               t('note.sttMissing') + '</a>');
+  }
   if (s.diarization_enabled && s.diar_supported && !s.diar_cached) {
-    notes.push(t('note.diarMissing'));
+    if (dl.active && dl.kind === 'diarize') {
+      const pct = dl.progress == null ? '' : pctText(dl.progress);
+      notes.push('<span class="caution busy">' +
+                 esc(dl.message || t('llm.downloading')) + pct + '</span>');
+    } else if (dl.kind === 'diarize' && dl.error) {
+      notes.push('<a class="caution err" data-go="diar">' + esc(dl.error) +
+                 t('note.diarRetry') + '</a>');
+    } else {
+      notes.push('<a class="caution" data-go="diar">' + t('note.diarMissing') + '</a>');
+    }
   }
   if (s.diarization_enabled && !s.diar_supported) notes.push(t('note.diarUnbuilt'));
   if (notes.length) {
@@ -392,7 +456,13 @@ async function poll() {
     // compared equal and never tried the reload again.
     try {
       // renders the empty state too, so a cleared panel clears
-      if (await loadResult()) { prevResultRev = resRev; prevSummaryRev = sumRev; }
+      if (await loadResult()) {
+        prevResultRev = resRev; prevSummaryRev = sumRev;
+        // The load is what learns whether there are words, and it happens after
+        // the buttons were set above; without this the Summarize button spent a
+        // whole tick describing the previous transcript.
+        syncSumBtn(s, busy);
+      }
     } catch (e) { /* leave the revisions be; the next poll retries */ }
   }
 
@@ -425,6 +495,9 @@ async function loadResult() {
   resultLoading = true;
   try {
     const d = await api('/api/result');
+    // Read before rendering, and only here: renderTranscript() also draws the
+    // library's panel, which must not move the studio's button.
+    txHasText = transcriptHasText(d.result);
     renderTranscript(d.result);
     renderSummary(d.summary);
     return true;
@@ -432,7 +505,28 @@ async function loadResult() {
     resultLoading = false;
   }
 }
-function renderTranscript(res, el) {
+// Nothing to summarize without words, whatever has_result says. Says which of
+// the two it is on hover, so a dimmed button is not a dead end — and is read
+// fresh each time, so the reason follows a language switch.
+function syncSumBtn(s, busy) {
+  const noWords = !s.has_result || !txHasText;
+  $('sumBtn').disabled = busy || noWords;
+  $('sumBtn').title = noWords ? t(s.has_result ? 'sum.emptyTx' : 'sum.noTx') : '';
+}
+
+// A whitespace-only line is not text: whisper hands back a timed, speaker-
+// tagged line with nothing in it often enough that counting lines would call an
+// empty transcript full.
+function transcriptHasText(res) {
+  return !!(res && res.lines &&
+            res.lines.some(l => l && typeof l.text === 'string' && l.text.trim()));
+}
+
+// `seekable` turns the timestamps into controls that move the playback head.
+// Only the library passes it, and only when the recording kept its audio:
+// there is nothing to jump into otherwise, and a timestamp that looks pressable
+// and does nothing is worse than one that never offered.
+function renderTranscript(res, el, seekable) {
   el = el || $('transcript');
   if (!res || !res.lines || !res.lines.length) {
     el.innerHTML = '<span class="empty">' + esc(t('tx.none')) + '</span>'; return;
@@ -445,6 +539,14 @@ function renderTranscript(res, el) {
       // Named `ts`, not `t`: `t` is the translation lookup.
       const ts = document.createElement('span');
       ts.className = 'ts'; ts.textContent = l.ts;
+      if (seekable && typeof l.start === 'number') {
+        // data-at is what the delegated handler and the CSS both key off, so
+        // the two can never disagree about which stamps are live.
+        ts.dataset.at = l.start;
+        ts.setAttribute('role', 'button');
+        ts.setAttribute('tabindex', '0');
+        ts.title = t('lib.seekTo');
+      }
       div.appendChild(ts);
     }
     if (res.diarized && l.speaker !== null) {
@@ -495,10 +597,14 @@ $('pauseBtn').onclick = async () => {
 };
 $('cancelBtn').onclick = async () => {
   if (browserRec) cancelBrowserCapture();   // stop + skip upload
-  const r = await post('/api/cancel');       // clear result + delete empty folder
+  const r = await post('/api/cancel');
   if (r && r.error) { toast(r.error); return; }
-  // Reset the panels to their empty state. The revision is left alone: it only
-  // ever climbs, so the next run's transcript still reads as new.
+  // Stopping a run throws nothing away, so the panels stay as they are — the
+  // transcript a cancelled summary was reading is still the transcript.
+  if (r && r.stopped === 'job') { toast(t('toast.jobStopped')); return; }
+  // A cancelled take or a discarded result does clear them. The revision is
+  // left alone: it only ever climbs, so the next run's transcript still reads
+  // as new.
   $('transcript').innerHTML =
     '<span class="empty" data-i18n="tx.empty">' + esc(t('tx.empty')) + '</span>';
   renderSummary(null);
@@ -735,116 +841,237 @@ function fillGgufList(paths, selected) {
 $('s_ggufsel').addEventListener('change', () => {
   if ($('s_ggufsel').value) $('s_llmpath').value = $('s_ggufsel').value;
 });
-// ---- downloadable summarizer models ----
-let llmCatalog = [];
-let llmDlTimer = null;
+// ---- downloadable models ----
+// Speech weights and summarizer GGUFs behave identically from here: pick from
+// a catalog that says what each one is and what it costs, press Download, watch
+// it land. The server runs one download at a time, so one timer serves both.
+//
+// The speech catalog is the model picker itself, not an optional shortcut
+// beside it — nothing is fetched during a transcription any more, so this panel
+// is the only place weights ever arrive from.
+const DL = {
+  llm:     {sel: 's_llmdl', btn: 'dlLlm',     cancel: 'cancelLlmDl',     note: 'llmDlNote'},
+  whisper: {sel: 's_model', btn: 'dlWhisper', cancel: 'cancelWhisperDl', note: 'whisperDlNote'},
+};
+let catalogs = {llm: [], whisper: []};
+let dlTimer = null;
+let dlKind = 'llm';       // which section the running download belongs to
 
-function fillLlmCatalog(catalog) {
-  llmCatalog = catalog || [];
-  const sel = $('s_llmdl');
+function catalogEntry(kind, id) {
+  return catalogs[kind].find(x => x.id === id);
+}
+
+// The sign leads in Turkish and trails in English. It was hardcoded the
+// Turkish way, which was quiet enough inside the settings panel and much less
+// so once a download started reporting itself on the main screen.
+function pctText(frac) {
+  const n = Math.round(frac * 100);
+  return LANG === 'tr' ? ' (%' + n + ')' : ' (' + n + '%)';
+}
+
+// `placeholder` heads the list with an unselected entry, so "no model yet" is a
+// state the dropdown can actually show rather than a silent first item.
+//
+// `stored` is what the settings currently hold. A dropdown that cannot show its
+// own saved value reports "" for it, and the next save writes that "" back —
+// so a name the catalog does not list (a legacy large-v2, or a model put there
+// by hand) is added as an option of its own. fillDeviceList() keeps a missing
+// card visible for the same reason.
+function fillCatalog(kind, list, placeholder, stored) {
+  catalogs[kind] = list || [];
+  const sel = $(DL[kind].sel);
+  const keep = sel.value;
   sel.innerHTML = '';
-  llmCatalog.forEach(m => {
+  if (placeholder) {
+    const o = document.createElement('option');
+    o.value = ''; o.textContent = placeholder;
+    sel.appendChild(o);
+  }
+  catalogs[kind].forEach(m => {
     const o = document.createElement('option');
     o.value = m.id;
     o.textContent = m.label + ' · ' + m.size + (m.downloaded ? t('llm.downloaded') : '');
     sel.appendChild(o);
   });
-  refreshSelect('s_llmdl');
-  showLlmNote();
+  if (stored && !catalogEntry(kind, stored)) {
+    const o = document.createElement('option');
+    o.value = stored;
+    o.textContent = stored + t('stt.notListed');
+    sel.appendChild(o);
+  }
+  // Whatever was on screen wins a refill, so rebuilding the list under an open
+  // panel does not move the user's choice; the stored value is what a first
+  // fill lands on.
+  const has = (v) => Array.from(sel.options).some(o => o.value === v);
+  if (keep && has(keep)) sel.value = keep;
+  else if (stored && has(stored)) sel.value = stored;
+  refreshSelect(DL[kind].sel);
+  showNote(kind);
 }
 
-function setLlmNote(text, isError) {
-  const el = $('llmDlNote');
+function setNote(kind, text, isError) {
+  const el = $(DL[kind].note);
   el.textContent = text || '';
   el.classList.toggle('err', !!isError);
 }
 
-// Default note for the highlighted catalog entry.
-function showLlmNote() {
-  const m = llmCatalog.find(x => x.id === $('s_llmdl').value);
-  if (!m) return setLlmNote('');
-  setLlmNote(m.downloaded ? (m.note + t('llm.already'))
-                          : (m.note + t('llm.willDl') + m.size));
+// Default note for the highlighted catalog entry: what it is, then whether it
+// is here or what fetching it will cost.
+function showNote(kind) {
+  const m = catalogEntry(kind, $(DL[kind].sel).value);
+  if (!m) return setNote(kind, kind === 'whisper' ? t('stt.pick') : '');
+  setNote(kind, m.downloaded ? (m.note + t('llm.already'))
+                             : (m.note + t('llm.willDl') + m.size));
 }
-$('s_llmdl').addEventListener('change', showLlmNote);
+$('s_llmdl').addEventListener('change', () => showNote('llm'));
+$('s_model').addEventListener('change', () => showNote('whisper'));
 
 // Download and Cancel are the same control in two states: only one of them is
 // ever useful, so only one is ever on screen.
-function setLlmDlActive(on) {
-  $('dlLlm').disabled = on;
-  const c = $('cancelLlmDl');
+function setDlActive(kind, on) {
+  $(DL[kind].btn).disabled = on;
+  const c = $(DL[kind].cancel);
   c.style.display = on ? '' : 'none';
   if (on) c.disabled = false;
 }
 
 // Poll until the download thread finishes, then adopt the fetched file.
-function pollLlmDownload() {
-  if (llmDlTimer) return;
-  llmDlTimer = setInterval(async () => {
+function pollDownload() {
+  if (dlTimer) return;
+  dlTimer = setInterval(async () => {
     let d;
-    try { d = await api('/api/llm/download'); } catch (e) { return; }
-    if (d.active) {
-      const pct = d.progress == null ? '' : ' (%' + Math.round(d.progress * 100) + ')';
-      setLlmNote((d.message || t('llm.downloading')) + pct);
-      setLlmDlActive(true);
+    try { d = await api('/api/model/download'); } catch (e) { return; }
+    const kind = d.kind || dlKind;
+    // The speaker models are fetched from the studio caution and report
+    // themselves there; this panel has no controls for them to drive.
+    if (!DL[kind]) {
+      if (!d.active) { clearInterval(dlTimer); dlTimer = null; }
       return;
     }
-    clearInterval(llmDlTimer); llmDlTimer = null;
-    setLlmDlActive(false);
+    if (d.active) {
+      const pct = d.progress == null ? '' : pctText(d.progress);
+      setNote(kind, (d.message || t('llm.downloading')) + pct);
+      setDlActive(kind, true);
+      return;
+    }
+    clearInterval(dlTimer); dlTimer = null;
+    setDlActive(kind, false);
     if (d.error) {
       // A download the user stopped is not a failure: same note, not in red.
-      setLlmNote(d.error, !d.cancelled);
+      setNote(kind, d.error, !d.cancelled);
       toast(d.cancelled ? t('toast.dlCancelled') : t('toast.dlFailed'));
       return;
     }
 
-    setLlmNote(d.message || t('llm.ready'));
+    setNote(kind, d.message || t('llm.ready'));
     toast(t('toast.dlDone'));
     // The server already pointed the settings at the new file; mirror that here
     // so saving the panel does not undo it.
     const s = await api('/api/settings');
-    fillLlmCatalog(s.llm_catalog);
-    $('s_llmpath').value = s.llm_model_path || '';
-    fillGgufList(s.gguf_models, s.llm_model_path);
+    if (kind === 'whisper') {
+      fillCatalog('whisper', s.whisper_catalog, t('stt.none'), s.whisper_model);
+      $('s_model').value = s.whisper_model || '';
+      $('s_whisperpath').value = s.whisper_model_path || '';
+      refreshSelect('s_model');
+    } else {
+      fillCatalog('llm', s.llm_catalog);
+      $('s_llmpath').value = s.llm_model_path || '';
+      fillGgufList(s.gguf_models, s.llm_model_path);
+    }
   }, 1000);
 }
 
-$('dlLlm').onclick = async () => {
-  const id = $('s_llmdl').value;
-  const m = llmCatalog.find(x => x.id === id);
+async function startDownload(kind) {
+  const id = $(DL[kind].sel).value;
+  const m = catalogEntry(kind, id);
   if (!m) return;
   if (m.downloaded) {
     // Nothing to fetch — just select it, which is what the user meant.
-    $('s_llmpath').value = m.path;
-    const s = await api('/api/settings');
-    fillGgufList(s.gguf_models, m.path);
+    if (kind === 'whisper') {
+      $('s_whisperpath').value = '';   // the picked model, not a stale path
+    } else {
+      $('s_llmpath').value = m.path;
+      const s = await api('/api/settings');
+      fillGgufList(s.gguf_models, m.path);
+    }
     toast(t('toast.dlAlready'));
     return;
   }
-  if (!confirm(t('llm.confirmDl', {label: m.label, size: m.size}))) return;
+  const go = await ask({
+    title: t('ask.downloadTitle'),
+    body:  t('llm.confirmDl', {label: m.label, size: m.size}),
+    yes:   t('set.llmDlBtn'),
+  });
+  if (!go) return;
 
-  setLlmDlActive(true);
-  setLlmNote(t('llm.starting'));
+  dlKind = kind;
+  setDlActive(kind, true);
+  setNote(kind, t('llm.starting'));
   // post(), not a hand-built header set. Building the headers here omitted
   // X-Transcriptor-Token, so the server answered every download with 403
   // "This page is out of date — reload it" — which reloading could not fix,
   // because the header was never being sent in the first place.
-  const r = await post('/api/llm/download', { id: id });
+  const r = await post('/api/model/download', {kind: kind, id: id});
   if (r.error) {
-    setLlmDlActive(false);   // both controls back, not just Download
-    setLlmNote(r.error, true);
+    setDlActive(kind, false);   // both controls back, not just Download
+    setNote(kind, r.error, true);
     return;
   }
-  pollLlmDownload();
-};
+  pollDownload();
+}
 
-$('cancelLlmDl').onclick = async () => {
+async function cancelDownload(kind) {
   // Ask, then let the poll above tell the story: the download thread kills its
   // curl, drops the .part file and goes inactive, which resets both buttons.
-  $('cancelLlmDl').disabled = true;
-  setLlmNote(t('llm.cancelling'));
-  try { await post('/api/llm/download/cancel'); } catch (e) { /* poll recovers */ }
-};
+  $(DL[kind].cancel).disabled = true;
+  setNote(kind, t('llm.cancelling'));
+  try { await post('/api/model/download/cancel'); } catch (e) { /* poll recovers */ }
+}
+
+// ---- transcript → playhead ----
+// Clicking a timestamp in a saved transcript moves the recording to it. The
+// stamps are rebuilt whenever a recording is opened, so the listeners are
+// delegated to the panel rather than attached per line.
+function seekLibraryTo(sec) {
+  const a = $('libAudio');
+  if (!a.getAttribute('src') || !isFinite(sec)) return;
+
+  const jump = () => {
+    const dur = a.duration;
+    a.currentTime = Math.max(0, isFinite(dur) && dur > 0 ? Math.min(sec, dur) : sec);
+    plPaint();
+    // Jumping to a moment is a request to hear it. Already playing, it just
+    // moves; paused, it starts — this is a click, so autoplay allows it.
+    if (a.paused) { const p = a.play(); if (p && p.catch) p.catch(() => {}); }
+  };
+
+  // preload="metadata" usually has the length in hand already; on the very
+  // first click of a fresh page it may not, and seeking before then is ignored.
+  if (a.readyState > 0) jump();
+  else a.addEventListener('loadedmetadata', jump, {once: true});
+}
+
+function stampAt(target) {
+  const el = target && target.closest && target.closest('.ts[data-at]');
+  return el ? parseFloat(el.dataset.at) : NaN;
+}
+
+$('libTranscript').addEventListener('click', (e) => {
+  const at = stampAt(e.target);
+  if (!isNaN(at)) seekLibraryTo(at);
+});
+$('libTranscript').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const at = stampAt(e.target);
+  if (isNaN(at)) return;
+  e.preventDefault();
+  seekLibraryTo(at);
+});
+
+$('dlLlm').onclick     = () => startDownload('llm');
+$('dlWhisper').onclick = () => startDownload('whisper');
+$('cancelLlmDl').onclick     = () => cancelDownload('llm');
+$('cancelWhisperDl').onclick = () => cancelDownload('whisper');
 
 $('rescanGguf').onclick = async () => {
   const s = await api('/api/settings');
@@ -856,7 +1083,13 @@ async function openSettings() {
   const s = await api('/api/settings');
   $('s_theme').value = s.ui_theme || themePref;
   fillDeviceList(s.devices, s.device);
-  $('s_model').value = s.whisper_model;
+  // Built from the catalog, so the sizes and the "already here" marks are
+  // current every time the panel opens. The placeholder is what a fresh
+  // install lands on: nothing is chosen until the user chooses.
+  fillCatalog('whisper', s.whisper_catalog, t('stt.none'), s.whisper_model);
+  $('s_model').value = s.whisper_model || '';
+  refreshSelect('s_model');
+  showNote('whisper');
   $('s_language').value = s.language;
   $('s_whisperpath').value = s.whisper_model_path || '';
   $('s_sysgain').value = s.system_gain;
@@ -886,11 +1119,15 @@ async function openSettings() {
   $('s_llmctx').value = s.llm_ctx;
   $('s_llmgpu').value = s.llm_gpu_layers;
   $('s_llmmaxtok').value = s.llm_max_tokens;
+  $('s_llmthink').checked = !!s.llm_thinking;
   fillGgufList(s.gguf_models, s.llm_model_path);
-  fillLlmCatalog(s.llm_catalog);
-  if (s.llm_download && s.llm_download.active) {
-    setLlmDlActive(true);
-    pollLlmDownload();
+  fillCatalog('llm', s.llm_catalog);
+  // A download that is already running belongs to whichever section started
+  // it, so the panel picks its controls back up where they were left.
+  if (s.model_download && s.model_download.active && DL[s.model_download.kind]) {
+    dlKind = s.model_download.kind;
+    setDlActive(dlKind, true);
+    pollDownload();
   }
   syncLlmBackend();
 
@@ -986,6 +1223,31 @@ function showSetTab(name) {
 SET_TABS.forEach(n => { $('setTab_' + n).onclick = () => showSetTab(n); });
 
 $('settingsBtn').onclick = openSettings;
+
+// The first-run cautions are the way to act on themselves. Delegated, because
+// the notice is rebuilt from scratch on every poll that needs it.
+$('diarHint').addEventListener('click', async (e) => {
+  const link = e.target.closest && e.target.closest('a.caution');
+  if (!link) return;
+  e.preventDefault();
+
+  // The speaker models have nothing to choose between, so there is nothing to
+  // go to Settings for: fetch them here and let the notice carry the progress.
+  // The next poll picks the state up from /api/state and redraws the line.
+  if (link.dataset.go === 'diar') {
+    const r = await post('/api/model/download', {kind: 'diarize', id: 'diarize'});
+    if (r.error) toast(r.error);
+    return;
+  }
+
+  await openSettings();
+  showSetTab('general');
+  // Land on the control, not just the tab it lives in.
+  const sel = $('s_model');
+  if (sel && sel._x && sel._x.wrap && sel._x.wrap.scrollIntoView) {
+    sel._x.wrap.scrollIntoView({block: 'center'});
+  }
+});
 $('cancelSettings').onclick = () => $('modalBg').classList.remove('on');
 $('modalBg').onclick = (e) => { if (e.target === $('modalBg')) $('modalBg').classList.remove('on'); };
 $('fetchModels').onclick = async () => {
@@ -1034,6 +1296,7 @@ $('saveSettings').onclick = async () => {
     llm_ctx: parseInt($('s_llmctx').value, 10),
     llm_gpu_layers: parseInt($('s_llmgpu').value, 10),
     llm_max_tokens: parseInt($('s_llmmaxtok').value, 10),
+    llm_thinking: $('s_llmthink').checked,
     llm_base_url: $('s_llmurl').value, llm_model: $('s_llmmodel').value,
     llm_timeout: parseFloat($('s_llmtimeout').value),
     summary_language: $('s_sumlang').value,
@@ -1297,9 +1560,15 @@ $('pendingSave').onclick = () => {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 };
-$('pendingDrop').onclick = () => {
+$('pendingDrop').onclick = async () => {
   if (!_pendingBlob) return;
-  if (!confirm(t('pending.dropAsk'))) return;
+  const go = await ask({
+    title: t('ask.discardTitle'),
+    body:  t('pending.dropAsk'),
+    yes:   t('ask.discard'),
+  });
+  // The take could have been resolved while the question was on screen.
+  if (!go || !_pendingBlob) return;
   clearPending();
   toast(t('toast.pendingDropped'));
 };
@@ -1397,13 +1666,23 @@ function renderLibraryList() {
   });
 }
 
-async function openLibraryItem(id) {
+// `tx` / `sum` name which saved transcript and summary to show. A different
+// recording always starts at its originals; the server falls back to them
+// anyway if a name is asked for that is no longer on disk, and answers with
+// what it actually opened.
+async function openLibraryItem(id, tx, sum) {
+  if (libCurrent !== id) { tx = ''; sum = ''; }
+  const q = '/api/library/item?id=' + encodeURIComponent(id) +
+            '&transcript=' + encodeURIComponent(tx || '') +
+            '&summary=' + encodeURIComponent(sum || '');
   let d;
-  try { d = await api('/api/library/item?id=' + encodeURIComponent(id)); }
+  try { d = await api(q); }
   catch (e) { toast(t('lib.loadErr')); return; }
   if (d.error) { toast(d.error); return; }
-  if (libCurrent !== id) $('libAudio').pause();
+  if (libCurrent !== id) { $('libAudio').pause(); closeLibRun(); }
   libCurrent = id; libItem = d;
+  libTx  = d.transcript_name || '';
+  libSum = d.summary_name || '';
   renderLibraryList();     // moves the selection highlight
   renderLibraryDetail();
 }
@@ -1418,6 +1697,15 @@ function renderLibraryDetail() {
   const s = libSessions.find(x => x.id === d.id);
   $('libTitle').textContent = s ? libDate(s) : d.id;
   $('libPath').textContent = d.path || '';
+
+  // The version pickers appear only once there is a choice: one transcript and
+  // one summary is the normal state, and an empty dropdown beside each panel
+  // would just be furniture.
+  fillVariantPick('libTxPick', d.transcripts, libTx);
+  fillVariantPick('libSumPick', d.summaries, libSum);
+  // Re-transcribing needs the audio; re-summarizing needs a transcript.
+  $('libRetx').disabled  = !d.audio;
+  $('libResum').disabled = !(d.transcripts && d.transcripts.length);
 
   const audio = $('libAudio');
   if (d.audio) {
@@ -1434,12 +1722,18 @@ function renderLibraryDetail() {
     $('libAudioWrap').hidden = true;
     $('libNoAudio').hidden = false;
   }
+  // The transport draws itself from the element, so it has to be told when the
+  // element changed underneath it — a new recording starts at 0:00, and the
+  // one whose audio is gone must not keep the old length on screen.
+  plPaint();
 
   // transcript.json keeps the speakers and timestamps, so it renders exactly
   // like the live panel; the .txt is the fallback for older sessions.
   const tx = $('libTranscript');
   if (d.transcript && d.transcript.lines && d.transcript.lines.length) {
-    renderTranscript(d.transcript, tx);
+    // Seekable only when this recording actually kept its audio — a session
+    // saved with Save Audio off has a transcript and nothing to play.
+    renderTranscript(d.transcript, tx, !!d.audio);
   } else if (d.transcript_text) {
     tx.innerHTML = '';
     const raw = document.createElement('div');
@@ -1453,6 +1747,259 @@ function renderLibraryDetail() {
   renderSummary(d.summary, $('libSummary'), t('lib.noSum'));
 }
 
+// ===== library transport =====
+// Everything the native bar did, drawn in the app's own palette. The <audio>
+// element still does the work; these handlers only move numbers onto it and
+// read them back out.
+const PL_RATES = [1, 1.25, 1.5, 2];
+
+// h:mm:ss past an hour, m:ss below it — a two-hour meeting and a two-minute
+// note should both read naturally.
+function plClock(sec) {
+  if (!isFinite(sec) || sec < 0) sec = 0;
+  const s = Math.floor(sec % 60), m = Math.floor(sec / 60) % 60;
+  const h = Math.floor(sec / 3600);
+  const mm = h ? String(m).padStart(2, '0') : String(m);
+  return (h ? h + ':' : '') + mm + ':' + String(s).padStart(2, '0');
+}
+
+// How many ticks the ladder is drawn with. Fixed rather than derived from the
+// width: they are spread by the flexbox, so the count only sets how fine the
+// scale reads, and a fixed one means no relayout work on resize.
+const PL_BARS = 80;
+let plLit = -1;   // how many are currently lit, so a repaint touches the delta
+
+// Lights the first `n` ticks. Called on every timeupdate, which is a few times
+// a second, so it only writes to the ones that actually changed.
+function plPaintBars(fraction) {
+  const bars = $('plBars').children;
+  if (!bars || !bars.length) return;
+  const lit = Math.max(0, Math.min(bars.length, Math.round(fraction * bars.length)));
+  if (lit === plLit) return;
+  const from = plLit < 0 ? 0 : Math.min(lit, plLit);
+  const to   = plLit < 0 ? bars.length : Math.max(lit, plLit);
+  for (let i = from; i < to; i++) bars[i].classList.toggle('on', i < lit);
+  plLit = lit;
+}
+
+function plPaint() {
+  const a = $('libAudio');
+  const dur = a.duration, cur = a.currentTime || 0;
+  const known = isFinite(dur) && dur > 0;
+  const p = known ? Math.min(1, Math.max(0, cur / dur)) : 0;
+  const pct = p * 100;
+
+  plPaintBars(p);
+  $('plHead').style.left  = pct + '%';
+  $('plNow').textContent  = plClock(cur);
+  // "--:--" rather than 0:00 while the length is still unknown: a zero there
+  // reads as an empty file.
+  $('plDur').textContent  = known ? plClock(dur) : '--:--';
+
+  const track = $('plTrack');
+  track.setAttribute('aria-valuemax', known ? Math.floor(dur) : 0);
+  track.setAttribute('aria-valuenow', Math.floor(cur));
+  track.setAttribute('aria-valuetext', plClock(cur));
+}
+
+function plSeekAt(clientX) {
+  const a = $('libAudio'), track = $('plTrack');
+  if (!isFinite(a.duration) || a.duration <= 0 || !track.getBoundingClientRect) return;
+  const r = track.getBoundingClientRect();
+  const p = Math.min(1, Math.max(0, (clientX - r.left) / (r.width || 1)));
+  a.currentTime = p * a.duration;
+  plPaint();
+}
+
+function plToggle() {
+  const a = $('libAudio');
+  if (!a.getAttribute('src')) return;
+  // play() rejects when the src is gone or the format is refused; the button
+  // state is driven by the events below either way, so nothing to do here.
+  if (a.paused) { const p = a.play(); if (p && p.catch) p.catch(() => {}); }
+  else a.pause();
+}
+
+(function setupPlayer() {
+  const a = $('libAudio'), track = $('plTrack');
+
+  const bars = $('plBars');
+  for (let i = 0; i < PL_BARS; i++) bars.appendChild(document.createElement('i'));
+
+  ['timeupdate', 'durationchange', 'loadedmetadata', 'seeked', 'emptied']
+    .forEach(ev => a.addEventListener(ev, plPaint));
+  a.addEventListener('play',  () => $('plPlay').classList.add('on'));
+  a.addEventListener('pause', () => $('plPlay').classList.remove('on'));
+  a.addEventListener('ended', () => $('plPlay').classList.remove('on'));
+
+  $('plPlay').addEventListener('click', plToggle);
+
+  // Dragging keeps seeking after the pointer leaves the track, which is how
+  // every other scrubber behaves and how a two-hour recording stays usable.
+  let dragging = false;
+  track.addEventListener('pointerdown', e => {
+    dragging = true;
+    if (track.setPointerCapture) track.setPointerCapture(e.pointerId);
+    plSeekAt(e.clientX);
+  });
+  track.addEventListener('pointermove', e => { if (dragging) plSeekAt(e.clientX); });
+  const drop = e => {
+    dragging = false;
+    if (track.releasePointerCapture && e.pointerId !== undefined) {
+      try { track.releasePointerCapture(e.pointerId); } catch (_) {}
+    }
+  };
+  track.addEventListener('pointerup', drop);
+  track.addEventListener('pointercancel', drop);
+
+  track.addEventListener('keydown', e => {
+    const step = e.shiftKey ? 30 : 5;      // Shift for a coarser jump
+    const cur = a.currentTime || 0;
+    if (e.key === 'ArrowRight')     a.currentTime = isFinite(a.duration) ? Math.min(a.duration, cur + step) : cur + step;
+    else if (e.key === 'ArrowLeft') a.currentTime = Math.max(0, cur - step);
+    else if (e.key === 'Home')      a.currentTime = 0;
+    else if (e.key === 'End' && isFinite(a.duration)) a.currentTime = a.duration;
+    else if (e.key === ' ' || e.key === 'Enter') plToggle();
+    else return;
+    e.preventDefault();
+    plPaint();
+  });
+
+  $('plMute').addEventListener('click', () => {
+    a.muted = !a.muted;
+    $('plMute').classList.toggle('off', a.muted);
+  });
+
+  $('plRate').addEventListener('click', () => {
+    const next = PL_RATES[(PL_RATES.indexOf(a.playbackRate) + 1) % PL_RATES.length];
+    a.playbackRate = next;
+    $('plRate').textContent = next + '×';
+    $('plRate').classList.toggle('on', next !== 1);
+  });
+})();
+
+// ---- saved versions, and running the models again ----
+// A re-run can replace what a session already has or sit beside it under a
+// name. Both are on disk as files — transcript.<name>.json, summary.<name>.txt
+// — so the older ones stay openable from the pickers rather than being
+// something the new run consumed.
+let libTx = '', libSum = '';   // which saved transcript / summary is on screen
+let libRunKind = '';           // 'transcribe' | 'summarize' while the form is open
+let libRunTimer = null;
+
+// The wrapper is what is on screen once enhanceSelect() has run; hiding the
+// native element it replaced would leave the dropdown sitting there.
+function showSelect(id, on) {
+  const s = $(id);
+  if (!s) return;
+  const el = (s._x && s._x.wrap) ? s._x.wrap : s;
+  el.hidden = !on;
+}
+
+function fillVariantPick(id, variants, current) {
+  const sel = $(id);
+  const list = variants || [];
+  sel.innerHTML = '';
+  list.forEach(v => {
+    const o = document.createElement('option');
+    o.value = v.name;
+    o.textContent = v.name || t('lib.original');
+    sel.appendChild(o);
+  });
+  sel.value = current || '';
+  refreshSelect(id);
+  showSelect(id, list.length > 1);
+}
+
+$('libTxPick').addEventListener('change', () => {
+  if (libCurrent) openLibraryItem(libCurrent, $('libTxPick').value, libSum);
+});
+$('libSumPick').addEventListener('change', () => {
+  if (libCurrent) openLibraryItem(libCurrent, libTx, $('libSumPick').value);
+});
+
+function closeLibRun() {
+  libRunKind = '';
+  $('libRun').hidden = true;
+  $('libRunName').value = '';
+}
+
+// Opens the form, or starts straight away when there is nothing to overwrite:
+// asking "replace or keep both?" about a session with no summary at all is a
+// question with one real answer.
+function openLibRun(kind) {
+  if (!libItem) return;
+  const existing = kind === 'transcribe' ? (libItem.transcripts || [])
+                                         : (libItem.summaries || []);
+  if (!existing.length) { startLibRun(kind, ''); return; }
+
+  libRunKind = kind;
+  $('libRunQ').textContent =
+    t(kind === 'transcribe' ? 'lib.runAskTx' : 'lib.runAskSum');
+  $('libRunOver').textContent =
+    t(kind === 'transcribe' ? 'lib.runOverTx' : 'lib.runOverSum',
+      {name: (kind === 'transcribe' ? libTx : libSum) || t('lib.original')});
+  $('libRun').querySelector('input[value="overwrite"]').checked = true;
+  $('libRunName').value = '';
+  $('libRun').hidden = false;
+}
+
+async function startLibRun(kind, name) {
+  const id = libCurrent;
+  if (!id) return;
+  const body = {id: id, name: name};
+  if (kind === 'summarize') {
+    // Summarize the transcript that is on screen, with the template and the
+    // context the studio panel is set to — the same request the live button
+    // would make, aimed at a recording that is already saved.
+    body.source = libTx;
+    body.template = $('tpl').value;
+    body.title = $('ctxTitle').value;
+    body.participants = $('ctxPeople').value;
+    body.notes = $('ctxNotes').value;
+  }
+  const r = await post('/api/library/' + kind, body);
+  if (r.error) { toast(r.error); return; }
+  closeLibRun();
+  toast(t(kind === 'transcribe' ? 'lib.runningTx' : 'lib.runningSum'));
+  // The phase readout in the studio carries the progress; here we only need to
+  // know when it is over, so the panel can show what landed.
+  watchLibRun(kind, name);
+}
+
+// One poll, ending when the job does. The result is a file, so the item is
+// simply re-opened — with the new version selected, which is what someone who
+// just asked for it wants to look at.
+function watchLibRun(kind, name) {
+  if (libRunTimer) clearInterval(libRunTimer);
+  libRunTimer = setInterval(async () => {
+    let s;
+    try { s = await api('/api/state'); } catch (e) { return; }
+    if (s.processing) return;
+    clearInterval(libRunTimer); libRunTimer = null;
+    if (s.phase === 'error') { toast(s.message || t('lib.runFailed')); }
+    else toast(t('lib.runDone'));
+    if (!libCurrent) return;
+    await loadLibrary();
+    openLibraryItem(libCurrent, kind === 'transcribe' ? name : libTx,
+                    kind === 'summarize' ? name : libSum);
+  }, 900);
+}
+
+$('libRetx').onclick  = () => openLibRun('transcribe');
+$('libResum').onclick = () => openLibRun('summarize');
+$('libRunCancel').onclick = closeLibRun;
+$('libRunStart').onclick = () => {
+  const mode = $('libRun').querySelector('input[name="libRunMode"]:checked');
+  const wantNew = mode && mode.value === 'new';
+  const name = wantNew ? $('libRunName').value.trim() : '';
+  if (wantNew && !name) { toast(t('lib.runNameNeeded')); return; }
+  // Dots and separators would let a name reach past its own file; the server
+  // refuses them too, but saying so here costs nothing and reads better.
+  if (wantNew && /[./\\:]/.test(name)) { toast(t('lib.runNameBad')); return; }
+  startLibRun(libRunKind, name);
+};
+
 $('libRefresh').onclick = loadLibrary;
 $('libOpen').onclick = async () => {
   if (!libCurrent) return;
@@ -1463,11 +2010,19 @@ $('libOpen').onclick = async () => {
 // Deleting takes the folder off the disk, so it asks first and names what goes.
 $('libDelete').onclick = async () => {
   if (!libCurrent || !libItem) return;
-  const s = libSessions.find(x => x.id === libCurrent);
-  const name = s ? libDate(s) : libCurrent;
-  if (!confirm(t('lib.deleteAsk', {name: name, path: libItem.path || libCurrent}))) return;
+  const id = libCurrent;
+  const s = libSessions.find(x => x.id === id);
+  const name = s ? libDate(s) : id;
+  const go = await ask({
+    title: t('ask.deleteTitle'),
+    body:  t('lib.deleteAsk', {name: name, path: libItem.path || id}),
+    yes:   t('lib.delete'),
+  });
+  // Asking is no longer instant, so the selection may have moved under it —
+  // and deleting whatever happens to be selected now is not what was agreed to.
+  if (!go || libCurrent !== id) return;
 
-  const r = await post('/api/library/delete', {id: libCurrent});
+  const r = await post('/api/library/delete', {id: id});
   if (r.error) { toast(r.error); return; }
   // Stop playback before the list reload drops the selection — the <audio>
   // still points at a file that is gone.

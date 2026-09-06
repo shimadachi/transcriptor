@@ -26,6 +26,33 @@ struct Entry {
     std::string   preview;             // opening words of the transcript
 };
 
+// A saved transcript or summary inside a session.
+//
+// Re-running either one over an archived recording does not have to replace
+// what is there: the result can be kept beside it under a name. On disk that
+// is a middle segment — transcript.json / transcript.<name>.json,
+// summary.txt / summary.<name>.txt — so the originals keep the names every
+// earlier version of the app wrote and still reads.
+struct Variant {
+    std::string  name;         // "" = the original pair
+    std::int64_t mtime = 0;
+    bool         structured = false;   // transcripts: a .json is there, not only .txt
+};
+
+// True for a name that may sit in the middle of a file name: letters, digits,
+// spaces, dashes, underscores. No dots, separators or leading/trailing space,
+// so a name can never climb out of the session folder or shadow another file.
+bool valid_variant(const std::string& name);
+
+// Where a variant's files live. `name` empty gives the originals.
+fs::path transcript_json_file(const fs::path& dir, const std::string& name);
+fs::path transcript_txt_file(const fs::path& dir, const std::string& name);
+fs::path summary_file(const fs::path& dir, const std::string& name);
+
+// What is actually on disk, original first and the rest newest-first.
+std::vector<Variant> transcript_variants(const fs::path& dir);
+std::vector<Variant> summary_variants(const fs::path& dir);
+
 // True for a plain directory name: no separators, no "..", nothing exotic.
 bool valid_id(const std::string& id);
 

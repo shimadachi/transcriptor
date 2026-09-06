@@ -39,6 +39,13 @@ std::string fmt_ts(double seconds) {
     return buf;
 }
 
+bool ProcessResult::has_text() const {
+    for (const Line& l : lines) {
+        if (!trim(l.text).empty()) return true;
+    }
+    return false;
+}
+
 std::string ProcessResult::plain_text(const std::string& lang, bool with_ts) const {
     std::vector<std::string> parts;
     parts.reserve(lines.size());
@@ -194,17 +201,18 @@ ProcessResult OfflineProcessor::run(const std::vector<float>& audio, int sampler
                           : 0.0;
 
     // -- transcribe --------------------------------------------------------
-    // Checked at the top of every stage, not only inside the engines. A model
-    // already on disk skips the download entirely, so the canceller below is
-    // never consulted and this is the only thing standing between a shutdown
-    // and a full transcription.
+    // Checked at the top of every stage, not only inside the engines. This is
+    // the only thing standing between a shutdown and a full transcription.
     throw_if_aborted();
     if (progress) progress("transcribe", -1.0, "");
 
-    if (std::string err = models::ensure_whisper_model(settings_, report("transcribe"),
-                                                    &dl_cancel_);
-        !err.empty()) {
-        throw std::runtime_error(err);
+    // The speech model has to be there already. This used to download it --
+    // pressing Transcribe with a fresh install fetched three gigabytes without
+    // being asked, from inside a job that looked like it was working. Settings
+    // downloads it deliberately now; here it is only ever a question.
+    if (std::string missing = models::whisper_missing_reason(settings_);
+        !missing.empty()) {
+        throw std::runtime_error(missing);
     }
     throw_if_aborted();
 

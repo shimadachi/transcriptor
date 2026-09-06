@@ -9,6 +9,7 @@
 #include "diarize/diarizer.h"
 #include "llm/templates.h"
 #include "util/export.h"
+#include "util/library.h"
 #include "util/models.h"
 
 namespace transcriptor::app {
@@ -33,6 +34,13 @@ const std::map<std::string, PhaseText>& phase_messages() {
         {"error",       {"Error",               "Hata"}},
     };
     return kMessages;
+}
+
+// How a run the user stopped ends. Not "Error": nothing went wrong, and
+// nothing was thrown away — the audio or transcript it was reading is still
+// there to try again with.
+std::string cancelled_message() {
+    return L("Stopped. Nothing was discarded.", "Durduruldu. Hiçbir şey silinmedi.");
 }
 
 std::string trim(const std::string& s) {
@@ -147,11 +155,23 @@ void AppState::start_job(std::function<void()> body) {
         if (processor_) processor_->request_abort();
         if (llm_) llm_->request_abort();
     }
+    job_cancelled_.store(false);
     worker_ = std::thread([this, body = std::move(body)] {
         try {
             body();
         } catch (const std::exception& e) {
-            set_phase("error", -1.0, e.what());
+            // A run the user stopped is not a failure. The engines report it
+            // by throwing, the same as anything else, so the flag is what
+            // tells the two apart -- otherwise pressing Cancel left a red
+            // "Summarizing was cancelled." sitting there as though something
+            // had gone wrong.
+            if (job_cancelled_.load()) set_phase("idle", -1.0, cancelled_message());
+            else set_phase("error", -1.0, e.what());
+        }
+        // A job that ran to the end while a cancel was in flight has already
+        // written its result; say so rather than reporting it as stopped.
+        if (job_cancelled_.load() && phase() != "idle") {
+            set_phase("idle", -1.0, cancelled_message());
         }
         release_backends();
         processing_.store(false);
@@ -380,6 +400,29 @@ void AppState::cancel() {
     set_phase("idle");
 }
 
+bool AppState::cancel_job() {
+    if (!processing_.load()) return false;
+    // Raised before the engines are asked, so the worker cannot finish and
+    // report a failure in the window between the two.
+    job_cancelled_.store(true);
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        // Both, not whichever is thought to be running: a job moves between
+        // them -- transcribe hands over to summarize when auto_summarize is on
+        // -- and asking only one leaves the other to carry on regardless. An
+        // abort a backend was not in the middle of costs nothing; start_job()
+        // clears it when the next one is admitted.
+        if (processor_) processor_->request_abort();
+        if (llm_) llm_->request_abort();
+    }
+    // The worker unwinds on its own; the phase it lands on says so. Waiting for
+    // it here would block the request thread through a whisper batch, which can
+    // be seconds. Keep whichever phase is running so the spinner does not jump
+    // — only the line under it changes.
+    set_phase(phase(), -1.0, L("Stopping…", "Durduruluyor…"));
+    return true;
+}
+
 void AppState::stop_and_process() {
     std::unique_ptr<audio::Recorder> recorder;
     unsigned gen = 0;
@@ -568,37 +611,45 @@ bool AppState::start_transcribe(std::string* error) {
     return true;
 }
 
+// The transcription itself, with no opinion about where the result goes.
+// Shared by a fresh take and by a re-run over a recording already in the
+// library, which wants the same models, the same VRAM handoff and the same
+// progress reporting, and none of the current-session bookkeeping.
+pipeline::ProcessResult AppState::run_pipeline(const std::vector<float>& audio,
+                                               const Settings& settings) {
+    // VRAM handoff: drop the summarizer's weights before the STT models load.
+    if (settings.manage_vram) {
+        set_phase("transcribe", -1.0, L("Freeing VRAM (LLM)…", "VRAM boşaltılıyor (LLM)…"));
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (llm_) llm_->unload();
+    }
+
+    auto progress = [this](const std::string& phase, double fraction,
+                           const std::string& message) {
+        set_phase(phase, fraction, message);
+    };
+
+    // Safe to hold raw: claim_backends() marked the backends in use, so
+    // replace_settings() parks its change instead of deleting this.
+    pipeline::OfflineProcessor* processor = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        processor = processor_.get();
+    }
+    return processor->run(audio, settings.samplerate, progress);
+}
+
 void AppState::process_worker(AudioBuffer audio) {
     const Settings settings = settings_copy();
     {
-        // VRAM handoff: drop the summarizer's weights before the STT models load.
-        if (settings.manage_vram) {
-            set_phase("transcribe", -1.0, L("Freeing VRAM (LLM)…", "VRAM boşaltılıyor (LLM)…"));
-            std::lock_guard<std::mutex> lock(mutex_);
-            if (llm_) llm_->unload();
-        }
+        pipeline::ProcessResult result = run_pipeline(*audio, settings);
 
-        auto progress = [this](const std::string& phase, double fraction,
-                               const std::string& message) {
-            set_phase(phase, fraction, message);
-        };
-
-        pipeline::ProcessResult result;
-        {
-            // Safe to hold raw: claim_backends() marked the backends in use, so
-            // replace_settings() parks its change instead of deleting this.
-            pipeline::OfflineProcessor* processor = nullptr;
-            {
-                std::lock_guard<std::mutex> lock(mutex_);
-                processor = processor_.get();
-            }
-            result = processor->run(*audio, settings.samplerate, progress);
-        }
-
+        bool has_text = false;
         {
             std::lock_guard<std::mutex> lock(mutex_);
             result_ = std::move(result);
             ++result_rev_;
+            has_text = result_->has_text();
         }
         // The summary on screen described the transcript this one just
         // replaced. Re-running the audio with another model or with speakers
@@ -610,7 +661,12 @@ void AppState::process_worker(AudioBuffer audio) {
         save_transcript();
         set_phase("done", 1.0);
 
-        if (settings.auto_summarize) do_summarize();
+        // Only when the transcript has words in it. A take of silence still
+        // finishes with a result, and handing that to the summarizer sequences
+        // the VRAM, loads a model and thinks about "Speaker 1: " for a while,
+        // to end the run on an error over a recording that simply had nothing
+        // in it. The phase stays "done", which is what actually happened.
+        if (settings.auto_summarize && has_text) do_summarize();
     }
     // The tail -- catch, release_backends(), processing_ -- belongs to
     // start_job(), which owns the thread this runs on.
@@ -709,7 +765,10 @@ bool AppState::start_summarize(const std::string& context,
                                std::string* error) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (!result_.has_value()) {
+        // A result with no words in it is the same answer as no result at all,
+        // and the same message. The button that starts this is dimmed for both,
+        // but the endpoint is reachable without it.
+        if (!result_.has_value() || !result_->has_text()) {
             if (error) {
                 *error = L("There is no text to summarize.", "Özetlenecek metin yok.");
             }
@@ -749,79 +808,102 @@ bool AppState::start_summarize(const std::string& context,
     return true;
 }
 
+// The request every summary is built from: the chosen template's prompt and
+// its persistent context, plus whatever context was typed for this run.
+// Factored out so a re-run over a library recording asks for exactly what the
+// live panel asks for, and does not drift from it.
+llm::SummaryRequest AppState::build_summary_request(const std::string& transcript,
+                                                    const std::string& template_id,
+                                                    const std::string& extra_context) {
+    llm::SummaryRequest req;
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    req.language    = settings_.summary_language;
+    req.transcript  = transcript;
+    req.template_id = template_id;
+
+    // Per-template edits: prompt override + persistent context, then the
+    // context the user typed for this run. A custom template carries its own
+    // prompt rather than overriding a built-in one.
+    std::string template_context;
+    auto custom = settings_.custom_templates.find(template_id);
+    if (custom != settings_.custom_templates.end()) {
+        req.system_override = trim(custom->second.prompt);
+        template_context = trim(custom->second.context);
+    } else {
+        auto it = settings_.template_overrides.find(template_id);
+        if (it != settings_.template_overrides.end()) {
+            req.system_override = trim(it->second.prompt);
+            template_context = trim(it->second.context);
+        }
+    }
+    std::vector<std::string> parts;
+    if (!template_context.empty()) parts.push_back(template_context);
+    if (!trim(extra_context).empty()) parts.push_back(trim(extra_context));
+    for (std::size_t i = 0; i < parts.size(); ++i) {
+        if (i) req.context += "\n";
+        req.context += parts[i];
+    }
+    return req;
+}
+
+// Runs the summarizer and hands back finished text. Throws SummarizerError,
+// including when the backend is missing or unhealthy, so every caller reports
+// a failure the same way.
+std::string AppState::run_summarizer(const llm::SummaryRequest& req,
+                                     bool manage_vram) {
+    // VRAM handoff the other way: free the STT models before the LLM loads.
+    if (manage_vram) {
+        set_phase("summarizing", -1.0,
+                  L("Handing VRAM over (STT→LLM)…", "VRAM devrediliyor (STT→LLM)…"));
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (processor_) processor_->unload();
+    }
+
+    llm::Backend* backend = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        backend = llm_.get();
+    }
+    if (!backend) {
+        throw llm::SummarizerError(
+            L("The summarizer is not ready.", "Özetleyici hazır değil."));
+    }
+
+    const llm::Availability health = backend->available();
+    if (!health.ok) throw llm::SummarizerError(health.message);
+
+    auto progress = [this](const std::string& msg, double fraction) {
+        set_phase("summarizing", fraction, msg);
+    };
+    // Strip here rather than in either backend: this is the one point the text
+    // passes through on its way to both the UI and the file.
+    return llm::strip_reasoning(backend->summarize(req, progress));
+}
+
 void AppState::do_summarize() {
     llm::SummaryRequest req;
     bool manage_vram = false;
     bool save_summary = false;
 
     {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (!result_.has_value()) return;
-
-        req.language    = settings_.summary_language;
-        req.transcript  = result_->plain_text(settings_.summary_language);
-        req.template_id = summary_template_;
-
-        // Per-template edits: prompt override + persistent context, then the
-        // context the user typed for this run. A custom template carries its own
-        // prompt rather than overriding a built-in one.
-        std::string template_context;
-        auto custom = settings_.custom_templates.find(summary_template_);
-        if (custom != settings_.custom_templates.end()) {
-            req.system_override = trim(custom->second.prompt);
-            template_context = trim(custom->second.context);
-        } else {
-            auto it = settings_.template_overrides.find(summary_template_);
-            if (it != settings_.template_overrides.end()) {
-                req.system_override = trim(it->second.prompt);
-                template_context = trim(it->second.context);
-            }
+        std::string transcript, template_id, context;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!result_.has_value()) return;
+            transcript   = result_->plain_text(settings_.summary_language);
+            template_id  = summary_template_;
+            context      = summary_context_;
+            manage_vram  = settings_.manage_vram;
+            save_summary = settings_.save_summary;
         }
-        std::vector<std::string> parts;
-        if (!template_context.empty()) parts.push_back(template_context);
-        if (!trim(summary_context_).empty()) parts.push_back(trim(summary_context_));
-        for (std::size_t i = 0; i < parts.size(); ++i) {
-            if (i) req.context += "\n";
-            req.context += parts[i];
-        }
-
-        manage_vram  = settings_.manage_vram;
-        save_summary = settings_.save_summary;
+        req = build_summary_request(transcript, template_id, context);
     }
 
     set_phase("summarizing");
 
     try {
-        // VRAM handoff the other way: free the STT models before the LLM loads.
-        if (manage_vram) {
-            set_phase("summarizing", -1.0,
-                      L("Handing VRAM over (STT→LLM)…", "VRAM devrediliyor (STT→LLM)…"));
-            std::lock_guard<std::mutex> lock(mutex_);
-            if (processor_) processor_->unload();
-        }
-
-        llm::Backend* backend = nullptr;
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            backend = llm_.get();
-        }
-        if (!backend) {
-            throw llm::SummarizerError(
-                L("The summarizer is not ready.", "Özetleyici hazır değil."));
-        }
-
-        const llm::Availability health = backend->available();
-        if (!health.ok) {
-            set_phase("error", -1.0, health.message);
-            return;
-        }
-
-        auto progress = [this](const std::string& msg, double fraction) {
-            set_phase("summarizing", fraction, msg);
-        };
-        // Strip here rather than in either backend: this is the one point the
-        // text passes through on its way to both the UI and summary.txt.
-        std::string summary = llm::strip_reasoning(backend->summarize(req, progress));
+        const std::string summary = run_summarizer(req, manage_vram);
 
         paths::fs::path dir;
         {
@@ -834,6 +916,177 @@ void AppState::do_summarize() {
             !exporter::save_text(dir / "summary.txt", summary)) {
             note_save_error(L("The summary could not be written to ",
                               "Özet şuraya yazılamadı: ") + paths::to_utf8(dir));
+        }
+        set_phase("done", 1.0);
+    } catch (const llm::SummarizerError& e) {
+        set_phase("error", -1.0, e.what());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Library re-runs
+// ---------------------------------------------------------------------------
+//
+// Both of these work on a folder in the output directory rather than on the
+// current take, and neither touches result_ or summary_: the studio panels are
+// about the recording in hand, and re-reading an archived one must not replace
+// what is on screen. What they produce lands on disk, and the library panel
+// reloads the item to show it.
+
+namespace {
+
+// The text to summarize, out of whichever files this variant has. The JSON
+// carries a plain_text field written at save time, which is the same string the
+// live path feeds the model; the .txt is the fallback, timestamps and all.
+std::string transcript_text(const paths::fs::path& dir, const std::string& name) {
+    std::string raw;
+    if (paths::read_file(library::transcript_json_file(dir, name), &raw)) {
+        auto j = nlohmann::json::parse(raw, nullptr, /*allow_exceptions=*/false);
+        if (!j.is_discarded() && j.contains("plain_text") && j["plain_text"].is_string()) {
+            return j["plain_text"].get<std::string>();
+        }
+    }
+    if (paths::read_file(library::transcript_txt_file(dir, name), &raw)) return raw;
+    return {};
+}
+
+}  // namespace
+
+paths::fs::path AppState::library_dir(const std::string& id, std::string* error) {
+    const Settings s = settings_copy();
+    const paths::fs::path dir = library::resolve(s.output_dir, id);
+    if (dir.empty() && error) {
+        *error = L("That recording is no longer there.",
+                   "Bu kayıt artık yerinde değil.");
+    }
+    return dir;
+}
+
+bool AppState::start_library_transcribe(const std::string& id,
+                                        const std::string& name,
+                                        std::string* error) {
+    const paths::fs::path dir = library_dir(id, error);
+    if (dir.empty()) return false;
+
+    if (!name.empty() && !library::valid_variant(name)) {
+        if (error) {
+            *error = L("That name cannot be used for a file.",
+                       "Bu ad bir dosya adı olarak kullanılamaz.");
+        }
+        return false;
+    }
+
+    const std::string audio_name = library::find_audio(dir);
+    if (audio_name.empty()) {
+        if (error) {
+            *error = L("That recording has no audio to transcribe again.",
+                       "Bu kaydın yeniden metne dönüştürülecek sesi yok.");
+        }
+        return false;
+    }
+    if (std::string missing = models::whisper_missing_reason(settings_copy());
+        !missing.empty()) {
+        if (error) *error = missing;
+        return false;
+    }
+    if (!claim_job()) {
+        if (error) *error = L("A job is already running.", "İşlem sürüyor.");
+        return false;
+    }
+
+    const paths::fs::path audio_path = dir / paths::from_utf8(audio_name);
+    start_job([this, dir, audio_path, name] {
+        do_library_transcribe(dir, audio_path, name);
+    });
+    return true;
+}
+
+void AppState::do_library_transcribe(const paths::fs::path& dir,
+                                     const paths::fs::path& audio_path,
+                                     const std::string& name) {
+    const Settings settings = settings_copy();
+
+    set_phase("transcribe", -1.0, L("Reading the recording…", "Kayıt okunuyor…"));
+    std::vector<float> audio = audio::decode_file(audio_path, settings.samplerate);
+
+    const pipeline::ProcessResult result = run_pipeline(audio, settings);
+
+    // Written whatever save_transcript says: this run is not a side effect of
+    // recording, it is the thing the user asked for.
+    const std::string lang = settings.summary_language;
+    const bool ok_txt = exporter::save_text(library::transcript_txt_file(dir, name),
+                                            result.plain_text(lang, true));
+    const bool ok_json = exporter::save_json(library::transcript_json_file(dir, name),
+                                             result.to_json(lang));
+    if (!ok_txt || !ok_json) {
+        throw std::runtime_error(L("The transcript could not be written to ",
+                                   "Metin şuraya yazılamadı: ") + paths::to_utf8(dir));
+    }
+    set_phase("done", 1.0);
+}
+
+bool AppState::start_library_summarize(const std::string& id,
+                                       const std::string& source,
+                                       const std::string& name,
+                                       const std::string& context,
+                                       const std::string& template_id,
+                                       std::string* error) {
+    const paths::fs::path dir = library_dir(id, error);
+    if (dir.empty()) return false;
+
+    if ((!name.empty() && !library::valid_variant(name)) ||
+        (!source.empty() && !library::valid_variant(source))) {
+        if (error) {
+            *error = L("That name cannot be used for a file.",
+                       "Bu ad bir dosya adı olarak kullanılamaz.");
+        }
+        return false;
+    }
+
+    const std::string text = trim(transcript_text(dir, source));
+    if (text.empty()) {
+        if (error) {
+            *error = L("There is no text to summarize.", "Özetlenecek metin yok.");
+        }
+        return false;
+    }
+    if (!claim_job()) {
+        if (error) *error = L("A job is already running.", "İşlem sürüyor.");
+        return false;
+    }
+
+    // Resolved before the job so an unknown id falls back the way the live
+    // panel does, rather than reaching the backend as a missing prompt.
+    std::string tpl = template_id;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!llm::is_template(tpl) && !settings_.custom_templates.count(tpl)) {
+            tpl = summary_template_;
+        }
+    }
+
+    start_job([this, dir, text, name, context, tpl] {
+        do_library_summarize(dir, text, name, context, tpl);
+    });
+    return true;
+}
+
+void AppState::do_library_summarize(const paths::fs::path& dir,
+                                    const std::string& transcript,
+                                    const std::string& name,
+                                    const std::string& context,
+                                    const std::string& template_id) {
+    const llm::SummaryRequest req =
+        build_summary_request(transcript, template_id, context);
+    const bool manage_vram = settings_copy().manage_vram;
+
+    set_phase("summarizing");
+    try {
+        const std::string summary = run_summarizer(req, manage_vram);
+        if (!exporter::save_text(library::summary_file(dir, name), summary)) {
+            throw llm::SummarizerError(
+                L("The summary could not be written to ",
+                  "Özet şuraya yazılamadı: ") + paths::to_utf8(dir));
         }
         set_phase("done", 1.0);
     } catch (const llm::SummarizerError& e) {
@@ -867,12 +1120,44 @@ std::vector<std::string> AppState::list_llm_models(
 // Summarizer model download
 // ---------------------------------------------------------------------------
 
-bool AppState::start_llm_download(const std::string& model_id, std::string* error) {
-    const models::LlmModelSpec* spec = models::llm_spec(model_id);
-    if (!spec) {
+bool AppState::start_model_download(const std::string& kind,
+                                    const std::string& model_id,
+                                    std::string* error) {
+    // Resolve to a label and a fetch before anything is claimed, so an unknown
+    // id costs nothing and leaves no slot held.
+    const models::LlmModelSpec*     llm  = nullptr;
+    const models::WhisperModelSpec* stt  = nullptr;
+    // The two speaker models are one thing to the person waiting for them, so
+    // they are one download here — and they carry no catalog id.
+    const bool diarize = (kind == "diarize");
+    if (kind == "llm") {
+        llm = models::llm_spec(model_id);
+    } else if (kind == "whisper") {
+        stt = models::whisper_catalog_entry(model_id);
+    } else if (!diarize) {
+        if (error) *error = L("Unknown model kind: ", "Bilinmeyen model türü: ") + kind;
+        return false;
+    }
+    if (!diarize && !llm && !stt) {
         if (error) *error = L("Unknown model: ", "Bilinmeyen model: ") + model_id;
         return false;
     }
+    if (diarize && models::diarization_ready(settings_copy())) {
+        if (error) {
+            *error = L("The speaker models are already downloaded.",
+                       "Konuşmacı modelleri zaten indirilmiş.");
+        }
+        return false;
+    }
+    const std::string label = llm  ? llm->label
+                            : stt  ? stt->label
+                                   : L("Speaker models", "Konuşmacı modelleri");
+    // Built here rather than glued to the label at the end: the speaker pair is
+    // plural, and "Speaker models is ready." is what gluing produced.
+    const std::string ready = diarize
+        ? L("The speaker models are ready.", "Konuşmacı modelleri hazır.")
+        : label + L(" is ready.", " hazır.");
+
     if (downloading_.exchange(true)) {
         if (error) {
             *error = L("A model is already downloading.",
@@ -885,28 +1170,46 @@ bool AppState::start_llm_download(const std::string& model_id, std::string* erro
     dl_cancel_.reset();   // a cancelled download must not block this one
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        dl_model_    = spec->id;
-        dl_label_    = spec->label;
-        dl_message_  = lang::english() ? "Downloading " + spec->label + "…"
-                                       : spec->label + " indiriliyor…";
+        dl_kind_     = kind;
+        dl_model_    = diarize ? kind : model_id;
+        dl_label_    = label;
+        dl_message_  = lang::english() ? "Downloading " + label + "…"
+                                       : label + " indiriliyor…";
         dl_error_.clear();
         dl_cancelled_ = false;
         dl_progress_ = -1.0;
     }
 
-    const models::LlmModelSpec copy = *spec;
-    download_thread_ = std::thread([this, copy] {
+    // Copied, not captured by pointer: the catalogs are static, but the specs
+    // are different types and the thread only needs one of them.
+    const bool is_llm = llm != nullptr;
+    const models::LlmModelSpec     llm_copy = llm ? *llm : models::LlmModelSpec{};
+    const models::WhisperModelSpec stt_copy = stt ? *stt : models::WhisperModelSpec{};
+
+    download_thread_ = std::thread([this, is_llm, diarize, llm_copy, stt_copy, ready] {
         auto progress = [this](const std::string& msg, double fraction) {
             std::lock_guard<std::mutex> lock(mutex_);
             dl_message_  = msg;
             dl_progress_ = fraction;
         };
 
-        const std::string err = models::ensure_llm_model(copy, progress, &dl_cancel_);
+        std::string      err;
+        paths::fs::path  file;
+        if (diarize) {
+            // Managed paths, so there is nothing to point the settings at
+            // afterwards -- the pipeline finds these by name.
+            err = models::ensure_diarization_models(settings_copy(), progress,
+                                                    &dl_cancel_);
+        } else if (is_llm) {
+            err  = models::ensure_llm_model(llm_copy, progress, &dl_cancel_);
+            file = models::llm_model_file(llm_copy);
+        } else {
+            file = models::whisper_model_file(stt_copy);
+            err  = models::ensure_whisper_model_file(stt_copy, progress, &dl_cancel_);
+        }
         // The error string is the same shape either way; the flag is what tells
         // the UI to say "cancelled" instead of colouring it as a failure.
         const bool stopped = dl_cancel_.requested();
-        const paths::fs::path file = models::llm_model_file(copy);
 
         Settings next;
         {
@@ -914,7 +1217,7 @@ bool AppState::start_llm_download(const std::string& model_id, std::string* erro
             dl_error_ = err;
             dl_cancelled_ = stopped;
             if (err.empty()) {
-                dl_message_  = copy.label + L(" is ready.", " hazır.");
+                dl_message_  = ready;
                 dl_progress_ = 1.0;
             } else {
                 dl_message_.clear();
@@ -923,10 +1226,16 @@ bool AppState::start_llm_download(const std::string& model_id, std::string* erro
             next = settings_;
         }
 
-        if (err.empty()) {
-            // Point the embedded backend at what we just fetched, so the user
-            // does not have to pick the file by hand afterwards.
-            next.llm_model_path = paths::to_utf8(file);
+        if (err.empty() && !diarize) {
+            // Point the engine at what we just fetched, so the user does not
+            // have to pick it again afterwards.
+            if (is_llm) {
+                next.llm_model_path = paths::to_utf8(file);
+            } else {
+                next.whisper_model = stt_copy.id;
+                // A stale hand-typed path would win over the model just chosen.
+                next.whisper_model_path.clear();
+            }
             // The model is on disk either way; what can fail here is recording
             // which file to use. Say so instead of letting the next launch come
             // up pointing at nothing.
@@ -944,7 +1253,7 @@ bool AppState::start_llm_download(const std::string& model_id, std::string* erro
     return true;
 }
 
-bool AppState::cancel_llm_download() {
+bool AppState::cancel_model_download() {
     if (!downloading_.load()) return false;
     // Only asks. The download thread notices its child was killed, clears the
     // partial file and lowers `downloading_` on its way out, so the UI keeps
@@ -953,10 +1262,11 @@ bool AppState::cancel_llm_download() {
     return true;
 }
 
-nlohmann::json AppState::llm_download_json() const {
+nlohmann::json AppState::model_download_json() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return {
         {"active", downloading_.load()},
+        {"kind", dl_kind_},
         {"model", dl_model_.empty() ? nlohmann::json(nullptr)
                                     : nlohmann::json(dl_model_)},
         {"label", dl_label_},
@@ -1010,9 +1320,10 @@ nlohmann::json AppState::state_json() const {
         {"auto_summarize", settings_.auto_summarize},
         {"summary_template", summary_template_},
         {"llm_backend", settings_.llm_backend},
-        // Same fields as llm_download_json(), built here to keep one lock.
-        {"llm_download",
+        // Same fields as model_download_json(), built here to keep one lock.
+        {"model_download",
          {{"active", downloading_.load()},
+          {"kind", dl_kind_},
           {"model", dl_model_.empty() ? nlohmann::json(nullptr)
                                       : nlohmann::json(dl_model_)},
           {"label", dl_label_},

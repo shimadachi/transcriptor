@@ -179,14 +179,22 @@ Run the binary and a window opens. From a console:
 
 ## Models
 
-No model is bundled; each downloads the first time it is needed (via `curl`,
-which ships with Windows 10 1803+, macOS, and Linux):
+No model is bundled. The speech model is chosen and downloaded by hand in
+Settings → General — there is no default, and nothing is fetched during a
+transcription. The rest arrive the first time they are needed. Downloads go
+through `curl`, which ships with Windows 10 1803+, macOS, and Linux:
 
 | Model | Size | When |
 |---|---|---|
-| `ggml-large-v3.bin` (whisper.cpp) | ~3.1 GB | First recording processed |
+| Whisper `tiny` … `large-v3` | 74 MB – 2.9 GB | Chosen and downloaded in Settings |
 | pyannote segmentation-3.0 (ONNX) | ~6 MB | First speaker separation |
 | 3D-Speaker ERes2NetV2 embedding | ~69 MB | First speaker separation |
+
+The speech models, smallest to best: `tiny` and `base` are for checking that
+audio arrives; `small` is the lightest one worth putting a real conversation
+through; `medium` is clearly better on accents and crosstalk; `large-v3-turbo`
+is the recommended default — close to `large-v3` at a fraction of the time and
+half the size; `large-v3` is the most accurate and the slowest.
 
 Location: `%APPDATA%\Transcriptor\models` (Windows),
 `~/Library/Application Support/Transcriptor/models` (macOS),
@@ -240,9 +248,9 @@ audio in real time; gains and the peak limiter come from Settings.
 
 ## VRAM management
 
-For 8 GB cards the models load in sequence: because the app holds the weights
-itself, the LLM is released before transcription starts and whisper is released
-before summarizing does. Turn it off with Settings → **Sequence VRAM**.
+The models load in sequence: because the app holds the weights itself, the LLM
+is released before transcription starts and whisper is released before
+summarizing does. Turn it off with Settings → **Sequence VRAM**.
 
 When a recording does not fit the context window, the summarizer takes notes
 chunk by chunk and merges them.

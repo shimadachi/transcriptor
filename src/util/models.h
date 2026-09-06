@@ -29,6 +29,35 @@ using ProgressFn = std::function<void(const std::string& message, double fractio
 // Whisper GGML weights for "tiny".."large-v3"; empty url for unknown names.
 ModelSpec whisper_spec(const std::string& model_name);
 
+// -- speech models (Whisper GGML) -----------------------------------------
+// The same shape as the summarizer catalog below, and for the same reason:
+// nothing ships in the binary, and the user picks one and downloads it. There
+// is deliberately no default — transcribing used to pull 3 GB down on the
+// first recording, which is a surprising thing for a button press to do.
+struct WhisperModelSpec {
+    std::string   id;             // "large-v3" — what Settings stores
+    std::string   label;          // "Large v3", shown in the dropdown
+    std::uint64_t approx_bytes = 0;
+
+    // Both languages carried rather than resolved here; see LlmModelSpec.
+    std::string note_en;
+    std::string note_tr;
+
+    std::string note() const;
+};
+
+const std::vector<WhisperModelSpec>& whisper_catalog();
+
+// nullptr when the id is not in the catalog.
+const WhisperModelSpec* whisper_catalog_entry(const std::string& id);
+
+// Where a catalog model lands: models_dir() / "ggml-<id>.bin".
+paths::fs::path whisper_model_file(const WhisperModelSpec& spec);
+
+// Empty when transcription can go ahead; otherwise a ready-to-display line
+// saying what is missing and what to do about it.
+std::string whisper_missing_reason(const Settings& s);
+
 ModelSpec segmentation_spec();
 ModelSpec embedding_spec();
 
@@ -68,8 +97,13 @@ std::string ensure_llm_model(const LlmModelSpec& spec, const ProgressFn& progres
 // Each returns an empty string on success, or a human-readable error.
 // If the file already exists, they return immediately without touching the
 // network.
-std::string ensure_whisper_model(const Settings& s, const ProgressFn& progress,
-                                 net::Canceller* cancel = nullptr);
+//
+// The speech weights are fetched by catalog entry rather than from Settings:
+// downloading one is now something the user asks for in Settings, not
+// something a transcription does on their behalf halfway through a job.
+std::string ensure_whisper_model_file(const WhisperModelSpec& spec,
+                                      const ProgressFn& progress,
+                                      net::Canceller* cancel = nullptr);
 std::string ensure_diarization_models(const Settings& s, const ProgressFn& progress,
                                       net::Canceller* cancel = nullptr);
 

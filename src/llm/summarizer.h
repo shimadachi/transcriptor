@@ -15,6 +15,8 @@
 
 #include "config.h"
 #include "device.h"
+// strip_reasoning() and the ReasoningBudget both backends generate against.
+#include "llm/reasoning.h"
 
 namespace transcriptor::llm {
 
@@ -30,13 +32,6 @@ struct Availability {
 
 // Streams status lines while a model loads or tokens are generated.
 using ProgressFn = std::function<void(const std::string& message, double fraction)>;
-
-// Drop the chain-of-thought block reasoning models emit before their answer.
-// Qwen and DeepSeek-R1 wrap it in <think>...</think> and expect the caller to
-// discard it; left in, it reaches the summary pane and summary.txt verbatim.
-// Applies to both backends, since an OpenAI-compatible server fronting one of
-// those models passes the tags straight through.
-std::string strip_reasoning(const std::string& text);
 
 struct SummaryRequest {
     std::string transcript;

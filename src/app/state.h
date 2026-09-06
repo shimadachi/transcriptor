@@ -54,6 +54,12 @@ public:
     // result, deleting the auto-created session folder.
     void cancel();
 
+    // Stop the models mid-run. Nothing is discarded: the audio a cancelled
+    // transcription was reading, and the transcript a cancelled summary was
+    // reading, are still there to try again with. Returns false when no job is
+    // running, which is the caller's cue to fall back to cancel() above.
+    bool cancel_job();
+
     // -- file upload ------------------------------------------------------
     // Decodes then runs the same offline pipeline. Sets the error phase and
     // returns false if the file could not be decoded.
@@ -71,6 +77,25 @@ public:
     // Same contract as start_transcribe().
     bool start_summarize(const std::string& context, const std::string& template_id,
                          std::string* error);
+
+    // -- library re-runs --------------------------------------------------
+    // Run the models again over a recording that is already in the output
+    // folder. Neither touches the panels: what they make lands on disk, and
+    // the library reloads to show it.
+    //
+    // `name` says where the result goes — empty replaces the session's
+    // original transcript/summary, anything else keeps both by writing
+    // transcript.<name>.json / summary.<name>.txt beside it. `source` names
+    // which saved transcript to summarize ("" = the original).
+    //
+    // Same contract as start_transcribe(): false with `error` filled when the
+    // recording is gone, the name is unusable, there is nothing to work from,
+    // or a job already holds the worker.
+    bool start_library_transcribe(const std::string& id, const std::string& name,
+                                  std::string* error);
+    bool start_library_summarize(const std::string& id, const std::string& source,
+                                 const std::string& name, const std::string& context,
+                                 const std::string& template_id, std::string* error);
 
     // -- settings ---------------------------------------------------------
     Settings settings_copy() const;
@@ -102,19 +127,23 @@ public:
     std::vector<std::string> list_llm_models(const std::string& backend_override,
                                              const std::string& base_url_override);
 
-    // -- summarizer model download ----------------------------------------
-    // Downloads a catalog GGUF into the models dir in the background and, once
-    // it lands, points the settings at it. Returns false and fills `error`
-    // when the id is unknown or a download is already running.
-    bool start_llm_download(const std::string& model_id, std::string* error);
+    // -- model downloads ---------------------------------------------------
+    // Downloads a catalog model into the models dir in the background and,
+    // once it lands, points the settings at it. `kind` is "llm" (a GGUF for
+    // the summarizer) or "whisper" (speech weights). Returns false and fills
+    // `error` when the kind or id is unknown, or a download is already
+    // running — there is one slot, deliberately: two multi-gigabyte fetches
+    // over one connection finish later than the same two in sequence.
+    bool start_model_download(const std::string& kind, const std::string& model_id,
+                              std::string* error);
 
     // Stops the download in flight, if any. The curl child is killed and the
     // partial file removed, so the next attempt starts clean. Returns false
     // when nothing was running.
-    bool cancel_llm_download();
+    bool cancel_model_download();
 
-    // {active, model, message, progress, error} for /api/state.
-    nlohmann::json llm_download_json() const;
+    // {active, kind, model, message, progress, error} for /api/state.
+    nlohmann::json model_download_json() const;
 
     // Stop any worker so the process can exit promptly.
     void shutdown();
@@ -142,6 +171,26 @@ private:
     void save_orphaned_take(const std::vector<float>& audio);
     void process_worker(AudioBuffer audio);
     void do_summarize();
+
+    // The two model runs, with no opinion about where their output goes, so a
+    // library re-run asks for exactly what the live panel asks for.
+    pipeline::ProcessResult run_pipeline(const std::vector<float>& audio,
+                                         const Settings& settings);
+    llm::SummaryRequest build_summary_request(const std::string& transcript,
+                                              const std::string& template_id,
+                                              const std::string& extra_context);
+    std::string run_summarizer(const llm::SummaryRequest& req, bool manage_vram);
+
+    // Empty (with `error` filled) when the id names nothing in the library.
+    paths::fs::path library_dir(const std::string& id, std::string* error);
+    void do_library_transcribe(const paths::fs::path& dir,
+                               const paths::fs::path& audio_path,
+                               const std::string& name);
+    void do_library_summarize(const paths::fs::path& dir,
+                              const std::string& transcript,
+                              const std::string& name,
+                              const std::string& context,
+                              const std::string& template_id);
 
     bool            any_save() const;
     paths::fs::path ensure_session_dir();
@@ -244,6 +293,7 @@ private:
     std::string save_error_;   // guarded by mutex_
 
     // Summarizer model download, guarded by mutex_ except for the flag.
+    std::string dl_kind_;          // "llm" | "whisper", "" when never started
     std::string dl_model_;         // catalog id, "" when never started
     std::string dl_label_;
     std::string dl_message_;
@@ -265,6 +315,10 @@ private:
     std::atomic<bool> processing_{false};
     std::atomic<bool> downloading_{false};
     std::atomic<bool> shutting_down_{false};
+    // Raised by cancel_job() and read by the worker as it unwinds, so a run the
+    // user stopped ends as a cancellation rather than as a failure. Cleared
+    // when the next job is admitted.
+    std::atomic<bool> job_cancelled_{false};
 
     std::thread worker_;
     std::thread download_thread_;

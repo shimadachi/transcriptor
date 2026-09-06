@@ -79,6 +79,7 @@ nlohmann::json Settings::to_json() const {
         {"llm_threads", llm_threads},
         {"llm_max_tokens", llm_max_tokens},
         {"llm_temperature", llm_temperature},
+        {"llm_thinking", llm_thinking},
         {"llm_base_url", llm_base_url},
         {"llm_model", llm_model},
         {"llm_api_key", llm_api_key},
@@ -133,6 +134,8 @@ void Settings::from_json(const nlohmann::json& j) {
     get(j, "llm_threads", &llm_threads);
     get(j, "llm_max_tokens", &llm_max_tokens);
     get(j, "llm_temperature", &llm_temperature);
+    get(j, "llm_thinking", &llm_thinking);
+    if (llm_ctx < 0) llm_ctx = 0;   // 0 and below both mean "size it yourself"
     get(j, "llm_base_url", &llm_base_url);
     get(j, "llm_model", &llm_model);
     get(j, "llm_api_key", &llm_api_key);
@@ -224,6 +227,10 @@ void Settings::apply_env() {
 
 paths::fs::path Settings::whisper_model_file() const {
     if (!whisper_model_path.empty()) return paths::expand_user(whisper_model_path);
+    // No model chosen is an empty path, not "ggml-.bin": every caller asks
+    // whether the file exists, and a made-up name would answer "no" for the
+    // wrong reason and print that nonsense in the error.
+    if (whisper_model.empty()) return {};
     return paths::models_dir() / ("ggml-" + whisper_model + ".bin");
 }
 

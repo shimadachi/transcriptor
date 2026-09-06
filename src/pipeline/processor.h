@@ -48,6 +48,13 @@ struct ProcessResult {
     std::string plain_text(const std::string& lang = "tr",
                            bool with_ts = false) const;
 
+    // Is there anything in here worth summarizing? A finished run is not the
+    // same as a transcript with words in it: silence, or audio Whisper makes
+    // nothing of, comes back as no lines or as lines holding only whitespace.
+    // Asking plain_text() instead would not do -- a diarized result labels
+    // every line, so empty lines still render as "Speaker 1: ".
+    bool has_text() const;
+
     nlohmann::json to_json(const std::string& lang = "tr") const;
 };
 

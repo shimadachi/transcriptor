@@ -33,6 +33,16 @@ function mkEl(id) {
     addEventListener: (name, fn) => { (el._listeners[name] = el._listeners[name] || []).push(fn); },
     fire: (name, ev) => (el._listeners[name] || []).forEach(fn => fn(ev)),
   };
+  // Assigning innerHTML replaces what is inside the element — the mock cannot
+  // build nodes out of the string, but it must at least drop the old ones.
+  // Leaving them made a second render look like it had appended to the first,
+  // which is exactly what the app does to clear a panel before redrawing it.
+  let html = '';
+  Object.defineProperty(el, 'innerHTML', {
+    enumerable: true,
+    get: () => html,
+    set: (v) => { html = v; el.children.length = 0; el.options.length = 0; },
+  });
   return el;
 }
 
@@ -68,6 +78,10 @@ function createEnv(root) {
     },
     resultFails: false,
     loadResultCalls: 0,
+    // What /api/result hands back. null is "nothing transcribed yet", which is
+    // what every test that does not care about the panels wants.
+    result: null,
+    summary: null,
     // When set, /api/result waits on this promise before answering.
     resultGate: null,
     uploads: [],           // one entry per POST /api/process_file
@@ -85,7 +99,7 @@ function createEnv(root) {
       server.loadResultCalls++;
       if (server.resultGate) await server.resultGate;
       if (server.resultFails) throw new Error('network down');
-      return {json: async () => ({result: null, summary: null})};
+      return {json: async () => ({result: server.result, summary: server.summary})};
     }
     if (url === '/api/process_file') {
       const entry = {body: opts && opts.body, done: false};

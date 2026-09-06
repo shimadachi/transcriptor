@@ -156,12 +156,66 @@
                 <div id="libTitle" class="lib-title"></div>
                 <code id="libPath" class="lib-path"></code>
               </div>
+              <button id="libRetx" class="mini" data-i18n-title="lib.retxTitle" data-i18n="lib.retx">↻ Transcribe</button>
+              <button id="libResum" class="mini" data-i18n-title="lib.resumTitle" data-i18n="lib.resum">↻ Summarize</button>
               <button id="libOpen" class="mini" data-i18n="saved.open">Open Folder</button>
               <button id="libDelete" class="mini danger" data-i18n-title="lib.deleteTitle" data-i18n="lib.delete">🗑 Delete</button>
             </div>
 
+            <!-- Where a re-run's output goes. Opens under the head when either
+                 button above is pressed, and only when there is something the
+                 run could overwrite. -->
+            <div id="libRun" class="lib-run" hidden>
+              <div class="lib-run-q" id="libRunQ"></div>
+              <label class="lib-run-opt">
+                <input type="radio" name="libRunMode" value="overwrite" checked>
+                <span id="libRunOver" data-i18n="lib.runOverwrite">Replace what is there</span>
+              </label>
+              <label class="lib-run-opt">
+                <input type="radio" name="libRunMode" value="new">
+                <span data-i18n="lib.runNew">Keep both, name the new one</span>
+                <input type="text" id="libRunName" maxlength="64"
+                       data-i18n-ph="lib.runNamePh" placeholder="second pass">
+              </label>
+              <div class="lib-run-go">
+                <button id="libRunStart" class="mini ok" data-i18n="lib.runStart">Run</button>
+                <button id="libRunCancel" class="ghost mini" data-i18n="set.cancel">Cancel</button>
+              </div>
+            </div>
+
             <div id="libAudioWrap" class="lib-audio">
-              <audio id="libAudio" controls preload="none"></audio>
+              <!-- The element is the engine only; the transport below is the UI.
+                   preload=metadata so the length is on screen before playing. -->
+              <audio id="libAudio" preload="metadata"></audio>
+              <div class="pl">
+                <button id="plPlay" class="pl-play" data-i18n-title="pl.toggle"></button>
+                <div class="pl-main">
+                  <div id="plTrack" class="pl-track" role="slider" tabindex="0"
+                       aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"
+                       data-i18n-title="pl.seek">
+                    <!-- Ticks are real elements, filled by the player. Painted
+                         as a repeating gradient they moiré into clumps: 1px
+                         hairlines on a 6px pitch do not survive being laid over
+                         a few hundred fractional pixels. -->
+                    <div id="plBars" class="pl-bars" aria-hidden="true"></div>
+                    <div id="plHead" class="pl-head"></div>
+                  </div>
+                  <div class="pl-times">
+                    <span id="plNow" class="pl-now">0:00</span>
+                    <span id="plDur" class="pl-dur">0:00</span>
+                  </div>
+                </div>
+                <button id="plMute" class="pl-icon" data-i18n-title="pl.mute">
+                  <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+                    <path d="M4 8h3l4-3.5v11L7 12H4z" fill="currentColor"/>
+                    <path class="pl-wave" d="M13.6 7.4a3.6 3.6 0 0 1 0 5.2" fill="none"
+                          stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                    <path class="pl-x" d="M13.8 7.8l4 4.4M17.8 7.8l-4 4.4" fill="none"
+                          stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                  </svg>
+                </button>
+                <button id="plRate" class="pl-rate" data-i18n-title="pl.rate">1×</button>
+              </div>
               <div id="libAudioName" class="lib-audio-name"></div>
             </div>
             <div id="libNoAudio" class="lib-none" data-i18n="lib.noAudio" hidden>
@@ -170,11 +224,15 @@
 
             <div class="lib-cols">
               <section>
-                <div class="tx-head"><span class="label" data-i18n="tx.label">Transcript</span></div>
+                <div class="tx-head"><span class="label" data-i18n="tx.label">Transcript</span>
+                  <select id="libTxPick" class="lib-pick" hidden
+                          data-i18n-title="lib.pickTx"></select></div>
                 <div id="libTranscript" class="tx-body"></div>
               </section>
               <section>
-                <div class="tx-head"><span class="label" data-i18n="sum.label">Summary</span></div>
+                <div class="tx-head"><span class="label" data-i18n="sum.label">Summary</span>
+                  <select id="libSumPick" class="lib-pick" hidden
+                          data-i18n-title="lib.pickSum"></select></div>
                 <div id="libSummary" class="sum-body"></div>
               </section>
             </div>
@@ -231,9 +289,13 @@
         <div class="field"><label data-i18n="set.sumLang">Summary language</label>
           <select id="s_sumlang"><option value="en">English</option>
             <option value="tr">Türkçe</option></select></div>
-        <div class="field"><label data-i18n="set.whisper">Whisper model</label>
-          <select id="s_model"><option>tiny</option><option>base</option><option>small</option>
-            <option>medium</option><option>large-v3</option></select></div>
+        <div class="field"><label data-i18n="set.whisper">Speech model — pick one and download it</label>
+          <div class="row"><select id="s_model" class="grow"></select>
+            <button id="dlWhisper" class="mini" type="button" data-i18n="set.whisperDlBtn">Download</button>
+            <button id="cancelWhisperDl" class="mini danger" type="button"
+                    data-i18n-title="set.dlCancelTitle" data-i18n="set.dlCancel"
+                    style="display:none;">✕ Cancel</button></div>
+          <div id="whisperDlNote" class="dlnote"></div></div>
         <div class="field"><label data-i18n="set.device">Device</label>
           <select id="s_device"><option value="auto" data-i18n="set.auto">Automatic</option>
             <option value="cpu">CPU</option></select>
@@ -357,8 +419,8 @@
           <div id="advLlmEmbedded">
             <div class="field"><label data-i18n="set.llmPath">Model file path (type it if it is not in the list)</label>
               <input type="text" id="s_llmpath" placeholder="…/qwen2.5-7b-instruct-q4_k_m.gguf"></div>
-            <div class="field"><label data-i18n="set.llmCtx">Context size (tokens)</label>
-              <input type="number" id="s_llmctx" min="1024" max="131072" step="1024"></div>
+            <div class="field"><label data-i18n="set.llmCtx">Context size (tokens) — 0 = automatic, from the model and the free memory</label>
+              <input type="number" id="s_llmctx" min="0" max="131072" step="1024"></div>
             <div class="field"><label data-i18n="set.llmGpu">Layers offloaded to the GPU (0 = CPU only, 999 = all of them)</label>
               <input type="number" id="s_llmgpu" min="0" max="999" step="1"></div>
             <div class="field"><label data-i18n="set.llmMaxTok">Maximum answer length (tokens)</label>
@@ -371,13 +433,28 @@
             <div class="field"><label data-i18n="set.llmTimeout">Summary timeout (s) — raise it for long or CPU-bound models</label>
               <input type="number" id="s_llmtimeout" min="10" max="3600" step="10"></div>
           </div>
-          <div class="field check"><input type="checkbox" id="s_vram"><label data-i18n="set.vram">Sequence VRAM: unload the LLM during transcription and the STT model during summarizing (for 8 GB cards)</label></div>
+          <div class="field check"><input type="checkbox" id="s_llmthink"><label data-i18n="set.llmThink">Let the model think first: reasoning models may work through the final summary before writing it, on a budget of their own. Section notes are never written this way.</label></div>
+          <div class="field check"><input type="checkbox" id="s_vram"><label data-i18n="set.vram">Sequence VRAM: unload the LLM during transcription and the STT model during summarizing</label></div>
         </div>
       </div>
 
       <div class="modal-actions">
         <button id="cancelSettings" class="ghost" data-i18n="set.cancel">Cancel</button>
         <button id="saveSettings" class="save" data-i18n="set.save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- The page's own confirm. window.confirm() is drawn by the webview host,
+       not by the page: it lands at the top of the window in the system's
+       colours and no stylesheet here can reach it. -->
+  <div class="modal-bg" id="askBg">
+    <div class="modal ask" role="alertdialog" aria-modal="true" aria-labelledby="askTitle">
+      <h2 id="askTitle"></h2>
+      <div id="askBody" class="ask-body"></div>
+      <div class="modal-actions">
+        <button id="askNo" class="ghost" type="button"></button>
+        <button id="askYes" class="save" type="button"></button>
       </div>
     </div>
   </div>

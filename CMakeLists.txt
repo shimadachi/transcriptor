@@ -65,6 +65,7 @@ set(TRANSCRIPTOR_CORE_SOURCES
     src/stt/whisper_stt.cpp
     src/diarize/diarizer.cpp
     src/llm/chunking.cpp
+    src/llm/reasoning.cpp
     src/llm/templates.cpp
     src/llm/summarizer.cpp
     src/llm/openai_backend.cpp

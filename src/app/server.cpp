@@ -115,6 +115,27 @@ std::string trim(const std::string& s) {
     return s.substr(b, e - b + 1);
 }
 
+// The context preamble, from the three fields the page collects. Shared by the
+// live summarize route and the library re-run, so a summary made over an
+// archived recording is given exactly what the same button would give it.
+std::string context_preamble(const json& body, const std::string& summary_language) {
+    const bool tr = (summary_language == "tr");
+    std::vector<std::string> parts;
+    const std::string title  = trim(get_string(body, "title"));
+    const std::string people = trim(get_string(body, "participants"));
+    const std::string notes  = trim(get_string(body, "notes"));
+    if (!title.empty())  parts.push_back((tr ? "Başlık: " : "Title: ") + title);
+    if (!people.empty()) parts.push_back((tr ? "Katılımcılar: " : "Participants: ") + people);
+    if (!notes.empty())  parts.push_back((tr ? "Notlar: " : "Notes: ") + notes);
+
+    std::string context;
+    for (std::size_t i = 0; i < parts.size(); ++i) {
+        if (i) context += "\n";
+        context += parts[i];
+    }
+    return context;
+}
+
 // The accelerators the settings panel offers, named the way ggml names them.
 // Sent on every settings read rather than cached: a laptop can gain or lose a
 // card between one launch and the next.
@@ -381,14 +402,17 @@ bool Server::start() {
         send_json(res, json{{"ok", true}, {"paused", false}});
     });
 
+    // Two jobs under one button, because to the person pressing it they are
+    // the same intent: stop what is happening. With a run in flight that means
+    // asking the models to give up, and nothing is thrown away. Otherwise it is
+    // the take or the result on screen that goes.
     svr.Post("/api/cancel", [state](const httplib::Request&,
                                     httplib::Response& res) {
-        if (state->processing()) {
-            return send_error(res, L("A job is running; cancel once it finishes.",
-                                     "İşlem sürüyor; bitince iptal edin."));
+        if (state->cancel_job()) {
+            return send_json(res, json{{"ok", true}, {"stopped", "job"}});
         }
         state->cancel();
-        send_json(res, json{{"ok", true}});
+        send_json(res, json{{"ok", true}, {"stopped", "take"}});
     });
 
     // -- process an existing file -----------------------------------------
@@ -494,19 +518,53 @@ bool Server::start() {
         body["id"]   = paths::to_utf8(dir.filename());
         body["path"] = paths::to_utf8(dir);
 
+        // Every saved transcript and summary, so the panel can offer the older
+        // ones beside whatever the last re-run produced. The requested one wins
+        // when it exists; otherwise this falls back to the original, which is
+        // what a stale selection in the page should land on.
+        const auto variants_json = [](const std::vector<library::Variant>& vs) {
+            json arr = json::array();
+            for (const library::Variant& v : vs) {
+                arr.push_back({{"name", v.name},
+                               {"mtime", v.mtime},
+                               {"structured", v.structured}});
+            }
+            return arr;
+        };
+        const auto pick = [](const std::vector<library::Variant>& vs,
+                             const std::string& want) {
+            for (const library::Variant& v : vs) {
+                if (v.name == want) return want;
+            }
+            return std::string();
+        };
+
+        const auto tx_variants  = library::transcript_variants(dir);
+        const auto sum_variants = library::summary_variants(dir);
+        body["transcripts"] = variants_json(tx_variants);
+        body["summaries"]   = variants_json(sum_variants);
+
+        const std::string tx_name =
+            pick(tx_variants, req.get_param_value("transcript"));
+        const std::string sum_name =
+            pick(sum_variants, req.get_param_value("summary"));
+        body["transcript_name"] = tx_name;
+        body["summary_name"]    = sum_name;
+
         std::string raw;
         // transcript.json carries speakers and timestamps, so the library shows
         // it exactly the way the live transcript panel does; the .txt is only
         // the fallback for a session saved before the JSON existed.
         body["transcript"] = json(nullptr);
-        if (paths::read_file(dir / "transcript.json", &raw)) {
+        if (paths::read_file(library::transcript_json_file(dir, tx_name), &raw)) {
             json parsed = json::parse(raw, nullptr, /*allow_exceptions=*/false);
             if (!parsed.is_discarded()) body["transcript"] = parsed;
         }
         body["transcript_text"] =
-            paths::read_file(dir / "transcript.txt", &raw) ? json(raw) : json(nullptr);
+            paths::read_file(library::transcript_txt_file(dir, tx_name), &raw)
+                ? json(raw) : json(nullptr);
         body["summary"] = json(nullptr);
-        if (paths::read_file(dir / "summary.txt", &raw)) {
+        if (paths::read_file(library::summary_file(dir, sum_name), &raw)) {
             // Summaries written before the backends stripped reasoning still
             // carry the model's <think> block, so filter it on the way out.
             //
@@ -610,6 +668,45 @@ bool Server::start() {
         send_json(res, json{{"ok", true}, {"id", paths::to_utf8(dir.filename())}});
     });
 
+    // -- library re-runs ---------------------------------------------------
+    // Run the models again over a recording already in the output folder. The
+    // result replaces the session's original when `name` is empty, and is kept
+    // beside it under that name otherwise. Neither disturbs the studio panels;
+    // both take the one job slot, so the phase and progress the page already
+    // polls tell the story.
+    svr.Post("/api/library/transcribe", [state](const httplib::Request& req,
+                                                httplib::Response& res) {
+        if (state->recording()) {
+            return send_error(res, L("A job is already running.", "İşlem sürüyor."));
+        }
+        const json body = parse_body(req);
+        std::string error;
+        if (!state->start_library_transcribe(get_string(body, "id"),
+                                             trim(get_string(body, "name")), &error)) {
+            return send_error(res, error);
+        }
+        send_json(res, json{{"ok", true}});
+    });
+
+    svr.Post("/api/library/summarize", [state](const httplib::Request& req,
+                                               httplib::Response& res) {
+        if (state->recording()) {
+            return send_error(res, L("A job is already running.", "İşlem sürüyor."));
+        }
+        const json body = parse_body(req);
+        std::string error;
+        const std::string context =
+            context_preamble(body, state->settings_copy().summary_language);
+        if (!state->start_library_summarize(get_string(body, "id"),
+                                            get_string(body, "source"),
+                                            trim(get_string(body, "name")), context,
+                                            trim(get_string(body, "template")),
+                                            &error)) {
+            return send_error(res, error);
+        }
+        send_json(res, json{{"ok", true}});
+    });
+
     // -- transcribe --------------------------------------------------------
     // The manual counterpart of settings.auto_transcribe: runs the pipeline
     // over the audio that stopped short of it.
@@ -637,23 +734,8 @@ bool Server::start() {
         }
 
         const json body = parse_body(req);
-        const Settings settings = state->settings_copy();
-        const bool tr = (settings.summary_language == "tr");
-
-        // Build the context preamble from the structured fields.
-        std::vector<std::string> parts;
-        const std::string title  = trim(get_string(body, "title"));
-        const std::string people = trim(get_string(body, "participants"));
-        const std::string notes  = trim(get_string(body, "notes"));
-        if (!title.empty())  parts.push_back((tr ? "Başlık: " : "Title: ") + title);
-        if (!people.empty()) parts.push_back((tr ? "Katılımcılar: " : "Participants: ") + people);
-        if (!notes.empty())  parts.push_back((tr ? "Notlar: " : "Notes: ") + notes);
-
-        std::string context;
-        for (std::size_t i = 0; i < parts.size(); ++i) {
-            if (i) context += "\n";
-            context += parts[i];
-        }
+        const std::string context =
+            context_preamble(body, state->settings_copy().summary_language);
 
         std::string error;
         if (!state->start_summarize(context, trim(get_string(body, "template")),
@@ -700,6 +782,22 @@ bool Server::start() {
         json gguf = json::array();
         for (const std::string& p : llm::discover_gguf_models()) gguf.push_back(p);
 
+        // Downloadable speech models, with what is already on disk marked.
+        // This is the whole model picker now: there is no default and nothing
+        // is fetched behind the user's back, so the panel has to say plainly
+        // what each one is and which of them are here.
+        json whisper = json::array();
+        for (const models::WhisperModelSpec& m : models::whisper_catalog()) {
+            const paths::fs::path file = models::whisper_model_file(m);
+            std::error_code ec;
+            whisper.push_back({{"id", m.id},
+                               {"label", m.label},
+                               {"note", m.note()},
+                               {"size", models::human_size(m.approx_bytes)},
+                               {"path", paths::to_utf8(file)},
+                               {"downloaded", paths::fs::exists(file, ec)}});
+        }
+
         // Downloadable summarizer models, with what is already on disk marked.
         json catalog = json::array();
         for (const models::LlmModelSpec& m : models::llm_catalog()) {
@@ -716,6 +814,8 @@ bool Server::start() {
         send_json(res, json{
             {"whisper_model", s.whisper_model},
             {"whisper_model_path", s.whisper_model_path},
+            {"whisper_catalog", whisper},
+            {"whisper_ready", models::whisper_ready(s)},
             {"language", s.language},
             {"device", s.device},
             {"compute_type", s.compute_type},
@@ -733,9 +833,10 @@ bool Server::start() {
             {"llm_ctx", s.llm_ctx},
             {"llm_gpu_layers", s.llm_gpu_layers},
             {"llm_max_tokens", s.llm_max_tokens},
+            {"llm_thinking", s.llm_thinking},
             {"gguf_models", gguf},
             {"llm_catalog", catalog},
-            {"llm_download", state->llm_download_json()},
+            {"model_download", state->model_download_json()},
             {"llm_base_url", s.llm_base_url},
             {"llm_model", s.llm_model},
             {"llm_timeout", s.llm_timeout},
@@ -799,6 +900,14 @@ bool Server::start() {
         };
 
         str("whisper_model", &s.whisper_model);
+        // "" means nothing chosen, which is the state a fresh install is in.
+        // Anything else has to be a real model: a typo used to become a
+        // download URL, and the failure surfaced mid-transcription.
+        if (!s.whisper_model.empty() &&
+            !models::whisper_catalog_entry(s.whisper_model) &&
+            models::whisper_spec(s.whisper_model).url.empty()) {
+            s.whisper_model.clear();
+        }
         str("whisper_model_path", &s.whisper_model_path);
         str("language", &s.language);
         str("device", &s.device);
@@ -835,12 +944,16 @@ bool Server::start() {
         flag("auto_summarize", &s.auto_summarize);
         flag("manage_vram", &s.manage_vram);
         flag("check_updates", &s.check_updates);
+        flag("llm_thinking", &s.llm_thinking);
 
         clamped_float("mic_gain", &s.mic_gain, 0.0f, 4.0f);
         clamped_float("system_gain", &s.system_gain, 0.0f, 4.0f);
         clamped_float("cluster_threshold", &s.cluster_threshold, 0.05f, 0.95f);
         clamped_int("num_speakers", &s.num_speakers, 0, 20);
-        clamped_int("llm_ctx", &s.llm_ctx, 1024, 131072);
+        // 0 is "size it from the model and the machine"; anything the user
+        // types by hand starts where a chat template alone stops fitting.
+        clamped_int("llm_ctx", &s.llm_ctx, 0, 131072);
+        if (s.llm_ctx > 0 && s.llm_ctx < 1024) s.llm_ctx = 1024;
         clamped_int("llm_gpu_layers", &s.llm_gpu_layers, 0, 999);
         clamped_int("llm_max_tokens", &s.llm_max_tokens, 64, 16384);
 
@@ -924,30 +1037,33 @@ bool Server::start() {
         }
     });
 
-    // -- summarizer model download ----------------------------------------
-    svr.Post("/api/llm/download", [state](const httplib::Request& req,
-                                          httplib::Response& res) {
+    // -- model downloads ---------------------------------------------------
+    // One route for both catalogs: there is a single download slot, and the
+    // panel polls a single status whichever kind it started.
+    svr.Post("/api/model/download", [state](const httplib::Request& req,
+                                            httplib::Response& res) {
         const json body = parse_body(req);
-        const std::string id = trim(get_string(body, "id"));
+        const std::string kind = trim(get_string(body, "kind"));
+        const std::string id   = trim(get_string(body, "id"));
         if (id.empty()) return send_error(res, L("No model selected.", "Model seçilmedi."));
 
         std::string error;
-        if (!state->start_llm_download(id, &error)) {
+        if (!state->start_model_download(kind.empty() ? "llm" : kind, id, &error)) {
             return send_error(res, error, 409);
         }
-        send_json(res, json{{"ok", true}, {"download", state->llm_download_json()}});
+        send_json(res, json{{"ok", true}, {"download", state->model_download_json()}});
     });
 
-    svr.Get("/api/llm/download", [state](const httplib::Request&,
-                                         httplib::Response& res) {
-        send_json(res, state->llm_download_json());
+    svr.Get("/api/model/download", [state](const httplib::Request&,
+                                           httplib::Response& res) {
+        send_json(res, state->model_download_json());
     });
 
     // Stops a download in flight. The thread tears itself down, so the UI just
     // keeps polling GET above and sees it go inactive like any other ending.
-    svr.Post("/api/llm/download/cancel", [state](const httplib::Request&,
-                                                 httplib::Response& res) {
-        if (!state->cancel_llm_download()) {
+    svr.Post("/api/model/download/cancel", [state](const httplib::Request&,
+                                                   httplib::Response& res) {
+        if (!state->cancel_model_download()) {
             return send_error(res, L("No download is running.",
                                      "Çalışan bir indirme yok."), 409);
         }

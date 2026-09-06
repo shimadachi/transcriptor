@@ -35,7 +35,9 @@ struct Settings {
     float       system_gain = 1.0f;
 
     // -- STT (whisper.cpp) ------------------------------------------------
-    std::string whisper_model = "large-v3";   // tiny/base/small/medium/large-v3
+    // Empty until the user picks one. There is deliberately no default: the
+    // old one made the first recording quietly pull 3 GB down mid-transcribe.
+    std::string whisper_model;                // a models::whisper_catalog() id
     std::string whisper_model_path;           // explicit .bin; empty = managed
     std::string language      = "en";         // "" = auto-detect
     std::string device        = "auto";       // auto/cuda/cpu
@@ -53,11 +55,20 @@ struct Settings {
     // "embedded" = llama.cpp in-process; "remote" = OpenAI-compatible server.
     std::string llm_backend    = "embedded";
     std::string llm_model_path;               // GGUF for the embedded backend
-    int         llm_ctx        = 8192;
+    // 0 = size the window from the model's own trained context and the memory
+    // left after its weights load. A number here overrides that, as typed.
+    int         llm_ctx        = 0;
     int         llm_gpu_layers = 999;         // 999 = offload everything it can
     int         llm_threads    = 0;
     int         llm_max_tokens = 2048;
     float       llm_temperature = 0.2f;
+
+    // Let a reasoning model think before the final summary. Off by default:
+    // thinking costs tokens and time on every pass, and the section notes of a
+    // long recording never benefit from it — so it is spent on the one pass
+    // where weighing a whole meeting against itself actually pays, and it is
+    // given a budget of its own rather than the answer's.
+    bool        llm_thinking   = false;
 
     std::string llm_base_url = "http://127.0.0.1:1234/v1";
     std::string llm_model;                    // "" = first model the server lists
@@ -77,8 +88,10 @@ struct Settings {
     bool save_transcript = true;
     bool save_summary    = true;
     // Off = the recording waits in memory until the Transcribe button is
-    // pressed; the same gate the summarizer has always had.
-    bool auto_transcribe = true;
+    // pressed; the same gate the summarizer has always had, and the same
+    // default. Loading a Whisper model the moment a recording stops is a long,
+    // loud, memory-hungry thing to start on its own.
+    bool auto_transcribe = false;
     bool auto_summarize  = false;
 
     // Sequence VRAM: unload whisper before the LLM loads, and vice versa, so a

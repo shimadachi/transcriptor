@@ -22,6 +22,20 @@ transcriptor_test(test_chunking
     "${APP_SRC}/llm/chunking.cpp")
 add_test(NAME chunking COMMAND test_chunking)
 
+# -- reasoning budget ---------------------------------------------------------
+transcriptor_test(test_reasoning
+    "${TESTS_SRC}/test_reasoning.cpp"
+    "${APP_SRC}/llm/reasoning.cpp")
+add_test(NAME reasoning COMMAND test_reasoning)
+
+# -- library versions ---------------------------------------------------------
+transcriptor_test(test_library
+    "${TESTS_SRC}/test_library.cpp"
+    "${APP_SRC}/util/library.cpp"
+    "${APP_SRC}/util/paths.cpp")
+add_test(NAME library
+         COMMAND test_library "${CMAKE_CURRENT_BINARY_DIR}/library_scratch")
+
 # -- output writing (R2) ------------------------------------------------------
 # RLIMIT_FSIZE is how the failure is provoked, so POSIX only.
 if(UNIX)

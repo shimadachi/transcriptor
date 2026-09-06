@@ -371,6 +371,37 @@ void test_build_features_reach_their_code() {
                     ", compiled in=" + (built ? "yes" : "no"));
 }
 
+// A finished run is not the same as a transcript worth summarizing, and the
+// gap between the two is where auto-summarize used to sequence the VRAM, load
+// a model and end a perfectly good take on an error. The subtle half is the
+// diarized case: plain_text() labels every line, so a result of empty lines
+// reads back as "Speaker 1: " and looks like text to anyone who asks for it as
+// a string.
+void test_empty_transcripts_are_recognized() {
+    using pipeline::Line;
+    using pipeline::ProcessResult;
+
+    ProcessResult none;
+    test::check("a result with no lines has no text", !none.has_text());
+
+    ProcessResult blank;
+    blank.lines.push_back(Line{-1, "", 0.0, 1.0});
+    blank.lines.push_back(Line{-1, "  \n\t", 1.0, 2.0});
+    test::check("lines holding only whitespace are not text", !blank.has_text());
+
+    ProcessResult diarized;
+    diarized.diarized = true;
+    diarized.num_speakers = 1;
+    diarized.lines.push_back(Line{0, "   ", 0.0, 1.0});
+    test::check("a labelled empty line is still not text", !diarized.has_text(),
+                "plain_text=\"" + diarized.plain_text("en") + "\"");
+
+    ProcessResult spoken;
+    spoken.lines.push_back(Line{-1, "  ", 0.0, 1.0});
+    spoken.lines.push_back(Line{-1, "We ship on Friday.", 1.0, 2.0});
+    test::check("one line with words is enough", spoken.has_text());
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -402,6 +433,7 @@ int main(int argc, char** argv) {
     test_device_failure_keeps_what_was_captured();
     test_failed_device_open_releases_the_claim();
     test_build_features_reach_their_code();
+    test_empty_transcripts_are_recognized();
 
     return test::summary("recording lifecycle");
 }

@@ -187,6 +187,146 @@ async function run() {
           `prevResultRev=${env.peek('prevResultRev')}`);
   }
 
+  // ------------------------------------------------- empty transcript ------
+  // has_result only says a run finished. A take of silence finishes with a
+  // result that has no words in it, and Summarize stayed lit over it: pressing
+  // it loaded the whole model to be told there was nothing to summarize.
+  {
+    const env = createEnv(ROOT);
+    env.server.state.has_result = true;
+    env.server.state.result_rev = 2;
+    env.server.result = {lines: [{text: '  ', ts: '0:00', speaker: null}]};
+    await env.app.poll();
+    await env.settle();
+    check('a transcript of only whitespace leaves Summarize disabled',
+          env.els.sumBtn.disabled === true);
+    check('the dimmed button says why',
+          typeof env.els.sumBtn.title === 'string' && env.els.sumBtn.title.length > 0,
+          JSON.stringify(env.els.sumBtn.title));
+
+    env.server.state.result_rev = 3;
+    env.server.result = {lines: [{text: 'We ship on Friday.', ts: '0:00', speaker: null}]};
+    await env.app.poll();
+    await env.settle();
+    check('a transcript with words enables Summarize',
+          env.els.sumBtn.disabled === false);
+    check('an enabled button carries no explanation',
+          !env.els.sumBtn.title);
+
+    // Starting a new take clears the result; the button has to go dim again
+    // rather than keep the last transcript's answer.
+    env.server.state.result_rev = 4;
+    env.server.state.has_result = false;
+    env.server.result = null;
+    await env.app.poll();
+    await env.settle();
+    check('clearing the result disables Summarize again',
+          env.els.sumBtn.disabled === true);
+  }
+
+  // ------------------------------------------------ seekable timestamps ----
+  // Library timestamps move the playhead, but only where there is a recording
+  // to move: a session saved with Save Audio off has a transcript and nothing
+  // to play, and a stamp that looks pressable and does nothing is worse than
+  // one that never offered.
+  {
+    const env = createEnv(ROOT);
+    const doc = {diarized: false, lines: [
+      {speaker: null, text: 'first',  start: 0,    ts: '0:00'},
+      {speaker: null, text: 'second', start: 36.1, ts: '0:36'},
+      {speaker: null, text: 'third',  start: 74.9, ts: '1:14'},
+    ]};
+    const el = env.peek("$('libTranscript')");
+    const stamps = () => el.children.map(line => line.children[0]);
+
+    env.app.renderTranscript(doc, el, true);
+    const live = stamps();
+    check('every timestamp is seekable when the audio was saved',
+          live.length === 3 && live.every(s => s.dataset.at !== undefined),
+          JSON.stringify(live.map(s => s.dataset.at)));
+    check('the stamp carries the second it points at',
+          Number(live[1].dataset.at) === 36.1, String(live[1].dataset.at));
+
+    env.app.renderTranscript(doc, el, false);
+    const dead = stamps();
+    check('no timestamp is seekable without saved audio',
+          dead.length === 3 && dead.every(s => s.dataset.at === undefined),
+          JSON.stringify(dead.map(s => s.dataset.at)));
+
+    // The studio panel passes no flag at all and must stay inert: there is no
+    // player on that screen for a stamp to drive.
+    const studio = env.peek("$('transcript')");
+    env.app.renderTranscript(doc, studio);
+    check('the studio transcript is never seekable',
+          studio.children.every(line => line.children[0].dataset.at === undefined));
+  }
+
+  // ------------------------------------------- a picker holds its own value --
+  // Saving reads every control in the panel, so a dropdown that cannot show
+  // the value the settings already hold reports "" for it — and the next save
+  // writes that "" back, discarding a setting the user never touched. A model
+  // name the catalog does not list (a legacy large-v2, or one put there by
+  // hand) has to stay selectable.
+  {
+    const env = createEnv(ROOT);
+    const catalog = [
+      {id: 'tiny', label: 'Tiny', size: '74 MB', downloaded: false, note: 'n'},
+      {id: 'large-v3', label: 'Large v3', size: '2.9 GB', downloaded: false, note: 'n'},
+    ];
+
+    env.app.fillCatalog('whisper', catalog, '- none -', 'large-v2');
+    const sel = env.els.s_model;
+    check('a stored name the catalog does not list stays selectable',
+          sel.value === 'large-v2',
+          `value=${JSON.stringify(sel.value)} options=` +
+              JSON.stringify(sel.options.map(o => o.value)));
+
+    env.app.fillCatalog('whisper', catalog, '- none -', 'tiny');
+    check('a listed model is not duplicated',
+          env.els.s_model.options.filter(o => o.value === 'tiny').length === 1,
+          JSON.stringify(env.els.s_model.options.map(o => o.value)));
+
+    // A refill must not move a choice already on screen — the panel rebuilds
+    // this list whenever a download finishes.
+    env.app.fillCatalog('whisper', catalog, '- none -', 'large-v3');
+    check('a refill leaves the visible choice alone',
+          env.els.s_model.value === 'tiny', JSON.stringify(env.els.s_model.value));
+
+    // Fresh panel, nothing stored: the placeholder is the honest state.
+    const blank = createEnv(ROOT);
+    blank.app.fillCatalog('whisper', catalog, '- none -', '');
+    check('nothing stored lands on the placeholder',
+          blank.els.s_model.value === '',
+          JSON.stringify(blank.els.s_model.value));
+  }
+
+  // -------------------------------------------------- cancelling a run ------
+  // Cancel used to be dimmed for the whole of a transcription or a summary, so
+  // a run started by mistake had to be waited out — minutes, on a long
+  // recording. The engines could always give up mid-run; nothing asked them.
+  {
+    const env = createEnv(ROOT);
+    env.server.state.processing = true;
+    env.server.state.phase = 'transcribe';
+    await env.app.poll();
+    check('Cancel is live while a job runs', env.els.cancelBtn.disabled === false);
+    check('and says what it will do', !!env.els.cancelBtn.title,
+          JSON.stringify(env.els.cancelBtn.title));
+
+    // Idle with nothing recorded, nothing transcribed: there is nothing for it
+    // to stop or throw away.
+    env.server.state.processing = false;
+    env.server.state.phase = 'idle';
+    env.server.state.has_audio = false;
+    env.server.state.has_result = false;
+    env.server.state.has_summary = false;
+    await env.app.poll();
+    check('and dim when there is nothing to stop or discard',
+          env.els.cancelBtn.disabled === true);
+    check('with no explanation to give', !env.els.cancelBtn.title,
+          JSON.stringify(env.els.cancelBtn.title));
+  }
+
   console.log(failures ? `\nui: ${failures} check(s) FAILED`
                        : '\nui: all checks passed');
   process.exit(failures ? 1 : 0);

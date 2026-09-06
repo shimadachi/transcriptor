@@ -178,6 +178,33 @@ input[type=number]::-webkit-inner-spin-button,
 input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 select.grow { flex: 1; }
 
+/* themed tick boxes — the native ones are a white slab on a warm dark panel,
+   and an unchecked row was the brightest thing in the settings modal. Same
+   tokens as every other control; the accent only shows once something is on. */
+input[type=checkbox], input[type=radio] {
+  -webkit-appearance: none; appearance: none;
+  flex: none; margin: 0; width: 17px; height: 17px; position: relative;
+  border: 1px solid var(--line-2); border-radius: 5px; background: var(--bg-2);
+  cursor: pointer; transition: background .14s var(--ease), border-color .14s var(--ease);
+}
+input[type=radio] { border-radius: 50%; }
+input[type=checkbox]:hover:not(:disabled),
+input[type=radio]:hover:not(:disabled) { border-color: var(--faint); }
+input[type=checkbox]:checked, input[type=radio]:checked {
+  background: var(--rec); border-color: var(--rec);
+}
+/* the tick: two borders of a rotated box */
+input[type=checkbox]:checked::after {
+  content: ""; position: absolute; left: 5px; top: 1px; width: 4px; height: 9px;
+  border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(43deg);
+}
+input[type=radio]:checked::after {
+  content: ""; position: absolute; inset: 4px; border-radius: 50%; background: #fff;
+}
+input[type=checkbox]:disabled, input[type=radio]:disabled {
+  opacity: .4; cursor: not-allowed;
+}
+
 /* ---------- custom themed select (replaces native popup) ---------- */
 .xsel { position: relative; }
 .xsel.grow { flex: 1; min-width: 0; }
@@ -282,16 +309,109 @@ select.grow { flex: 1; }
 
 .lib-detail { min-width: 0; }
 .lib-placeholder { padding: 24px 2px; }
-.lib-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
-.lib-head-text { flex: 1; min-width: 0; }
+/* Four actions and a date do not fit one row on a narrow detail pane. Let the
+   buttons drop to their own line rather than wrapping the title to three. */
+.lib-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;
+  flex-wrap: wrap; }
+.lib-head-text { flex: 1 1 240px; min-width: 0; }
 .lib-title { font-family: var(--display); font-weight: 700; font-size: 19px;
   letter-spacing: -.01em; color: var(--ink); line-height: 1.2; }
 .lib-path { display: block; font-family: var(--mono); font-size: 11px;
   color: var(--muted); margin-top: 4px; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
 
+/* Where a re-run's output goes. Sits under the head, only while it is being
+   asked, and reads as a question rather than a panel. */
+.lib-run { border: 1px solid var(--line-2); border-radius: 12px;
+  background: var(--panel-2); padding: 14px 16px; margin-bottom: 18px;
+  display: flex; flex-direction: column; gap: 10px; }
+.lib-run-q { font-family: var(--mono); font-size: 12px; color: var(--vu);
+  letter-spacing: .04em; }
+.lib-run-opt { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  font-size: 13px; color: var(--ink-dim); cursor: pointer; }
+.lib-run-opt input[type="text"] { flex: 1; min-width: 160px;
+  font-family: var(--mono); font-size: 12px; color: var(--ink);
+  background: var(--bg-2); border: 1px solid var(--line-2); border-radius: 8px;
+  padding: 8px 10px; }
+.lib-run-opt input[type="text"]:focus { outline: none; border-color: var(--vu); }
+.lib-run-go { display: flex; gap: 8px; margin-top: 2px; }
+
+/* The version picker beside a panel's label; only there when there is a choice. */
+.tx-head .xsel:has(.lib-pick) { margin-left: auto; }
+.lib-pick + .xsel-btn, .xsel:has(.lib-pick) .xsel-btn {
+  padding: 7px 10px; font-size: 11px; letter-spacing: .04em; }
+
 .lib-audio { margin-bottom: 18px; }
-.lib-audio audio { display: block; width: 100%; height: 40px; border-radius: 10px; }
+.lib-audio audio { display: none; }   /* the engine; .pl below is the face of it */
+
+/* ---------- transport (library playback) ----------
+   The webview's own <audio controls> is a grey OS slab that ignores every
+   token above. This is the same set of controls in the app's language: the
+   scrub track is the .meter's ladder of ticks, filled with the same
+   record-to-amber gradient as the level bars during a take. */
+.pl { display: flex; align-items: center; gap: 14px;
+  padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--panel-2); }
+
+.pl-play { flex: none; width: 40px; height: 40px; padding: 0; border-radius: 50%;
+  display: grid; place-items: center; color: var(--vu);
+  border-color: color-mix(in srgb, var(--vu) 45%, var(--line-2));
+  background: color-mix(in srgb, var(--vu) 10%, transparent); }
+.pl-play:hover:not(:disabled) { border-color: var(--vu); transform: none;
+  background: color-mix(in srgb, var(--vu) 20%, transparent); }
+.pl-play:disabled { opacity: .35; }
+/* a triangle, swapped for two bars while it plays */
+.pl-play::before { content: ""; display: block; margin-left: 3px;
+  width: 0; height: 0; border-left: 11px solid currentColor;
+  border-top: 7px solid transparent; border-bottom: 7px solid transparent; }
+/* Two bars out of the left and right borders of one box, so the pair is
+   symmetric and the grid centres it. A box plus an offset box-shadow put the
+   visual centre 3.5px off the real one, which showed as a lopsided icon. */
+.pl-play.on::before { margin-left: 0; width: 13px; height: 13px;
+  background: none; border: 0;
+  border-left: 4px solid currentColor; border-right: 4px solid currentColor; }
+
+.pl-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+
+.pl-track { position: relative; height: 28px; cursor: pointer;
+  touch-action: none; border-radius: 6px; outline: none; }
+.pl-track:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--vu) 55%, transparent); }
+/* One element per tick, spread by the flexbox rather than by a gradient, so
+   every tick is a real box on a whole pixel and the ladder stays even at any
+   width. Same construction as the .meter above, for the same reason. */
+.pl-bars { position: absolute; left: 0; right: 0; top: 50%; height: 16px;
+  transform: translateY(-50%); pointer-events: none;
+  display: flex; justify-content: space-between; align-items: stretch; }
+.pl-bars i { width: 2px; border-radius: 1px; background: var(--line-2);
+  transition: background .1s linear; }
+.pl-bars i.on { background: linear-gradient(180deg, var(--rec), var(--vu)); }
+.pl-head { position: absolute; top: 2px; bottom: 2px; left: 0; width: 2px;
+  margin-left: -1px; border-radius: 1px; background: var(--ink);
+  pointer-events: none; box-shadow: 0 0 8px color-mix(in srgb, var(--vu) 60%, transparent); }
+
+.pl-times { display: flex; justify-content: space-between;
+  font-family: var(--mono); font-size: 11px; letter-spacing: .08em; }
+.pl-now { color: var(--vu); }
+.pl-dur { color: var(--muted); }
+
+.pl-icon { flex: none; padding: 9px 10px; display: grid; place-items: center;
+  color: var(--ink-dim); }
+.pl-icon:hover:not(:disabled) { transform: none; color: var(--ink); }
+.pl-icon .pl-x { display: none; }
+.pl-icon.off { color: var(--muted); }
+.pl-icon.off .pl-wave { display: none; }
+.pl-icon.off .pl-x { display: block; }
+
+.pl-rate { flex: none; padding: 9px 10px; min-width: 52px; font-size: 12px;
+  letter-spacing: .06em; color: var(--ink-dim); }
+.pl-rate:hover:not(:disabled) { transform: none; color: var(--ink); }
+.pl-rate.on { color: var(--vu); border-color: color-mix(in srgb, var(--vu) 45%, var(--line-2)); }
+
+@media (max-width: 560px) {
+  .pl { flex-wrap: wrap; }
+  .pl-main { order: 3; flex-basis: 100%; }
+}
+
 .lib-audio-name { font-family: var(--mono); font-size: 11px; color: var(--faint);
   margin-top: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lib-none { font-family: var(--mono); font-size: 12px; color: var(--faint);
@@ -327,6 +447,18 @@ select.grow { flex: 1; }
 .hint { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-top: 14px;
   padding-top: 12px; border-top: 1px dashed var(--line-2); }
 .hint b { color: var(--vu); }
+/* A notice that is also the way to fix what it is telling you about. */
+.hint a.caution { color: inherit; text-decoration: none; cursor: pointer;
+  display: inline-block; border-left: 2px solid var(--vu); padding: 2px 0 2px 10px;
+  transition: color .15s var(--ease), border-color .15s var(--ease); }
+.hint a.caution::after { content: " →"; color: var(--vu); }
+.hint a.caution:hover { color: var(--ink); border-color: var(--rec); }
+.hint a.caution:hover b { color: var(--rec); }
+/* Mid-download: the same line, no longer an invitation to press it. */
+.hint .caution.busy { display: inline-block; padding: 2px 0 2px 10px;
+  border-left: 2px solid var(--ok); color: var(--ink-dim); }
+.hint a.caution.err { border-left-color: var(--rec); color: var(--rec-2); }
+.hint a.caution.err::after { content: ""; }
 .hint code { color: var(--ink-dim); }
 
 /* saved-output row */
@@ -352,6 +484,13 @@ select.grow { flex: 1; }
   color: var(--sc, var(--rec)); font-weight: 700; margin-right: 8px; }
 .tx-body .ts { font-family: var(--mono); font-size: 11px; color: var(--muted);
   margin-right: 10px; opacity: .8; }
+/* A timestamp is only a control where there is a recording to move. Without
+   the audio it stays exactly what it was: a muted label. */
+.tx-body .ts[data-at] { color: var(--vu); opacity: 1; cursor: pointer;
+  border-radius: 3px; transition: color .12s var(--ease); }
+.tx-body .ts[data-at]:hover { color: var(--rec); text-decoration: underline; }
+.tx-body .ts[data-at]:focus-visible { outline: 2px solid var(--vu);
+  outline-offset: 2px; text-decoration: underline; }
 .tx-body .txt { color: var(--ink); }
 .empty { color: var(--faint); font-style: italic; font-family: var(--mono); font-size: 13px; }
 
@@ -450,6 +589,15 @@ button.mini.on { border-color: var(--rec); color: var(--rec); }
 .check input { width: 18px; height: 18px; accent-color: var(--rec); }
 .check label { font-family: var(--body); font-size: 14px; color: var(--ink-dim); cursor: pointer; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
+
+/* The themed confirm. Narrower than Settings, and the body keeps the line
+   breaks the message was written with — a path on its own line reads as a
+   path, not as part of the sentence. */
+.modal.ask { max-width: 440px; }
+.ask-body { color: var(--ink-dim); font-size: 14px; line-height: 1.6;
+  white-space: pre-wrap; margin-bottom: 22px; }
+.ask-body code, .ask-body b { font-family: var(--mono); font-size: 12.5px;
+  color: var(--ink); font-weight: 400; }
 button.save { background: var(--rec); border-color: var(--rec); color: #1a0d06; font-weight: 700; }
 button.save:hover { background: var(--rec-2); border-color: var(--rec-2); }
 

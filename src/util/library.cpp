@@ -76,6 +76,109 @@ bool valid_id(const std::string& id) {
     return true;
 }
 
+bool valid_variant(const std::string& name) {
+    if (name.empty() || name.size() > 64) return false;
+    if (name.front() == ' ' || name.back() == ' ') return false;
+    for (char c : name) {
+        const unsigned char u = static_cast<unsigned char>(c);
+        if (u < 0x20) return false;
+        // A dot would let a name reach past its own segment ("x.json"), and a
+        // separator out of the folder entirely. Everything else printable and
+        // non-exotic is the user's to choose.
+        if (c == '.' || c == '/' || c == '\\' || c == ':') return false;
+    }
+    return true;
+}
+
+namespace {
+
+// "transcript" + "" -> "transcript.json"; + "second pass" -> the named file.
+fs::path variant_file(const fs::path& dir, const std::string& stem,
+                      const std::string& name, const std::string& ext) {
+    const std::string mid = (name.empty() || !valid_variant(name)) ? "" : "." + name;
+    return dir / paths::from_utf8(stem + mid + ext);
+}
+
+// The name out of "transcript<.name>.json", or "" for the original. Returns
+// false when the file is not one of this stem's at all.
+bool variant_name_of(const std::string& filename, const std::string& stem,
+                     const std::string& ext, std::string* out) {
+    if (filename.size() < stem.size() + ext.size()) return false;
+    if (filename.compare(0, stem.size(), stem) != 0) return false;
+    if (filename.compare(filename.size() - ext.size(), ext.size(), ext) != 0) return false;
+
+    const std::string mid = filename.substr(stem.size(),
+                                            filename.size() - stem.size() - ext.size());
+    if (mid.empty()) { out->clear(); return true; }        // the original
+    if (mid.front() != '.') return false;                  // "transcripts.json"
+    const std::string name = mid.substr(1);
+    if (!valid_variant(name)) return false;
+    *out = name;
+    return true;
+}
+
+// Original first, then newest-first: the one a session was born with is the
+// anchor, and after that recency is the only ordering that means anything.
+std::vector<Variant> scan(const fs::path& dir, const std::string& stem,
+                          const std::string& ext, const std::string& also_ext) {
+    std::vector<Variant> out;
+    std::error_code ec;
+    for (fs::directory_iterator it(dir, ec), end; it != end; it.increment(ec)) {
+        if (ec) break;
+        if (!it->is_regular_file(ec)) continue;
+        std::string name;
+        const std::string filename = paths::to_utf8(it->path().filename());
+        if (!variant_name_of(filename, stem, ext, &name)) continue;
+        Variant v;
+        v.name  = name;
+        v.mtime = mtime_seconds(it->path());
+        v.structured = also_ext.empty() ||
+                       fs::is_regular_file(variant_file(dir, stem, name, also_ext), ec);
+        out.push_back(std::move(v));
+    }
+    std::sort(out.begin(), out.end(), [](const Variant& a, const Variant& b) {
+        if (a.name.empty() != b.name.empty()) return a.name.empty();
+        if (a.mtime != b.mtime) return a.mtime > b.mtime;
+        return a.name < b.name;
+    });
+    return out;
+}
+
+}  // namespace
+
+fs::path transcript_json_file(const fs::path& dir, const std::string& name) {
+    return variant_file(dir, "transcript", name, ".json");
+}
+fs::path transcript_txt_file(const fs::path& dir, const std::string& name) {
+    return variant_file(dir, "transcript", name, ".txt");
+}
+fs::path summary_file(const fs::path& dir, const std::string& name) {
+    return variant_file(dir, "summary", name, ".txt");
+}
+
+std::vector<Variant> transcript_variants(const fs::path& dir) {
+    // Listed by the .txt, which is what a transcript normally has; the .json is
+    // what makes one structured enough to render with speakers and timestamps.
+    std::vector<Variant> out = scan(dir, "transcript", ".txt", ".json");
+    // A session saved with only the structured form still has a transcript, so
+    // do not let the .txt scan be the whole story.
+    for (Variant& v : scan(dir, "transcript", ".json", "")) {
+        const bool known = std::any_of(out.begin(), out.end(),
+                                       [&](const Variant& e) { return e.name == v.name; });
+        if (!known) out.push_back(std::move(v));
+    }
+    std::sort(out.begin(), out.end(), [](const Variant& a, const Variant& b) {
+        if (a.name.empty() != b.name.empty()) return a.name.empty();
+        if (a.mtime != b.mtime) return a.mtime > b.mtime;
+        return a.name < b.name;
+    });
+    return out;
+}
+
+std::vector<Variant> summary_variants(const fs::path& dir) {
+    return scan(dir, "summary", ".txt", "");
+}
+
 fs::path resolve(const std::string& output_dir, const std::string& id) {
     if (!valid_id(id) || output_dir.empty()) return {};
 

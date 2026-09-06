@@ -183,15 +183,22 @@ Binary'yi çalıştırın; pencere açılır. Konsoldan:
 
 ## Modeller
 
-Hiçbir model binary'ye gömülü değildir; ilk ihtiyaç duyulduğunda otomatik iner
-(indirme için `curl` kullanılır — Windows 10 1803+, macOS ve Linux'ta hazır
-gelir). İnenler:
+Hiçbir model binary'ye gömülü değildir. Konuşma modeli Ayarlar → Genel'den
+elle seçilip indirilir; varsayılan yoktur ve metne dönüştürme sırasında hiçbir
+şey indirilmez. Diğerleri ilk ihtiyaç duyulduğunda iner. İndirme için `curl`
+kullanılır — Windows 10 1803+, macOS ve Linux'ta hazır gelir.
 
 | Model | Boyut | Ne zaman |
 |---|---|---|
-| `ggml-large-v3.bin` (whisper.cpp) | ~3.1 GB | İlk kayıt işlenirken |
+| Whisper `tiny` … `large-v3` | 74 MB – 2.9 GB | Ayarlar'dan seçilip indirilir |
 | pyannote segmentation-3.0 (ONNX) | ~6 MB | İlk konuşmacı ayrımında |
 | 3D-Speaker ERes2NetV2 ses izi | ~69 MB | İlk konuşmacı ayrımında |
+
+Konuşma modelleri, küçükten iyiye: `tiny` ve `base` sesin geldiğini denemek
+için; `small` gerçek bir konuşmayı verebileceğiniz en hafif model; `medium`
+aksanlarda ve üst üste konuşmalarda belirgin biçimde daha iyi;
+`large-v3-turbo` önerilen seçim — `large-v3` doğruluğuna yakın, çok daha kısa
+sürede ve yarı boyutta; `large-v3` en doğrusu ve en yavaşı.
 
 Konum: `%APPDATA%\Transcriptor\models` (Windows),
 `~/Library/Application Support/Transcriptor/models` (macOS),
@@ -244,7 +251,7 @@ zamanlı karıştırılır; kazançlar ve tepe sınırlayıcı ayarlardan yönet
 
 ## VRAM yönetimi
 
-8 GB kart için modeller sırayla yüklenir: modelleri uygulama tuttuğu için STT
+Modeller sırayla yüklenir: modelleri uygulama tuttuğu için STT
 başlamadan önce LLM ağırlıkları, özet başlamadan önce whisper ağırlıkları
 doğrudan bırakılır.
 Ayarlar → **VRAM'i sıraya koy** ile kapatılabilir.

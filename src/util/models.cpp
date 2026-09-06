@@ -13,16 +13,12 @@ namespace {
 constexpr char kWhisperBase[] =
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/";
 
-// Sizes are approximate and only drive the progress bar.
-const std::map<std::string, std::uint64_t> kWhisperSizes = {
-    {"tiny",      77'700'000ULL},
-    {"base",     147'900'000ULL},
-    {"small",    487'600'000ULL},
-    {"medium", 1'533'800'000ULL},
+// Older large releases are still downloadable by name — a config carried over
+// from an earlier version may point at one — but they are not offered in the
+// catalog, where large-v3 and its turbo supersede them.
+const std::map<std::string, std::uint64_t> kLegacyWhisperSizes = {
     {"large-v1", 3'094'600'000ULL},
     {"large-v2", 3'094'600'000ULL},
-    {"large-v3", 3'095'000'000ULL},
-    {"large-v3-turbo", 1'624'600'000ULL},
 };
 
 bool has_file(const paths::fs::path& p) {
@@ -74,15 +70,106 @@ std::string human_size(std::uint64_t bytes) {
     return buf;
 }
 
+const std::vector<WhisperModelSpec>& whisper_catalog() {
+    // Ordered smallest to largest, which is also roughest to best. Sizes are
+    // the ggml .bin files on HuggingFace.
+    static const std::vector<WhisperModelSpec> kCatalog = {
+        {"tiny", "Tiny", 77'700'000ULL,
+         "Fastest and roughest. Good for checking that audio is reaching the "
+         "app; not for a meeting you need to read afterwards.",
+         "En hızlı ve en kaba. Sesin uygulamaya ulaştığını denemek için iyi; "
+         "sonradan okunacak bir toplantı için değil."},
+
+        {"base", "Base", 147'900'000ULL,
+         "Still quick, still rough. Usable for one clear speaker in a quiet "
+         "room, and little else.",
+         "Yine hızlı, yine kaba. Sessiz bir odada tek ve net bir konuşmacı "
+         "için kullanılabilir, fazlası değil."},
+
+        {"small", "Small", 487'600'000ULL,
+         "The lightest model worth putting a real conversation through. Runs "
+         "at a sensible speed on CPU.",
+         "Gerçek bir konuşmayı verebileceğiniz en hafif model. CPU'da makul "
+         "bir hızda çalışır."},
+
+        {"medium", "Medium", 1'533'800'000ULL,
+         "Clearly better on accents, crosstalk and quiet speakers. Slow "
+         "without a GPU.",
+         "Aksanlarda, üst üste konuşmalarda ve alçak sesli konuşmacılarda "
+         "belirgin biçimde daha iyi. GPU olmadan yavaş."},
+
+        {"large-v3-turbo", "Large v3 Turbo", 1'624'600'000ULL,
+         "Recommended — close to large-v3's accuracy in a fraction of the "
+         "time, and half the size.",
+         "Önerilen — large-v3 doğruluğuna yakın, çok daha kısa sürede ve yarı "
+         "boyutta."},
+
+        {"large-v3", "Large v3", 3'095'000'000ULL,
+         "The most accurate, and the slowest. Worth it for hard audio if you "
+         "have a GPU to run it on.",
+         "En doğrusu ve en yavaşı. Üzerinde çalıştıracak bir GPU'nuz varsa zor "
+         "kayıtlar için değer."},
+    };
+    return kCatalog;
+}
+
+std::string WhisperModelSpec::note() const { return L(note_en, note_tr); }
+
+const WhisperModelSpec* whisper_catalog_entry(const std::string& id) {
+    for (const WhisperModelSpec& m : whisper_catalog()) {
+        if (m.id == id) return &m;
+    }
+    return nullptr;
+}
+
+paths::fs::path whisper_model_file(const WhisperModelSpec& spec) {
+    return paths::models_dir() / paths::from_utf8("ggml-" + spec.id + ".bin");
+}
+
 ModelSpec whisper_spec(const std::string& model_name) {
     ModelSpec s;
     s.id = model_name;
+    if (model_name.empty()) return s;          // nothing chosen -> no url
     s.label = "Whisper " + model_name;
-    auto it = kWhisperSizes.find(model_name);
-    if (it == kWhisperSizes.end()) return s;   // unknown -> no url, caller errors
+
+    std::uint64_t bytes = 0;
+    if (const WhisperModelSpec* m = whisper_catalog_entry(model_name)) {
+        bytes = m->approx_bytes;
+        s.label = "Whisper " + m->label;
+    } else {
+        auto it = kLegacyWhisperSizes.find(model_name);
+        if (it == kLegacyWhisperSizes.end()) return s;   // unknown -> caller errors
+        bytes = it->second;
+    }
     s.url = std::string(kWhisperBase) + "ggml-" + model_name + ".bin";
-    s.approx_bytes = it->second;
+    s.approx_bytes = bytes;
     return s;
+}
+
+std::string whisper_missing_reason(const Settings& s) {
+    if (whisper_ready(s)) return {};
+
+    // Pointed at a file by hand, and it is not there. Naming the path is the
+    // only useful thing to say.
+    if (!s.whisper_model_path.empty()) {
+        return L("The speech model file was not found: ",
+                 "Konuşma modeli dosyası bulunamadı: ") +
+               paths::to_utf8(s.whisper_model_file()) +
+               L(" — check the path in Settings → Advanced.",
+                 " — Ayarlar → Gelişmiş'teki yolu kontrol edin.");
+    }
+    if (s.whisper_model.empty()) {
+        return L("No speech model is selected. Open Settings → General and "
+                 "choose one, then download it.",
+                 "Konuşma modeli seçilmedi. Ayarlar → Genel'den birini seçip "
+                 "indirin.");
+    }
+    const WhisperModelSpec* m = whisper_catalog_entry(s.whisper_model);
+    const std::string label = m ? m->label : s.whisper_model;
+    return L("The speech model \"", "\"") + label +
+           L("\" has not been downloaded. Open Settings → General and download "
+             "it.",
+             "\" konuşma modeli indirilmemiş. Ayarlar → Genel'den indirin.");
 }
 
 ModelSpec segmentation_spec() {
@@ -185,16 +272,12 @@ bool diarization_ready(const Settings& s) {
     return has_file(s.segmentation_model_file()) && has_file(s.embedding_model_file());
 }
 
-std::string ensure_whisper_model(const Settings& s, const ProgressFn& progress,
-                                 net::Canceller* cancel) {
-    const paths::fs::path dest = s.whisper_model_file();
+std::string ensure_whisper_model_file(const WhisperModelSpec& spec,
+                                      const ProgressFn& progress,
+                                      net::Canceller* cancel) {
+    const paths::fs::path dest = whisper_model_file(spec);
     if (has_file(dest)) return {};
-    if (!s.whisper_model_path.empty()) {
-        // The user pointed at a specific file; don't guess a download for it.
-        return L("Whisper model not found: ", "Whisper modeli bulunamadı: ") +
-               paths::to_utf8(dest);
-    }
-    return fetch(whisper_spec(s.whisper_model), dest, progress, cancel);
+    return fetch(whisper_spec(spec.id), dest, progress, cancel);
 }
 
 std::string ensure_diarization_models(const Settings& s, const ProgressFn& progress,

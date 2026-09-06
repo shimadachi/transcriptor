@@ -48,7 +48,8 @@ public:
         : base_url_(s.llm_base_url), model_(s.llm_model),
           api_key_(s.llm_api_key.empty() ? "not-needed" : s.llm_api_key),
           timeout_(s.llm_timeout), temperature_(s.llm_temperature),
-          max_tokens_(s.llm_max_tokens) {}
+          max_tokens_(std::max(64, s.llm_max_tokens)),
+          thinking_(s.llm_thinking) {}
 
     // Closing the window has to be able to end a request that is in flight.
     // Without this the backend inherited the base class's do-nothing abort:
@@ -146,16 +147,30 @@ public:
             model = models[0];
         }
 
+        // Reasoning is budgeted beside the answer, not out of it. There is no
+        // token-level control over a served model -- no way to close an
+        // overrunning <think> the way the embedded backend does -- so the only
+        // lever here is asking for the room, and asking the server not to think
+        // at all when the setting is off.
+        const int think_budget = thinking_ ? std::clamp(max_tokens_ / 2, 512, 2048) : 0;
+
         nlohmann::json payload = {
             {"model", model},
             {"temperature", temperature_},
-            {"max_tokens", max_tokens_},
+            {"max_tokens", max_tokens_ + think_budget},
             {"stream", false},
             {"messages", nlohmann::json::array({
                 {{"role", "system"}, {"content", resolve_system_prompt(req)}},
                 {{"role", "user"},   {"content", build_user_message(req)}},
             })},
         };
+        // llama-server, vLLM and LM Studio all pass this through to the chat
+        // template; a server that has never heard of it answers 400, and the
+        // request is worth one retry without the hint rather than failing a
+        // summary over it.
+        if (!thinking_) {
+            payload["chat_template_kwargs"] = {{"enable_thinking", false}};
+        }
 
         if (progress) {
             progress(L("Summarizing (", "Özetleniyor (") + model + ")…", -1.0);
@@ -182,6 +197,14 @@ public:
 
         auto res = client->Post(endpoint_.prefix + "/chat/completions", headers(),
                                 payload.dump(), "application/json");
+        if (res && res->status == 400 && payload.contains("chat_template_kwargs")) {
+            // The server does not know the kwarg. Ask again without it and let
+            // strip_reasoning() clean up after whatever it sends back.
+            throw_if_aborted();
+            payload.erase("chat_template_kwargs");
+            res = client->Post(endpoint_.prefix + "/chat/completions", headers(),
+                               payload.dump(), "application/json");
+        }
         // The abort is authoritative even when the answer beat it: nothing
         // downstream wants a summary for an operation the user stopped.
         throw_if_aborted();
@@ -211,8 +234,20 @@ public:
                                   res->body.substr(0, 400));
         }
         const auto& msg = j["choices"][0]["message"];
-        if (!msg.is_object() || !msg.contains("content") ||
-            !msg["content"].is_string()) {
+        if (!msg.is_object()) {
+            throw SummarizerError(L("Unexpected response format: ",
+                                    "Beklenmeyen yanıt biçimi: ") +
+                                  res->body.substr(0, 400));
+        }
+
+        // A server that separates the two sends the answer in content and the
+        // chain of thought in reasoning_content -- and sends content as null,
+        // not as a string, when the model never got past thinking. Reading only
+        // content and demanding a string reported that as a malformed response.
+        std::string served;
+        if (msg.contains("content") && msg["content"].is_string()) {
+            served = msg["content"].get<std::string>();
+        } else if (!msg.contains("reasoning_content")) {
             throw SummarizerError(L("Unexpected response format: ",
                                     "Beklenmeyen yanıt biçimi: ") +
                                   res->body.substr(0, 400));
@@ -221,17 +256,19 @@ public:
         // Reasoning comes off here, where the model's text arrives: a served
         // model that inlines <think> in the content is no different from the
         // embedded one, and no caller should have to remember.
-        const std::string served = msg["content"].get<std::string>();
         std::string content = strip_reasoning(served);
 
-        // All reasoning and no answer: the token budget ran out inside the
-        // <think> block. Say that, rather than "empty answer".
-        if (content.empty() && served.find_first_not_of(" \t\r\n") != std::string::npos) {
+        // All reasoning and no answer. The budget ran out inside the <think>
+        // block, and nothing here can close it the way the embedded backend
+        // does -- so this is the one place that advice is still the answer.
+        if (content.empty() && reasoned(msg, served)) {
             throw SummarizerError(
-                L("The model used the whole answer budget on reasoning. "
-                  "Raise the maximum answer length in Settings.",
-                  "Model, yanıt bütçesinin tamamını düşünmeye harcadı. "
-                  "Ayarlar'dan maksimum yanıt uzunluğunu artırın."));
+                L("The model spent the whole request on reasoning and never "
+                  "answered. Raise the maximum answer length in Settings, or "
+                  "turn off \"Let the model think first\".",
+                  "Model, isteğin tamamını düşünmeye harcadı ve yanıt vermedi. "
+                  "Ayarlar'dan azami yanıt uzunluğunu artırın veya \"Önce "
+                  "düşünmesine izin ver\" seçeneğini kapatın."));
         }
         if (content.empty()) {
             throw SummarizerError(L("The LLM returned an empty answer.",
@@ -241,6 +278,16 @@ public:
     }
 
 private:
+    // Did the model think, whether it inlined the block in the content or the
+    // server lifted it into a field of its own?
+    static bool reasoned(const nlohmann::json& msg, const std::string& served) {
+        if (served.find_first_not_of(" \t\r\n") != std::string::npos) return true;
+        auto it = msg.find("reasoning_content");
+        return it != msg.end() && it->is_string() &&
+               it->get<std::string>().find_first_not_of(" \t\r\n") !=
+                   std::string::npos;
+    }
+
     // Publishes the client for the length of one call, so request_abort() has
     // something to close and never a dangling pointer after it returns.
     class ActiveClient {
@@ -303,6 +350,7 @@ private:
     double      timeout_;
     float       temperature_;
     int         max_tokens_;
+    bool        thinking_;
     Endpoint    endpoint_;
 
     // The request in flight, and the flag that says a stop was asked for. Both
