@@ -55,6 +55,20 @@ transcriptor_test(test_recording_lifecycle
     "${TESTS_SRC}/test_recording_lifecycle.cpp"
     "${TESTS_SRC}/fake_capture.cpp")
 target_link_libraries(test_recording_lifecycle PRIVATE transcriptor_core)
+
+# Windows resolves a binary's whole import table before main() runs, so this
+# needs the same prebuilt ONNX Runtime the application does -- it links
+# sherpa-onnx whether or not a test ever asks for diarization.
+# cmake/package.cmake stages that DLL beside transcriptor.exe for exactly this
+# reason; the test binary lives in tests/ and got no such treatment, so it did
+# not start at all: ctest reported Exit code 0xc0000135, STATUS_DLL_NOT_FOUND,
+# with no output of its own to explain it.
+if(WIN32 AND TARGET onnxruntime)
+    add_custom_command(TARGET test_recording_lifecycle POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:onnxruntime> $<TARGET_FILE_DIR:test_recording_lifecycle>
+        COMMENT "Staging ONNX Runtime next to the recording-lifecycle test")
+endif()
 # Taken from the option, deliberately not from the define the application code
 # is compiled with: the check this feeds exists to notice that define failing to
 # reach the code, so reading it from the same place would prove nothing.
