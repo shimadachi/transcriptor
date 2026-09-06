@@ -128,9 +128,18 @@ private:
     // `device_error` is non-empty when the capture died mid-take: the audio is
     // still saved and held, but nothing runs on it unasked. `claimed` says the
     // caller already holds the job slot (see claim_job).
-    void begin(std::vector<float> audio, const paths::fs::path& original_file,
+    //
+    // Returns false when the take was rejected outright -- audio too short to
+    // process -- so an upload can answer with the error it just set instead of
+    // reporting the rejection as a success.
+    bool begin(std::vector<float> audio, const paths::fs::path& original_file,
                const std::string& original_name, const std::string& device_error,
                bool claimed);
+
+    // Write out a take that is being torn down rather than stopped: closing the
+    // window during a recording. Honours save_audio, and is the only saving
+    // path outside begin().
+    void save_orphaned_take(const std::vector<float>& audio);
     void process_worker(AudioBuffer audio);
     void do_summarize();
 
@@ -180,6 +189,18 @@ private:
     // taken while mutex_ is held, so the two can never deadlock against each
     // other; a running job takes mutex_ freely without ever wanting this one.
     std::mutex job_mutex_;
+
+    // One recording transition at a time, start to finish. Opening a device is
+    // slow, and the recorder used to be published only afterwards: a cancel
+    // arriving during that gap found no recorder_ to stop, lowered recording_
+    // and reported success, and startup then handed a live capture to an app
+    // that believed it was idle -- unstoppable, because every route checks
+    // recording() first. Held around the whole of start_recording(), cancel(),
+    // the handover in stop_and_process(), and shutdown().
+    //
+    // Outermost of the three: record_mutex_ -> job_mutex_ -> mutex_. Never
+    // taken while either of the others is held.
+    std::mutex record_mutex_;
 
     Settings   settings_;          // guarded by mutex_
     DeviceInfo device_;            // guarded by mutex_
@@ -233,6 +254,12 @@ private:
     // Kills the curl behind the catalog download. Reset when one starts, so a
     // cancelled download does not block the next.
     net::Canceller dl_cancel_;
+
+    // Bumped by every deliberate end of a take: a new recording, and a cancel.
+    // stop_and_process() reads it before closing the device and again before
+    // committing, because closing takes long enough for a cancel to run in
+    // between -- and a cancel that ran must not be undone by the stop it raced.
+    std::atomic<unsigned> lifecycle_gen_{0};
 
     std::atomic<bool> recording_{false};
     std::atomic<bool> processing_{false};

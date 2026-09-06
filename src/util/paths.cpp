@@ -115,6 +115,13 @@ bool write_file(const fs::path& p, const std::string& data) {
     std::ofstream out(p, std::ios::binary | std::ios::trunc);
     if (!out) return false;
     out.write(data.data(), static_cast<std::streamsize>(data.size()));
+    // Close here, and report on the closed stream. A write this size usually
+    // sits entirely in the stream buffer, so good() answers "nothing has gone
+    // wrong yet" rather than "the bytes are on disk" -- a full disk or a quota
+    // only surfaces when the buffer is flushed. Leaving that to the destructor
+    // threw the error away: the caller was told the transcript had been saved
+    // and the file was zero bytes long.
+    out.close();
     return out.good();
 }
 

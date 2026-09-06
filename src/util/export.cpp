@@ -95,6 +95,10 @@ bool save_audio_wav(const fs::path& path, const std::vector<float>& audio,
     }
     out.write(reinterpret_cast<const char*>(pcm.data()),
               static_cast<std::streamsize>(pcm.size() * sizeof(std::int16_t)));
+    // Flushed and checked before answering, for the reason paths::write_file
+    // spells out: this is the only copy of the recording, and a destructor that
+    // fails silently reports a lost take as a saved one.
+    out.close();
     return out.good();
 }
 

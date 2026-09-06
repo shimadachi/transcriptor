@@ -64,14 +64,33 @@ AppState::~AppState() { shutdown(); }
 
 void AppState::shutdown() {
     shutting_down_.store(true);
+
+    std::unique_ptr<audio::Recorder> recorder;
     {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (processor_) processor_->request_abort();
-        if (llm_) llm_->request_abort();
-        if (recorder_) recorder_->stop();
-        recorder_.reset();
+        // Behind record_mutex_, so a start_recording() still opening its device
+        // finishes first and hands the recorder over here rather than
+        // publishing it into an app that has already torn itself down.
+        std::lock_guard<std::mutex> lifecycle(record_mutex_);
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (processor_) processor_->request_abort();
+            if (llm_) llm_->request_abort();
+            recorder = std::move(recorder_);
+        }
+        recording_.store(false);
     }
-    recording_.store(false);
+
+    // A take in progress is the one thing here that cannot be made again. This
+    // used to stop the recorder and drop the samples it returned: closing the
+    // window mid-recording lost the lot, default save_audio and all, because
+    // writing only ever happened in begin(). Stop it outside the locks (a dead
+    // device can take a moment) and write it out before the teardown below.
+    if (recorder) {
+        std::vector<float> audio = recorder->stop();
+        recorder.reset();
+        save_orphaned_take(audio);
+    }
+
     join_worker();
     // Kill the download rather than wait it out. This used to join and hope:
     // curl has no transfer timeout, so quitting during a stalled fetch hung
@@ -95,6 +114,11 @@ bool AppState::claim_job() {
     // Nothing new starts once the app is on its way out: shutdown() joins the
     // worker, and a job admitted after that join would never be waited for.
     if (shutting_down_.load()) return false;
+    // A live recording owns the session state a job would clear out from under
+    // it. The HTTP routes check this too, but not atomically with the claim, so
+    // a request that passed its check just before a recording started could
+    // still get here. stop_and_process() lowers the flag before it claims.
+    if (recording_.load()) return false;
     return !processing_.exchange(true);
 }
 
@@ -105,6 +129,24 @@ void AppState::start_job(std::function<void()> body) {
     // claim_job() let exactly one caller get here.
     join_worker_locked();
     claim_backends();
+
+    // Clear the last job's cancellation here, where the worker does not exist
+    // yet, rather than inside the processor and the backends as they start.
+    // Doing it there meant a shutdown could be requested and then erased by the
+    // job it was meant to stop, leaving join_worker() below to wait out a whole
+    // transcription, summary, or gigabyte model download.
+    {
+        std::lock_guard<std::mutex> mlock(mutex_);
+        if (processor_) processor_->reset_abort();
+        if (llm_) llm_->reset_abort();
+    }
+    // ...and if the shutdown landed while this job was being admitted, put it
+    // straight back: claim_job() checked the flag before that store, not after.
+    if (shutting_down_.load()) {
+        std::lock_guard<std::mutex> mlock(mutex_);
+        if (processor_) processor_->request_abort();
+        if (llm_) llm_->request_abort();
+    }
     worker_ = std::thread([this, body = std::move(body)] {
         try {
             body();
@@ -211,6 +253,19 @@ void AppState::release_backends() {
 
 void AppState::start_recording(const audio::AudioSource& source,
                                const std::optional<audio::AudioSource>& mic_source) {
+    // The whole transition, start to finish, is one critical section. Opening a
+    // device is slow enough that a cancel used to slip through the middle of it
+    // -- see record_mutex_ -- and come out the other side with the app idle and
+    // a live capture nobody could reach.
+    std::lock_guard<std::mutex> lifecycle(record_mutex_);
+
+    // Nothing new starts once the app is on its way out. shutdown() has already
+    // stopped and saved whatever was recording; a take admitted after that
+    // would open a device nobody is left to close.
+    if (shutting_down_.load()) {
+        throw BusyError(L("The app is closing.", "Uygulama kapanıyor."));
+    }
+
     // Claim the recorder before anything else. Two starts landing together
     // would otherwise both build a Recorder, both join the worker, and the
     // second would drop the first's device on the floor mid-take.
@@ -261,10 +316,21 @@ void AppState::start_recording(const audio::AudioSource& source,
         throw;
     }
 
+    // shutdown() waits on record_mutex_, so it cannot have run past us -- but it
+    // can have raised the flag while the device was opening. Close what we just
+    // opened rather than publish it into an app that is going away.
+    if (shutting_down_.load()) {
+        recorder->stop();
+        recorder.reset();
+        recording_.store(false);
+        throw BusyError(L("The app is closing.", "Uygulama kapanıyor."));
+    }
+
     {
         std::lock_guard<std::mutex> lock(mutex_);
         recorder_ = std::move(recorder);
     }
+    lifecycle_gen_.fetch_add(1);   // a new take; anything older is history
     set_phase("recording");
 }
 
@@ -279,6 +345,17 @@ void AppState::resume_recording() {
 }
 
 void AppState::cancel() {
+    // Behind the same lock as start_recording(), so a take that is still
+    // opening its device is finished and published before this looks for it.
+    // Without that, cancel saw no recorder_, cleared recording_ and reported
+    // success while the capture it meant to stop was seconds from going live.
+    std::lock_guard<std::mutex> lifecycle(record_mutex_);
+
+    // There is nothing left to cancel once the app is closing, and a great deal
+    // to lose: shutdown() has just written the take that was in progress into
+    // the session folder, and delete_session_dir() below would take it away
+    // again. The request can only be a stray one -- the window is gone.
+    if (shutting_down_.load()) return;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (recording_.load() && recorder_) {
@@ -293,6 +370,11 @@ void AppState::cancel() {
         summary_context_.clear();
         save_error_.clear();
     }
+    // Announce the end of this take before anything else can commit it. A Stop
+    // already past the handover is sitting in the device close right now; the
+    // bump is what tells it, when it comes back, that the take it is holding
+    // was cancelled and must not be saved or transcribed.
+    lifecycle_gen_.fetch_add(1);
     recording_.store(false);
     delete_session_dir();
     set_phase("idle");
@@ -300,17 +382,32 @@ void AppState::cancel() {
 
 void AppState::stop_and_process() {
     std::unique_ptr<audio::Recorder> recorder;
+    unsigned gen = 0;
     {
+        // Only the handover is serialized against the other transitions: the
+        // saving and transcribing below take their time, and the job slot
+        // claimed further down is what keeps a second one out from there.
+        std::lock_guard<std::mutex> lifecycle(record_mutex_);
+        gen = lifecycle_gen_.load();
         std::lock_guard<std::mutex> lock(mutex_);
         recorder = std::move(recorder_);
     }
     if (!recorder) return;
 
     std::vector<float> audio = recorder->stop();
-    recording_.store(false);
-
     const std::string err = recorder->error();
     recorder.reset();
+
+    {
+        // Closing a device is slow, and Cancel can run the whole way through
+        // while it happens: it finds no recorder_ (this call took it), clears
+        // the session, deletes the folder and leaves the app idle. Committing
+        // the take now would put a cancelled recording back on screen and write
+        // it to disk. The generation is what tells the two apart.
+        std::lock_guard<std::mutex> lifecycle(record_mutex_);
+        if (lifecycle_gen_.load() != gen) return;   // cancelled underneath us
+        recording_.store(false);
+    }
 
     // A device that dies mid-take -- an unplugged headset, a sink that went
     // away -- still leaves everything captured before it did, and stop()
@@ -354,11 +451,14 @@ bool AppState::process_file(const paths::fs::path& tmp_path,
         processing_.store(false);
         return false;
     }
-    begin(std::move(audio), tmp_path, orig_name, {}, /*claimed=*/true);
-    return true;
+    // The upload's answer is begin()'s verdict, not "the decode worked". A take
+    // under half a second sets the error phase and runs nothing, and returning
+    // true regardless had the endpoint reply {ok:true} to a rejected file --
+    // the page then waited for a transcript that was never coming.
+    return begin(std::move(audio), tmp_path, orig_name, {}, /*claimed=*/true);
 }
 
-void AppState::begin(std::vector<float> audio, const paths::fs::path& original_file,
+bool AppState::begin(std::vector<float> audio, const paths::fs::path& original_file,
                      const std::string& original_name,
                      const std::string& device_error, bool claimed) {
     const Settings settings = settings_copy();
@@ -376,7 +476,7 @@ void AppState::begin(std::vector<float> audio, const paths::fs::path& original_f
                       : device_msg);
         // Nothing will run, so hand the job slot back.
         if (claimed) processing_.store(false);
-        return;
+        return false;
     }
 
     const paths::fs::path dir = ensure_session_dir();
@@ -426,10 +526,24 @@ void AppState::begin(std::vector<float> audio, const paths::fs::path& original_f
             set_phase("ready");
         }
         if (claimed) processing_.store(false);   // Transcribe takes its own
-        return;
+        return true;
     }
 
     start_job([this, buffer] { process_worker(buffer); });
+    return true;
+}
+
+void AppState::save_orphaned_take(const std::vector<float>& audio) {
+    const Settings settings = settings_copy();
+    if (!settings.save_audio) return;
+    if (audio.size() < static_cast<std::size_t>(settings.samplerate / 2)) return;
+
+    const paths::fs::path dir = ensure_session_dir();
+    if (dir.empty()) return;   // ensure_session_dir() already recorded why
+    if (!exporter::save_audio_wav(dir / "audio.wav", audio, settings.samplerate)) {
+        note_save_error(L("The audio could not be written to ",
+                          "Ses şuraya yazılamadı: ") + paths::to_utf8(dir));
+    }
 }
 
 bool AppState::start_transcribe(std::string* error) {
@@ -608,6 +722,7 @@ bool AppState::start_summarize(const std::string& context,
         if (error) *error = L("A job is already running.", "İşlem sürüyor.");
         return false;
     }
+    bool config_failed = false;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         summary_context_ = context;
@@ -616,9 +731,18 @@ bool AppState::start_summarize(const std::string& context,
             summary_template_ = template_id;
             if (settings_.summary_template != template_id) {
                 settings_.summary_template = template_id;
-                settings_.save();   // remember the chosen template
+                // Remember the chosen template -- and notice when that fails,
+                // rather than leaving the user to discover at the next launch
+                // that the app forgot. Reported after the lock: note_save_error
+                // takes the same mutex, which is not recursive.
+                config_failed = !settings_.save();
             }
         }
+    }
+    if (config_failed) {
+        note_save_error(L("The settings could not be saved to ",
+                          "Ayarlar şuraya kaydedilemedi: ") +
+                        paths::to_utf8(Settings::config_path()));
     }
 
     start_job([this] { do_summarize(); });
@@ -803,7 +927,16 @@ bool AppState::start_llm_download(const std::string& model_id, std::string* erro
             // Point the embedded backend at what we just fetched, so the user
             // does not have to pick the file by hand afterwards.
             next.llm_model_path = paths::to_utf8(file);
-            next.save();
+            // The model is on disk either way; what can fail here is recording
+            // which file to use. Say so instead of letting the next launch come
+            // up pointing at nothing.
+            if (!next.save()) {
+                std::lock_guard<std::mutex> lock(mutex_);
+                dl_message_ += L(" (the model path could not be saved — set it "
+                                 "in Settings)",
+                                 " (model yolu kaydedilemedi — Ayarlar'dan "
+                                 "seçin)");
+            }
             replace_settings(next);
         }
         downloading_.store(false);
