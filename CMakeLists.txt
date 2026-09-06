@@ -45,8 +45,11 @@ transcriptor_embed_assets(
 # ---------------------------------------------------------------------------
 # The application
 # ---------------------------------------------------------------------------
-set(TRANSCRIPTOR_SOURCES
-    src/main.cpp
+# Everything but the entry point and the audio device. Compiled once, into an
+# object library, and used by both the application and the recording-lifecycle
+# tests -- which supply their own AudioCapture, so they can drive a take without
+# a sound card and hold a device open on purpose to reproduce a race.
+set(TRANSCRIPTOR_CORE_SOURCES
     src/config.cpp
     src/device.cpp
     src/util/cpu.cpp
@@ -56,7 +59,6 @@ set(TRANSCRIPTOR_SOURCES
     src/util/net.cpp
     src/util/models.cpp
     src/audio/sources.cpp
-    src/audio/capture.cpp
     src/audio/recorder.cpp
     src/audio/decode.cpp
     src/audio/miniaudio_impl.c
@@ -71,6 +73,26 @@ set(TRANSCRIPTOR_SOURCES
     src/app/state.cpp
     src/app/server.cpp
     src/app/shell.cpp)
+
+add_library(transcriptor_core OBJECT ${TRANSCRIPTOR_CORE_SOURCES})
+
+target_include_directories(transcriptor_core PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated")
+
+target_link_libraries(transcriptor_core PUBLIC
+    transcriptor_assets
+    transcriptor::deps)
+
+target_compile_definitions(transcriptor_core PUBLIC
+    TRANSCRIPTOR_VERSION="${PROJECT_VERSION}")
+
+# The real audio device. Kept out of the object library above so a test can put
+# its own in this slot; AudioCapture is a pimpl, so the substitute only has to
+# match the header.
+set(TRANSCRIPTOR_SOURCES
+    src/main.cpp
+    src/audio/capture.cpp)
 
 if(WIN32)
     # GUI subsystem: no console window behind the app.
@@ -104,30 +126,40 @@ else()
     add_executable(transcriptor ${TRANSCRIPTOR_SOURCES})
 endif()
 
-target_include_directories(transcriptor PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    "${CMAKE_CURRENT_BINARY_DIR}/generated")
+target_link_libraries(transcriptor PRIVATE transcriptor_core)
 
-target_link_libraries(transcriptor PRIVATE
-    transcriptor_assets
-    transcriptor::deps)
-
-target_compile_definitions(transcriptor PRIVATE
-    TRANSCRIPTOR_VERSION="${PROJECT_VERSION}")
-
+# How the application's own code is compiled. These belong on the object library
+# that now holds that code, PUBLIC so the entry point and the audio device --
+# compiled into the executable itself -- and the tests get them too.
+#
+# They were on `transcriptor`, which was once the whole application. Moving the
+# sources into transcriptor_core put them out of reach without any warning:
+# diarize/diarizer.cpp and app/shell.cpp both compile themselves out when their
+# define is missing, so speaker separation and the native window silently
+# disappeared from the build while everything still linked and ran.
 if(TRANSCRIPTOR_DIARIZE)
-    target_compile_definitions(transcriptor PRIVATE TRANSCRIPTOR_HAVE_DIARIZE=1)
+    target_compile_definitions(transcriptor_core PUBLIC TRANSCRIPTOR_HAVE_DIARIZE=1)
 endif()
 if(TRANSCRIPTOR_WEBVIEW)
-    target_compile_definitions(transcriptor PRIVATE TRANSCRIPTOR_HAVE_WEBVIEW=1)
+    target_compile_definitions(transcriptor_core PUBLIC TRANSCRIPTOR_HAVE_WEBVIEW=1)
 endif()
 
 if(MSVC)
-    target_compile_options(transcriptor PRIVATE /utf-8 /W3)
-    target_compile_definitions(transcriptor PRIVATE
+    target_compile_options(transcriptor_core PUBLIC /utf-8 /W3)
+    target_compile_definitions(transcriptor_core PUBLIC
         NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS UNICODE _UNICODE)
 else()
-    target_compile_options(transcriptor PRIVATE -Wall -Wextra -Wno-unused-parameter)
+    target_compile_options(transcriptor_core PUBLIC -Wall -Wextra -Wno-unused-parameter)
+endif()
+
+# -- tests --------------------------------------------------------------------
+# On by default when this is the project being built, off when it is embedded
+# somewhere else. They need no models, no audio device and no network; run them
+# with `ctest --test-dir build/<preset>`.
+option(TRANSCRIPTOR_TESTS "Build the regression tests" ${PROJECT_IS_TOP_LEVEL})
+if(TRANSCRIPTOR_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
 endif()
 
 # ---------------------------------------------------------------------------
