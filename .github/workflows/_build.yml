@@ -140,8 +140,24 @@ jobs:
       # passing one. Two of the five are POSIX-only and the UI suite is skipped
       # where node is absent, so the count differs per platform; zero is the
       # only number that means something has gone wrong.
+      # Explicitly bash for the same reason the ccache step is: the default
+      # shell on the Windows runners is pwsh.
+      #
+      # The Vulkan presets import the loader implicitly -- vulkan-1.dll is the
+      # only non-system entry in the binary's import table -- so nothing built
+      # from them starts at all unless the loader is on the search path, and it
+      # fails before main() with 0xc0000135 and no output of its own. On a
+      # user's machine the GPU driver supplies it; on a runner it comes with the
+      # SDK, which is not on PATH by default. Harmless where it is already
+      # resolvable, and the echo makes a future failure explain itself.
       - name: Test
-        run: ctest --test-dir build/${{ inputs.preset }} --output-on-failure --no-tests=error
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ] && [ -n "$VULKAN_SDK" ]; then
+            export PATH="$VULKAN_SDK/Bin:$PATH"
+            echo "vulkan-1.dll -> $(where.exe vulkan-1.dll 2>/dev/null | head -1 || echo 'NOT FOUND')"
+          fi
+          ctest --test-dir "build/${{ inputs.preset }}" --output-on-failure --no-tests=error
 
       - name: Package
         working-directory: build/${{ inputs.preset }}
