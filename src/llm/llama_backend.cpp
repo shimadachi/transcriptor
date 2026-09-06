@@ -11,6 +11,7 @@
 #include <ggml-backend.h>
 #include <llama.h>
 
+#include "llm/chunking.h"
 #include "llm/templates.h"
 #include "util/cpu.h"
 #include "util/lang.h"
@@ -20,8 +21,9 @@ namespace transcriptor::llm {
 
 namespace {
 
-// Room reserved inside the context window for the system prompt, the chat
-// template's own tokens, and the answer we are about to generate.
+// Starting guess only, for turning a token budget into a byte budget to slice
+// on. Every slice is then measured for real -- see fits() -- so this being
+// wrong costs an extra split, not an overflow.
 constexpr int kPromptMargin = 512;
 
 // How many times the section notes may be reduced before the merge. Three
@@ -56,44 +58,6 @@ std::string trim(const std::string& s) {
     if (b == std::string::npos) return {};
     const auto e = s.find_last_not_of(" \t\r\n");
     return s.substr(b, e - b + 1);
-}
-
-// Split a transcript into chunks of at most `max_chars`, preferring line
-// boundaries so a speaker turn is never cut in half.
-std::vector<std::string> split_transcript(const std::string& text,
-                                          std::size_t max_chars) {
-    std::vector<std::string> chunks;
-    if (text.size() <= max_chars) {
-        chunks.push_back(text);
-        return chunks;
-    }
-
-    std::string current;
-    std::size_t pos = 0;
-    while (pos < text.size()) {
-        std::size_t nl = text.find('\n', pos);
-        std::string line = (nl == std::string::npos)
-                               ? text.substr(pos)
-                               : text.substr(pos, nl - pos + 1);
-        pos = (nl == std::string::npos) ? text.size() : nl + 1;
-
-        // A single line longer than the budget has to be cut mid-sentence.
-        while (line.size() > max_chars) {
-            if (!current.empty()) {
-                chunks.push_back(current);
-                current.clear();
-            }
-            chunks.push_back(line.substr(0, max_chars));
-            line = line.substr(max_chars);
-        }
-        if (current.size() + line.size() > max_chars && !current.empty()) {
-            chunks.push_back(current);
-            current.clear();
-        }
-        current += line;
-    }
-    if (!trim(current).empty()) chunks.push_back(current);
-    return chunks;
 }
 
 class LlamaBackend : public Backend {
@@ -142,10 +106,17 @@ public:
     }
 
     void request_abort() override { abort_.store(true); }
+    void reset_abort() override { abort_.store(false); }
 
     std::string summarize(const SummaryRequest& req,
                           const ProgressFn& progress) override {
-        abort_.store(false);
+        // Not abort_.store(false): see reset_abort(). Loading a GGUF takes long
+        // enough that a shutdown landing just before this line, and then being
+        // erased by it, held the window open for the whole load.
+        if (abort_.load()) {
+            throw SummarizerError(L("Summarizing was cancelled.",
+                                    "Özetleme iptal edildi."));
+        }
 
         const std::string transcript = trim(req.transcript);
         if (transcript.empty()) {
@@ -156,10 +127,11 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         load(progress);
 
-        const std::string system = resolve_system_prompt(req);
+        const std::string system  = resolve_system_prompt(req);
+        const std::string section_system = partial_prompt(req.language);
 
-        // Budget in characters, converted from the token budget with a
-        // deliberately pessimistic ~2.5 chars/token (Turkish tokenizes densely).
+        // Byte budget to slice on, from a deliberately pessimistic ~2.5
+        // chars/token. Only a starting guess: fits() measures each slice.
         const int prompt_budget_tokens = n_ctx_ - max_tokens_ - kPromptMargin;
         if (prompt_budget_tokens < 256) {
             throw SummarizerError(
@@ -174,13 +146,22 @@ public:
         SummaryRequest work = req;
         work.transcript = transcript;
 
-        if (count_tokens(build_user_message(work)) <= prompt_budget_tokens) {
+        // Measure the prompt that will actually be fed to the model -- system
+        // prompt, user message and the chat template's own tokens -- with the
+        // answer's tokens reserved. Counting only the user message and trusting
+        // a flat 512-token margin to cover the rest meant an edited system
+        // prompt could push the real prompt past the window, and left nothing
+        // set aside for the reply.
+        if (fits(system, build_user_message(work))) {
             return generate(system, build_user_message(work), progress);
         }
 
-        // Too long for one pass: summarize chunk by chunk, then summarize the
-        // notes. Keeps a two-hour meeting usable on an 8k-context model.
-        const auto chunks = split_transcript(transcript, budget_chars);
+        // Too long for one pass: summarize section by section, then summarize
+        // the notes. Keeps a two-hour meeting usable on an 8k-context model.
+        // Sections are measured against the note-taking prompt, which is what
+        // summarize_sections() actually generates with.
+        const auto chunks =
+            sections_for(section_system, work, transcript, budget_chars);
         std::string notes = summarize_sections(work, chunks, req.language,
                                                L("Long recording: summarizing part ",
                                                  "Uzun kayıt: bölüm "), progress);
@@ -193,15 +174,16 @@ public:
         // because a pass that cannot split is a pass that cannot shrink.
         SummaryRequest final_req = work;
         final_req.context.clear();   // already folded into the notes
+        bool merged = false;
         for (int pass = 0; pass < kMaxReducePasses; ++pass) {
             final_req.transcript = notes;
-            if (count_tokens(build_user_message(final_req)) <= prompt_budget_tokens) {
-                break;
-            }
-            const auto groups = split_transcript(notes, budget_chars);
-            if (groups.size() <= 1) break;   // generate() reports what is left
+            if (fits(system, build_user_message(final_req))) { merged = true; break; }
 
             const std::size_t before = notes.size();
+            const auto groups =
+                sections_for(section_system, work, notes, budget_chars);
+            if (groups.size() <= 1) break;
+
             notes = summarize_sections(work, groups, req.language,
                                        L("Condensing the notes: part ",
                                          "Notlar yoğunlaştırılıyor: bölüm "),
@@ -209,10 +191,25 @@ public:
             // A pass is only worth repeating if it actually shrank something.
             // A verbose model summarizing short notes can hand back more than
             // it was given; looping on that burns the user's time to arrive at
-            // the same error. Stop and let generate() say what does not fit.
+            // the same place.
             if (notes.size() >= before) break;
         }
         final_req.transcript = notes;
+
+        // Every way out of that loop except a successful fit lands here with
+        // notes that are still too big. Say so, rather than handing them to
+        // generate() -- which used to accept anything short of the whole window
+        // and then stop mid-sentence at the boundary, saving a half-written
+        // summary to summary.txt as though it were finished.
+        if (!merged && !fits(system, build_user_message(final_req))) {
+            throw SummarizerError(
+                L("This recording could not be condensed enough to summarize in "
+                  "one pass. Raise the context size in Settings, or lower the "
+                  "maximum answer length.",
+                  "Bu kayıt tek seferde özetlenecek kadar yoğunlaştırılamadı. "
+                  "Ayarlar'dan bağlam boyutunu artırın veya maksimum yanıt "
+                  "uzunluğunu azaltın."));
+        }
 
         if (progress) {
             progress(L("Merging the section notes…",
@@ -222,6 +219,40 @@ public:
     }
 
 private:
+    // Does this system+user pair fit, rendered exactly as generate() will
+    // render it, with room left for the answer? This is the one question every
+    // budget decision here asks; asking it about the user message alone is
+    // what let oversized prompts through.
+    bool fits(const std::string& system, const std::string& user) {
+        const int rendered = count_tokens(apply_chat_template(system, user));
+        return rendered + max_tokens_ <= n_ctx_;
+    }
+
+    // Sections that each fit as the prompt they will actually become. The
+    // splitting itself lives in llm/chunking.cpp and is tested there; all this
+    // supplies is the "does it fit?" question, which is the only part that
+    // needs a loaded model.
+    std::vector<std::string> sections_for(const std::string& system,
+                                          SummaryRequest shape,
+                                          const std::string& text,
+                                          std::size_t budget_chars) {
+        try {
+            return split_to_fit(text, budget_chars,
+                                [&](const std::string& piece) {
+                                    shape.transcript = piece;
+                                    return fits(system, build_user_message(shape));
+                                });
+        } catch (const SectionTooLarge&) {
+            throw SummarizerError(
+                L("The prompt and context alone do not leave room to "
+                  "summarize. Shorten the template's prompt or context, or "
+                  "raise the context size in Settings.",
+                  "Yönerge ve bağlam tek başına özetlemeye yer bırakmıyor. "
+                  "Şablonun yönergesini veya bağlamını kısaltın ya da "
+                  "Ayarlar'dan bağlam boyutunu artırın."));
+        }
+    }
+
     // Note-taking pass over one list of sections. Shared by the first pass over
     // the transcript and by every reduction of the notes that follows.
     std::string summarize_sections(const SummaryRequest& work,
@@ -458,6 +489,7 @@ private:
 
         std::string out;
         int n_past = static_cast<int>(tokens.size());
+        bool hit_window = false;
 
         for (int i = 0; i < max_tokens_; ++i) {
             if (abort_.load()) {
@@ -474,7 +506,17 @@ private:
                 progress("", static_cast<double>(i) / max_tokens_);
             }
 
-            if (++n_past >= n_ctx_) break;   // ran out of window
+            // Reaching the end of the window matters only if there were still
+            // tokens owed. fits() permits prompt + max_tokens == n_ctx exactly,
+            // so a model that spends its whole answer budget lands on the
+            // boundary with the last token it was ever going to emit -- that is
+            // the budget ending, not a truncation, and treating the two alike
+            // threw away a complete summary that a one-token-shorter prompt
+            // would have kept.
+            if (++n_past >= n_ctx_) {
+                hit_window = (i + 1 < max_tokens_);
+                break;
+            }
 
             llama_batch batch = llama_batch_get_one(&id, 1);
             if (llama_decode(ctx_, batch) != 0) {
@@ -485,6 +527,19 @@ private:
 
         // The weights are the biggest thing on the GPU; drop the KV cache now.
         free_context();
+
+        // The window ran out mid-answer. Callers now budget so this cannot
+        // happen, which makes it a last line of defence -- but it used to be
+        // the normal way a long summary ended, and it ended silently: the
+        // sentence stopped where the context did and the half-written result
+        // was saved to summary.txt as though the model had finished.
+        if (hit_window) {
+            throw SummarizerError(
+                L("The summary ran out of context before it finished. Raise the "
+                  "context size in Settings, or lower the maximum answer length.",
+                  "Özet tamamlanmadan bağlam doldu. Ayarlar'dan bağlam boyutunu "
+                  "artırın veya maksimum yanıt uzunluğunu azaltın."));
+        }
 
         // Reasoning comes off here, at the one point raw model output becomes a
         // string: a thinking model's <think> block is not an answer, and the
