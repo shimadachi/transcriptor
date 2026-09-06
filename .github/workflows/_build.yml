@@ -154,8 +154,17 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ] && [ -n "$VULKAN_SDK" ]; then
-            export PATH="$VULKAN_SDK/Bin:$PATH"
-            echo "vulkan-1.dll -> $(where.exe vulkan-1.dll 2>/dev/null | head -1 || echo 'NOT FOUND')"
+            # $VULKAN_SDK is a Windows path, so it cannot go into a
+            # colon-separated PATH -- the drive letter splits it. Copy the
+            # loader beside the binaries instead; Windows searches the
+            # executable's own directory first, which sidesteps PATH entirely.
+            sdk=$(cygpath -u "$VULKAN_SDK" 2>/dev/null || printf '%s' "$VULKAN_SDK")
+            loader=$(find "$sdk" -name vulkan-1.dll 2>/dev/null | head -1)
+            echo "Vulkan SDK    : $sdk"
+            echo "vulkan-1.dll  : ${loader:-NOT PRESENT IN SDK}"
+            if [ -n "$loader" ]; then
+              cp "$loader" "build/${{ inputs.preset }}/tests/" 2>/dev/null || true
+            fi
           fi
           ctest --test-dir "build/${{ inputs.preset }}" --output-on-failure --no-tests=error
 
