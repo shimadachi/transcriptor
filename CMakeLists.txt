@@ -75,12 +75,17 @@ set(TRANSCRIPTOR_SOURCES
 if(WIN32)
     # GUI subsystem: no console window behind the app.
     add_executable(transcriptor WIN32 ${TRANSCRIPTOR_SOURCES})
+    # The version resource reads its numbers from here rather than carrying its
+    # own copy, which had drifted five patch releases behind the project.
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/src/platform/app_version.h.in"
+                   "${CMAKE_CURRENT_BINARY_DIR}/generated/app_version.h" @ONLY)
     target_sources(transcriptor PRIVATE src/platform/app.rc)
     # The resource compiler pulls these in by name, which CMake's dependency
     # scanner does not follow -- say so, or a new icon never gets rebuilt in.
     set_property(SOURCE src/platform/app.rc APPEND PROPERTY OBJECT_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/src/platform/app.ico"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/platform/app.manifest")
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/platform/app.manifest"
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/app_version.h")
     # app.rc already embeds app.manifest as resource 1. The MSVC linker adds its
     # own by default, and two of them are a hard error at link time:
     #   CVT1100: duplicate resource. type:MANIFEST, name:1

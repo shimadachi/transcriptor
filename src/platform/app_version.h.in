@@ -1,0 +1,15 @@
+// Generated from the project() version in CMakeLists.txt. Do not edit the
+// generated copy -- edit the version there.
+//
+// This exists because app.rc used to carry the version as four literals, and
+// they were left behind: Explorer reported 0.1.0 for a 0.1.5 build, so the file
+// properties of a release said nothing useful about which release it was.
+#ifndef TRANSCRIPTOR_APP_VERSION_H
+#define TRANSCRIPTOR_APP_VERSION_H
+
+#define TRANSCRIPTOR_VER_MAJOR  @PROJECT_VERSION_MAJOR@
+#define TRANSCRIPTOR_VER_MINOR  @PROJECT_VERSION_MINOR@
+#define TRANSCRIPTOR_VER_PATCH  @PROJECT_VERSION_PATCH@
+#define TRANSCRIPTOR_VER_STRING "@PROJECT_VERSION@"
+
+#endif  // TRANSCRIPTOR_APP_VERSION_H

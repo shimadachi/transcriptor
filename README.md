@@ -87,7 +87,7 @@ Output:
 
 - Linux: `build/<preset>/transcriptor`
 - macOS: `build/<preset>/transcriptor.app`
-- Windows: `build/<preset>/Release/transcriptor.exe`
+- Windows: `build/<preset>/transcriptor.exe`
 
 For a distributable package: `cd build/<preset> && cpack`
 (Windows → `.zip`, macOS → `.dmg`, Linux → `.tar.gz`).

@@ -4,6 +4,11 @@
 
 #include <windows.h>
 
+// Version numbers come from CMake (see app_version.h.in), never from literals
+// here: the literals fell behind the project version and every release
+// identified itself as 0.1.0 in Explorer.
+#include "app_version.h"
+
 // Explorer shows the icon with the lowest ID, and webview's win32 backend
 // asks for IDI_APPLICATION (32512) out of *our* module when it fills in the
 // window class -- so this one ID covers the file icon, the title bar and the
@@ -11,8 +16,8 @@
 32512 ICON "app.ico"
 
 VS_VERSION_INFO VERSIONINFO
-  FILEVERSION     0,1,0,0
-  PRODUCTVERSION  0,1,0,0
+  FILEVERSION     TRANSCRIPTOR_VER_MAJOR,TRANSCRIPTOR_VER_MINOR,TRANSCRIPTOR_VER_PATCH,0
+  PRODUCTVERSION  TRANSCRIPTOR_VER_MAJOR,TRANSCRIPTOR_VER_MINOR,TRANSCRIPTOR_VER_PATCH,0
   FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
   FILEFLAGS       0
   FILEOS          VOS_NT_WINDOWS32
@@ -24,11 +29,11 @@ BEGIN
         BLOCK "040904B0"
         BEGIN
             VALUE "FileDescription", "Transcriptor"
-            VALUE "FileVersion",     "0.1.0"
+            VALUE "FileVersion",     TRANSCRIPTOR_VER_STRING
             VALUE "InternalName",    "transcriptor"
             VALUE "OriginalFilename","transcriptor.exe"
             VALUE "ProductName",     "Transcriptor"
-            VALUE "ProductVersion",  "0.1.0"
+            VALUE "ProductVersion",  TRANSCRIPTOR_VER_STRING
         END
     END
     BLOCK "VarFileInfo"

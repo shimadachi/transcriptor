@@ -87,7 +87,7 @@ değişince yeniden derlemeden arayüzde görünmez.
 
 - Linux: `build/<preset>/transcriptor`
 - macOS: `build/<preset>/transcriptor.app`
-- Windows: `build/<preset>/Release/transcriptor.exe`
+- Windows: `build/<preset>/transcriptor.exe`
 
 Dağıtılabilir paket için: `cd build/<preset> && cpack`
 (Windows → `.zip`, macOS → `.dmg`, Linux → `.tar.gz`).
