@@ -111,15 +111,27 @@ header {
   box-shadow: 0 0 10px var(--ok); animation: pulse 2.4s infinite; }
 .led.cpu { background: var(--vu); box-shadow: 0 0 10px var(--vu); }
 
+/* ---------- controls ----------
+   One height for everything that sits in a row: a button, a text field, a
+   select and the custom select below all come out at 42px. The line box is
+   pinned rather than left at `normal` because the mono face gives a wide
+   glyph (＋, ✦, ⏸) a taller line than plain latin — that alone put three
+   different heights in one row. Vertical padding stays 10px everywhere, so
+   10 + 20 + 10 + 2px of border is the shared number. */
+button, .xsel-btn,
+select, input[type=text], input[type=password], input[type=number] {
+  line-height: 20px;
+}
+
 /* ---------- buttons ---------- */
 button { font-family: var(--mono); font-size: 13px; cursor: pointer; color: var(--ink);
   background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 10px;
-  padding: 11px 18px; letter-spacing: .04em; transition: all .18s var(--ease); }
+  padding: 10px 18px; letter-spacing: .04em; transition: all .18s var(--ease); }
 button:hover:not(:disabled){ border-color: var(--faint); background: #241f16; transform: translateY(-1px); }
 button:active:not(:disabled){ transform: translateY(0); }
 button:disabled { opacity: .4; cursor: not-allowed; }
 button.ghost { background: transparent; }
-button.mini { padding: 11px 13px; }
+button.mini { padding: 10px 13px; }
 button.ok { border-color: var(--ok-dim); color: var(--ok); }
 button.ok:hover:not(:disabled){ background: rgba(87,211,166,.1); border-color: var(--ok); }
 button.danger { color: var(--rec); border-color: color-mix(in srgb, var(--rec) 45%, var(--line-2)); }
@@ -214,9 +226,25 @@ input[type=checkbox]:disabled, input[type=radio]:disabled {
   font-family: var(--mono); font-size: 13px; color: var(--ink);
   background: var(--bg-2); border: 1px solid var(--line-2); border-radius: 9px;
   padding: 10px 12px; cursor: pointer; transition: border-color .18s; }
-.xsel-btn:hover { border-color: var(--faint); background: var(--bg-2); }
-.xsel.open .xsel-btn { border-color: var(--vu); }
-.xsel-btn .xsel-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The button rules above lift on hover and tint the fill; a select must do
+   neither — it has to sit still under the pointer and read the same open as
+   closed, with only the border answering. The hover selector is written out to
+   `:hover:not(:disabled)`, matching the button rule it has to outrank: plain
+   `.xsel-btn:hover` loses on specificity, which is what left the hovered and
+   the open dropdown wearing different fills a pixel apart. */
+.xsel-btn:hover:not(:disabled) { border-color: var(--faint);
+  background: var(--bg-2); transform: none; }
+.xsel.open .xsel-btn { border-color: var(--vu); background: var(--bg-2);
+  transform: none; }
+/* The value and a hidden copy of every other option share one grid cell, so
+   the trigger measures the longest name and holds that width whichever one is
+   chosen. Where the control has a ceiling (the pickers in .tx-head, the mic
+   mixer) or is stretched by flex, that wins and the label ellipsises as it
+   did before. */
+.xsel-btn .xsel-value { flex: 1; min-width: 0; display: grid; }
+.xsel-btn .xsel-value > * { grid-area: 1 / 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xsel-btn .xsel-ghost { visibility: hidden; height: 0; }
 .xsel-caret { width: 8px; height: 8px; border-right: 2px solid var(--muted);
   border-bottom: 2px solid var(--muted); transform: rotate(45deg); margin: -3px 2px 0;
   transition: transform .2s var(--ease); flex-shrink: 0; }
@@ -264,11 +292,13 @@ input[type=checkbox]:disabled, input[type=radio]:disabled {
 .tabs { display: flex; gap: 4px; margin: -10px 0 18px;
   border-bottom: 1px solid var(--line); animation: rise .6s var(--ease) both;
   animation-delay: .03s; }
+/* A tab is a label, not a control, so it keeps its own rhythm: the padding
+   below absorbs the 20px line box the shared rule gives every button. */
 .tab {
   font-family: var(--mono); font-size: 11px; letter-spacing: .2em;
   text-transform: uppercase; color: var(--muted);
   background: transparent; border: 0; border-radius: 0;
-  padding: 12px 18px 14px; position: relative; }
+  padding: 10px 18px 11px; position: relative; }
 /* The generic button hover lifts and tints; a tab should do neither. */
 .tab:hover:not(:disabled) { background: transparent; transform: none;
   color: var(--ink-dim); }
@@ -336,6 +366,24 @@ input[type=checkbox]:disabled, input[type=radio]:disabled {
 .lib-run-opt input[type="text"]:focus { outline: none; border-color: var(--vu); }
 .lib-run-go { display: flex; gap: 8px; margin-top: 2px; }
 
+/* The running job, said where it was asked for. Same amber the studio uses
+   while the models work, and the record red once a run has stopped on an
+   error — the accent bar carries the state, so the box reads at a glance
+   without anyone parsing the sentence in it. */
+.lib-status { border: 1px solid var(--line-2); border-left: 3px solid var(--vu);
+  border-radius: 10px; background: var(--panel-2); padding: 12px 14px;
+  margin-bottom: 18px; display: flex; flex-direction: column; gap: 9px; }
+.lib-status-line { display: flex; align-items: center; gap: 10px;
+  font-family: var(--mono); font-size: 12px; }
+.lib-status-dot { flex: none; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--vu); box-shadow: 0 0 10px var(--vu);
+  animation: pulse 2.4s infinite; }
+.lib-status-msg { flex: 1; min-width: 0; color: var(--ink-dim); }
+.lib-status.err { border-left-color: var(--rec); }
+.lib-status.err .lib-status-msg { color: var(--rec); }
+.lib-status.err .lib-status-dot { background: var(--rec);
+  box-shadow: 0 0 10px var(--rec); animation: none; }
+
 /* The version picker beside a panel's label; only there when there is a choice. */
 .tx-head .xsel:has(.lib-pick) { margin-left: auto; }
 .lib-pick + .xsel-btn, .xsel:has(.lib-pick) .xsel-btn {
@@ -366,8 +414,14 @@ input[type=checkbox]:disabled, input[type=radio]:disabled {
   border-top: 7px solid transparent; border-bottom: 7px solid transparent; }
 /* Two bars out of the left and right borders of one box, so the pair is
    symmetric and the grid centres it. A box plus an offset box-shadow put the
-   visual centre 3.5px off the real one, which showed as a lopsided icon. */
-.pl-play.on::before { margin-left: 0; width: 13px; height: 13px;
+   visual centre 3.5px off the real one, which showed as a lopsided icon.
+   box-sizing is stated here because the reset at the top of the file uses `*`,
+   and `*` does not match pseudo-elements: the width below was being read as
+   the gap between the bars, which drew a 21px-wide glyph with a 13px hole in
+   it. Stated, the whole glyph is 13x14 — two 4px bars, 5px apart, the same
+   height as the play triangle above. */
+.pl-play.on::before { box-sizing: border-box; margin-left: 0;
+  width: 13px; height: 14px;
   background: none; border: 0;
   border-left: 4px solid currentColor; border-right: 4px solid currentColor; }
 
@@ -394,16 +448,17 @@ input[type=checkbox]:disabled, input[type=radio]:disabled {
 .pl-now { color: var(--vu); }
 .pl-dur { color: var(--muted); }
 
-.pl-icon { flex: none; padding: 9px 10px; display: grid; place-items: center;
-  color: var(--ink-dim); }
+/* Both sit beside the 40px round play button, so both are 40px: an icon in a
+   grid and a line of text pad out to different heights on their own. */
+.pl-icon, .pl-rate { flex: none; height: 40px; padding: 0 10px;
+  display: grid; place-items: center; color: var(--ink-dim); }
 .pl-icon:hover:not(:disabled) { transform: none; color: var(--ink); }
 .pl-icon .pl-x { display: none; }
 .pl-icon.off { color: var(--muted); }
 .pl-icon.off .pl-wave { display: none; }
 .pl-icon.off .pl-x { display: block; }
 
-.pl-rate { flex: none; padding: 9px 10px; min-width: 52px; font-size: 12px;
-  letter-spacing: .06em; color: var(--ink-dim); }
+.pl-rate { min-width: 52px; font-size: 12px; letter-spacing: .06em; }
 .pl-rate:hover:not(:disabled) { transform: none; color: var(--ink); }
 .pl-rate.on { color: var(--vu); border-color: color-mix(in srgb, var(--vu) 45%, var(--line-2)); }
 
@@ -429,9 +484,27 @@ input[type=checkbox]:disabled, input[type=radio]:disabled {
 .adv-hint { font-family: var(--mono); font-size: 10px; letter-spacing: .06em;
   text-transform: none; color: var(--faint); margin-bottom: 12px; }
 
+/* How far along a job is, in the two places a job is reported: the studio
+   readout and the library strip. The percentage sits beside the phase, and the
+   rail is only there while a stage can say — an empty rail would read as a job
+   that has not started. */
+.job-pct { font-family: var(--mono); color: var(--vu); letter-spacing: .06em; }
+.job-track { height: 4px; border-radius: 2px; background: var(--bg-2);
+  overflow: hidden; }
+.job-track i { display: block; height: 100%; width: 0;
+  background: linear-gradient(90deg, var(--rec), var(--vu));
+  transition: width .3s var(--ease); }
+
 /* readout + meter */
 .readout { display: flex; align-items: center; gap: 14px; font-family: var(--mono); font-size: 13px; }
 #statusMsg { color: var(--ink-dim); }
+/* The percentage belongs to the phase it qualifies, not to the row: the row's
+   14px gap would read it as a third, unrelated column. The leading space
+   pctText() carries is no help here — a flex item's leading white space is
+   trimmed — so the gap is pulled back to a hair instead. */
+.readout .job-pct { margin-left: -8px; font-size: 12px; }
+/* Under the readout, tight to it, and only while a stage reports a fraction. */
+#statusTrack { margin-top: -6px; }
 .cursor { display: inline-block; width: 8px; height: 15px; background: var(--vu);
   margin-left: 2px; vertical-align: -2px; animation: blink 1s step-end infinite; }
 .cursor.on { background: var(--ok); box-shadow: 0 0 9px var(--ok); }
@@ -503,7 +576,11 @@ button.mini.on { border-color: var(--rec); color: var(--rec); }
 
 /* ---------- summary ---------- */
 .tx-head .label { margin-right: auto; }
-.tx-head .xsel { min-width: 150px; }
+/* The floor keeps a one-word template from collapsing to its caret; the
+   ceiling keeps a template someone named in a whole sentence from pushing the
+   buttons beside it onto a second line. Between them the picker is the width
+   of its longest name and stays there whichever one is chosen. */
+.tx-head .xsel { min-width: 150px; max-width: 260px; }
 .ctx { display: grid; gap: 8px; margin-bottom: 14px; }
 .ctx input, .ctx textarea { font-family: var(--mono); font-size: 13px; color: var(--ink);
   background: var(--bg-2); border: 1px solid var(--line-2); border-radius: 9px;
@@ -559,16 +636,29 @@ button.mini.on { border-color: var(--rec); color: var(--rec); }
 .modal-bg { position: fixed; inset: 0; background: rgba(6,5,4,.72); backdrop-filter: blur(3px);
   display: none; align-items: center; justify-content: center; padding: 22px; z-index: 100; }
 .modal-bg.on { display: flex; animation: fade .2s ease; }
-.modal { width: 100%; max-width: 540px; max-height: 88vh; overflow-y: auto;
+/* A shell, not a scroll: the parts that stay put are laid out as a column and
+   only the body between them scrolls. max-height is a percentage of the
+   backdrop's content box rather than a slice of the viewport, so the dialog
+   always lands inside the 22px inset instead of overflowing it. */
+.modal { width: 100%; max-width: 540px; max-height: 100%;
+  display: flex; flex-direction: column; overflow: hidden;
   background: var(--panel); border: 1px solid var(--line-2); border-radius: 18px; padding: 24px;
   animation: rise .32s var(--ease); }
+.modal > h2, .modal > .set-tabs, .modal > .modal-actions { flex: none; }
+.modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+/* Settings holds five tabs of wildly different lengths — 387px of Output
+   against 1582px of Advanced. Left to the content the dialog resized and
+   re-centred itself on every tab, walking Save around the screen, so its
+   height is fixed and the body takes up the slack. */
+.modal.set { height: min(100%, 640px); }
+.modal.set .modal-actions { border-top: 1px solid var(--line); padding-top: 16px; }
 .modal h2 { font-family: var(--display); font-weight: 800; font-size: 24px; margin: 0 0 20px; letter-spacing: -.02em; }
 /* Settings tabs: the studio/library underline, tightened so five labels fit a
    540px modal, and scrollable sideways rather than wrapping if they do not. */
 .set-tabs { margin: -6px 0 16px; animation: none;
   overflow-x: auto; scrollbar-width: none; }
 .set-tabs::-webkit-scrollbar { display: none; }
-.set-tabs .tab { padding: 9px 10px 11px; letter-spacing: .12em; white-space: nowrap; }
+.set-tabs .tab { padding: 7px 10px 8px; letter-spacing: .12em; white-space: nowrap; }
 .set-tabs .tab::after { left: 6px; right: 6px; }
 .grp { border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; background: var(--bg-2); }
 .grp .t { font-family: var(--mono); font-size: 11px; letter-spacing: .18em; text-transform: uppercase;
@@ -594,8 +684,9 @@ button.mini.on { border-color: var(--rec); color: var(--rec); }
    breaks the message was written with — a path on its own line reads as a
    path, not as part of the sentence. */
 .modal.ask { max-width: 440px; }
+/* The shell clips, so a long message scrolls here rather than being cut. */
 .ask-body { color: var(--ink-dim); font-size: 14px; line-height: 1.6;
-  white-space: pre-wrap; margin-bottom: 22px; }
+  white-space: pre-wrap; margin-bottom: 22px; min-height: 0; overflow-y: auto; }
 .ask-body code, .ask-body b { font-family: var(--mono); font-size: 12.5px;
   color: var(--ink); font-weight: 400; }
 button.save { background: var(--rec); border-color: var(--rec); color: #1a0d06; font-weight: 700; }

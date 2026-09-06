@@ -228,8 +228,16 @@ function enhanceSelect(sel) {
 
   function render() {
     const cur = sel.options[sel.selectedIndex];
+    // Every option is laid into the same grid cell as the value, so the
+    // trigger is as wide as the longest name rather than the chosen one.
+    // Sized by the selection it shrank when you picked a short template, and
+    // the popup — which is the width of the trigger — then ellipsised the very
+    // names it is there to show.
+    const ghosts = Array.from(sel.options).map(o =>
+      `<span class="xsel-ghost" aria-hidden="true">${esc(o.textContent)}</span>`).join('');
     btn.innerHTML = (cur ? icon(cur) : '') +
-      `<span class="xsel-label">${cur ? esc(cur.textContent) : ''}</span><span class="xsel-caret"></span>`;
+      `<span class="xsel-value"><span class="xsel-label">${cur ? esc(cur.textContent) : ''}</span>` +
+      `${ghosts}</span><span class="xsel-caret"></span>`;
     pop.innerHTML = '';
     Array.from(sel.options).forEach((opt, i) => {
       const row = document.createElement('div');
@@ -354,6 +362,8 @@ async function poll() {
   $('spinner').classList.toggle('on', s.processing);
   $('elapsed').textContent = rec
     ? elapsed.toFixed(1) + 's' + (paused ? t('st.pausedSuffix') : '') : '';
+  renderProgress('statusPct', 'statusTrack', 'statusFill', jobFraction(s));
+  renderLibStatus(s);
 
   // meter
   const m = $('meter');
@@ -869,6 +879,22 @@ function pctText(frac) {
   return LANG === 'tr' ? ' (%' + n + ')' : ' (' + n + '%)';
 }
 
+// How far along the running job is, or null where the stage cannot say. Both
+// stages that can — the transcription, and a local summarizer working through
+// its sections or its answer budget — report a fraction on /api/state; a
+// remote summarizer sends none, and gets no number rather than a made-up one.
+function jobFraction(s) {
+  return s.processing && typeof s.progress === 'number' ? s.progress : null;
+}
+
+// One readout, drawn twice: the studio console and the library strip show the
+// same job from the same poll.
+function renderProgress(pctId, trackId, fillId, frac) {
+  $(pctId).textContent = frac == null ? '' : pctText(frac);
+  $(trackId).hidden = frac == null;
+  if (frac != null) $(fillId).style.width = Math.round(frac * 100) + '%';
+}
+
 // `placeholder` heads the list with an unselected entry, so "no model yet" is a
 // state the dropdown can actually show rather than a silent first item.
 //
@@ -1215,10 +1241,10 @@ function showSetTab(name) {
     btn.classList.toggle('on', on);
     btn.setAttribute('aria-selected', String(on));
   });
-  // The modal itself is the scroller — a tall tab must not leave the next one
+  // The body is the scroller — a tall tab must not leave the next one
   // scrolled halfway down.
-  const modal = document.querySelector('.modal');
-  if (modal) modal.scrollTop = 0;
+  const body = $('setBody');
+  if (body) body.scrollTop = 0;
 }
 SET_TABS.forEach(n => { $('setTab_' + n).onclick = () => showSetTab(n); });
 
@@ -1679,7 +1705,9 @@ async function openLibraryItem(id, tx, sum) {
   try { d = await api(q); }
   catch (e) { toast(t('lib.loadErr')); return; }
   if (d.error) { toast(d.error); return; }
-  if (libCurrent !== id) { $('libAudio').pause(); closeLibRun(); }
+  // A failure belongs to the session it was asked for; carrying it onto the
+  // next one someone opens would read as a fault of that recording.
+  if (libCurrent !== id) { $('libAudio').pause(); closeLibRun(); libRunError = ''; }
   libCurrent = id; libItem = d;
   libTx  = d.transcript_name || '';
   libSum = d.summary_name || '';
@@ -1703,9 +1731,7 @@ function renderLibraryDetail() {
   // would just be furniture.
   fillVariantPick('libTxPick', d.transcripts, libTx);
   fillVariantPick('libSumPick', d.summaries, libSum);
-  // Re-transcribing needs the audio; re-summarizing needs a transcript.
-  $('libRetx').disabled  = !d.audio;
-  $('libResum').disabled = !(d.transcripts && d.transcripts.length);
+  syncLibRunBtns();
 
   const audio = $('libAudio');
   if (d.audio) {
@@ -1886,6 +1912,22 @@ function plToggle() {
 let libTx = '', libSum = '';   // which saved transcript / summary is on screen
 let libRunKind = '';           // 'transcribe' | 'summarize' while the form is open
 let libRunTimer = null;
+let libJobBusy = false;        // the one worker, as of the last poll
+// Why a re-run started here stopped, until another is asked for. Held rather
+// than read off the phase so that a studio job that failed does not put a red
+// box over whatever recording the library happens to have open.
+let libRunError = '';
+
+// Re-transcribing needs the audio and re-summarizing needs a transcript;
+// neither can start while a job holds the only worker. Both halves of that are
+// known in different places, so both call this rather than each disabling the
+// buttons on what it alone knows — which is how a poll came to re-enable a
+// button for a session that has no audio to run.
+function syncLibRunBtns() {
+  const d = libItem;
+  $('libRetx').disabled  = libJobBusy || !(d && d.audio);
+  $('libResum').disabled = libJobBusy || !(d && d.transcripts && d.transcripts.length);
+}
 
 // The wrapper is what is on screen once enhanceSelect() has run; hiding the
 // native element it replaced would leave the dropdown sitting there.
@@ -1917,6 +1959,26 @@ $('libTxPick').addEventListener('change', () => {
 $('libSumPick').addEventListener('change', () => {
   if (libCurrent) openLibraryItem(libCurrent, libTx, $('libSumPick').value);
 });
+
+// The library's readout of the job, from the same poll and the same state the
+// studio reports. There is one job slot, so progress is shown for whichever
+// run holds it — a re-run started here, or a take still being processed on the
+// other tab, which is also why the buttons are dim. Once the worker is free
+// the strip clears, except for a failure this tab asked for: that stays until
+// the next run, because a toast is gone before it explains anything.
+function renderLibStatus(s) {
+  const box = $('libStatus');
+  if (!box) return;
+  const failed = !s.processing && !!libRunError;
+  box.hidden = !(s.processing || failed);
+  libJobBusy = !!s.processing;
+  syncLibRunBtns();
+  if (box.hidden) return;
+
+  box.classList.toggle('err', failed);
+  $('libStatusMsg').textContent = failed ? libRunError : (s.message || '');
+  renderProgress('libStatusPct', 'libStatusTrack', 'libStatusFill', jobFraction(s));
+}
 
 function closeLibRun() {
   libRunKind = '';
@@ -1959,12 +2021,14 @@ async function startLibRun(kind, name) {
     body.notes = $('ctxNotes').value;
   }
   const r = await post('/api/library/' + kind, body);
-  if (r.error) { toast(r.error); return; }
+  if (r.error) { libRunError = r.error; toast(r.error); poll(); return; }
+  libRunError = '';
   closeLibRun();
   toast(t(kind === 'transcribe' ? 'lib.runningTx' : 'lib.runningSum'));
-  // The phase readout in the studio carries the progress; here we only need to
-  // know when it is over, so the panel can show what landed.
+  // The readout above carries the progress; this only needs to know when it is
+  // over, so the panel can show what landed.
   watchLibRun(kind, name);
+  poll();   // put the readout up now rather than at the next tick
 }
 
 // One poll, ending when the job does. The result is a file, so the item is
@@ -1977,7 +2041,10 @@ function watchLibRun(kind, name) {
     try { s = await api('/api/state'); } catch (e) { return; }
     if (s.processing) return;
     clearInterval(libRunTimer); libRunTimer = null;
-    if (s.phase === 'error') { toast(s.message || t('lib.runFailed')); }
+    // Recorded before the panel is rebuilt: the readout above outlives the
+    // toast, which is the whole point of it for a run that failed.
+    libRunError = s.phase === 'error' ? (s.message || t('lib.runFailed')) : '';
+    if (libRunError) toast(libRunError);
     else toast(t('lib.runDone'));
     if (!libCurrent) return;
     await loadLibrary();

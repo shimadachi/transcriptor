@@ -76,8 +76,16 @@
           </div>
           <div class="meter" id="meter"></div>
           <div class="readout">
-            <span id="statusMsg" data-i18n="src.ready">Ready</span><span id="spinner" class="cursor"></span>
+            <!-- The percentage qualifies the phase, so it goes with it and the
+                 caret stays at the end of the line. It moves every tick, which
+                 is no use read out loud. -->
+            <span id="statusMsg" data-i18n="src.ready">Ready</span><span
+                  id="statusPct" class="job-pct" aria-hidden="true"></span><span
+                  id="spinner" class="cursor"></span>
             <span id="elapsed"></span>
+          </div>
+          <div id="statusTrack" class="job-track" hidden aria-hidden="true">
+            <i id="statusFill"></i>
           </div>
         </div>
       </div>
@@ -183,6 +191,22 @@
               </div>
             </div>
 
+            <!-- What the models are doing. There is one job slot and the studio
+                 readout watches the same one; a re-run started here used to
+                 report its progress only on the other tab. -->
+            <div id="libStatus" class="lib-status" hidden role="status" aria-live="polite">
+              <div class="lib-status-line">
+                <span class="lib-status-dot" aria-hidden="true"></span>
+                <span id="libStatusMsg" class="lib-status-msg"></span>
+                <!-- The percentage moves every tick and the box announces
+                     itself; only the phase is worth reading out loud. -->
+                <span id="libStatusPct" class="job-pct" aria-hidden="true"></span>
+              </div>
+              <div id="libStatusTrack" class="job-track" hidden aria-hidden="true">
+                <i id="libStatusFill"></i>
+              </div>
+            </div>
+
             <div id="libAudioWrap" class="lib-audio">
               <!-- The element is the engine only; the transport below is the UI.
                    preload=metadata so the length is on screen before playing. -->
@@ -248,7 +272,7 @@
        touch come first, and every knob that only matters once something is
        wrong lives in the last tab, "Advanced". -->
   <div class="modal-bg" id="modalBg">
-    <div class="modal">
+    <div class="modal set">
       <h2 data-i18n="set.title">Settings</h2>
 
       <nav class="tabs set-tabs" role="tablist">
@@ -268,6 +292,11 @@
                 aria-selected="false" aria-controls="setView_adv"
                 data-i18n="set.tabAdv">Advanced</button>
       </nav>
+
+      <!-- Only this scrolls. The title, the tabs and the Cancel/Save row stay
+           put, so the dialog is the same shape whichever tab is open and the
+           buttons are never below the fold. -->
+      <div class="modal-body" id="setBody">
 
       <div id="setView_general" class="set-view" role="tabpanel"
            aria-labelledby="setTab_general">
@@ -437,6 +466,8 @@
           <div class="field check"><input type="checkbox" id="s_vram"><label data-i18n="set.vram">Sequence VRAM: unload the LLM during transcription and the STT model during summarizing</label></div>
         </div>
       </div>
+
+      </div><!-- /.modal-body -->
 
       <div class="modal-actions">
         <button id="cancelSettings" class="ghost" data-i18n="set.cancel">Cancel</button>
