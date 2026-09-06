@@ -131,6 +131,18 @@ jobs:
       - name: Build
         run: cmake --build --preset ${{ inputs.preset }}
 
+      # Before Package on purpose: there is no point shipping an artifact that
+      # fails its own regression tests. They add a couple of seconds even to the
+      # CUDA presets — no models, no audio device, no network.
+      #
+      # --no-tests=error because ctest exits 0 when it finds nothing to run, so
+      # a suite that quietly stopped being registered would look exactly like a
+      # passing one. Two of the five are POSIX-only and the UI suite is skipped
+      # where node is absent, so the count differs per platform; zero is the
+      # only number that means something has gone wrong.
+      - name: Test
+        run: ctest --test-dir build/${{ inputs.preset }} --output-on-failure --no-tests=error
+
       - name: Package
         working-directory: build/${{ inputs.preset }}
         run: cpack
