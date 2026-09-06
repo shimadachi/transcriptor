@@ -161,9 +161,23 @@ jobs:
       # load no model, so nothing asks the stub for a GPU. It is shipped under
       # its link name, libcuda.so, while the binary asks for the SONAME, so the
       # symlink is the whole trick.
+      #
+      # Windows gets no such reprieve. The stub is a Linux-only part of the
+      # toolkit -- nvcuda.dll belongs to the driver, is not redistributable, and
+      # has no import-library equivalent to borrow -- so on win-cuda that one
+      # test cannot start at all, and reports 0xc0000135 with nothing to say for
+      # itself. Excluded there rather than left red: every other preset runs it,
+      # win-msvc and win-vulkan included, so the lifecycle stays covered on
+      # Windows and under CUDA, just not on both at once. Anchored so the
+      # pattern cannot quietly grow to swallow a second test.
       - name: Test
         shell: bash
         run: |
+          exclude=()
+          if [ "$RUNNER_OS" = "Windows" ] && [ "${{ inputs.cuda }}" = "true" ]; then
+            echo "Skipping recording_lifecycle: no nvcuda.dll on this runner."
+            exclude=(-E '^recording_lifecycle$')
+          fi
           if [ "$RUNNER_OS" = "Linux" ] && [ "${{ inputs.cuda }}" = "true" ]; then
             stub=$(find "${CUDA_PATH:-/usr/local/cuda}" -name libcuda.so -path '*stubs*' \
                    2>/dev/null | head -1)
@@ -188,7 +202,8 @@ jobs:
               cp "$loader" "build/${{ inputs.preset }}/tests/" 2>/dev/null || true
             fi
           fi
-          ctest --test-dir "build/${{ inputs.preset }}" --output-on-failure --no-tests=error
+          ctest --test-dir "build/${{ inputs.preset }}" --output-on-failure --no-tests=error \
+                "${exclude[@]}"
 
       - name: Package
         working-directory: build/${{ inputs.preset }}
