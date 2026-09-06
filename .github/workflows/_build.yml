@@ -150,9 +150,31 @@ jobs:
       # user's machine the GPU driver supplies it; on a runner it comes with the
       # SDK, which is not on PATH by default. Harmless where it is already
       # resolvable, and the echo makes a future failure explain itself.
+      #
+      # The CUDA presets have the same shape of problem with libcuda.so.1, and
+      # no equivalent way out: that library belongs to the driver, and a runner
+      # has the toolkit but no NVIDIA card to install one. Only the lifecycle
+      # test links transcriptor_core, so it is the only one that pulls in
+      # ggml-cuda and dies in the loader before main(). The toolkit ships a stub
+      # for exactly this -- it resolves every driver symbol and fails every call
+      # -- and failing calls are all the tests need: they set device "cpu" and
+      # load no model, so nothing asks the stub for a GPU. It is shipped under
+      # its link name, libcuda.so, while the binary asks for the SONAME, so the
+      # symlink is the whole trick.
       - name: Test
         shell: bash
         run: |
+          if [ "$RUNNER_OS" = "Linux" ] && [ "${{ inputs.cuda }}" = "true" ]; then
+            stub=$(find "${CUDA_PATH:-/usr/local/cuda}" -name libcuda.so -path '*stubs*' \
+                   2>/dev/null | head -1)
+            echo "CUDA_PATH     : ${CUDA_PATH:-unset}"
+            echo "libcuda stub  : ${stub:-NOT PRESENT IN TOOLKIT}"
+            if [ -n "$stub" ]; then
+              mkdir -p "$RUNNER_TEMP/cuda-stub"
+              ln -sf "$stub" "$RUNNER_TEMP/cuda-stub/libcuda.so.1"
+              export LD_LIBRARY_PATH="$RUNNER_TEMP/cuda-stub${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            fi
+          fi
           if [ "$RUNNER_OS" = "Windows" ] && [ -n "$VULKAN_SDK" ]; then
             # $VULKAN_SDK is a Windows path, so it cannot go into a
             # colon-separated PATH -- the drive letter splits it. Copy the
