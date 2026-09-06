@@ -203,9 +203,36 @@ bool Server::start() {
     // GET is left alone: it changes nothing, and the same-origin policy already
     // stops a foreign page reading what comes back. That also keeps the plain
     // <audio src="/api/library/audio?id=…"> element working.
-    svr.set_pre_routing_handler([token](const httplib::Request& req,
-                                        httplib::Response& res) {
+    // When we are bound to loopback, every request has to be addressed to
+    // loopback as well. Without this, GET was answered whatever hostname it
+    // claimed -- and a name the attacker controls is the whole point of DNS
+    // rebinding: once the browser believes an attacker's domain resolves here,
+    // it treats this app as same-origin and can read transcripts, recordings,
+    // settings and the page's own token straight out of GET responses. The
+    // Origin and token checks below never see those requests, because they
+    // genuinely are same-origin by then.
+    //
+    // A host that is not loopback means the user deliberately asked to serve
+    // beyond this machine, so their Host header is their business.
+    const bool loopback_only = is_loopback_origin("http://" + host_);
+    const std::string bound_host = host_;
+
+    svr.set_pre_routing_handler([token, loopback_only, bound_host](
+                                    const httplib::Request& req,
+                                    httplib::Response& res) {
         using Result = httplib::Server::HandlerResponse;
+
+        if (loopback_only) {
+            const std::string host = req.get_header_value("Host");
+            // An absent Host is HTTP/1.0; it cannot carry a rebound name.
+            if (!host.empty() && !is_loopback_origin("http://" + host) &&
+                host.substr(0, host.find(':')) != bound_host) {
+                send_error(res, L("That request was not addressed to this app.",
+                                  "Bu istek bu uygulamaya gönderilmedi."), 403);
+                return Result::Handled;
+            }
+        }
+
         if (req.method != "POST") return Result::Unhandled;
 
         const std::string origin = req.get_header_value("Origin");
@@ -380,9 +407,15 @@ bool Server::start() {
         }
 
         const std::string name = safe_filename(file.filename);
+        // Named from the same CSPRNG as the session token. std::rand() is never
+        // seeded anywhere in this program, so every run produced the identical
+        // sequence: the first upload of every run landed on the same path in a
+        // directory every user on the machine can write to. The write below
+        // truncates whatever is already there and follows symlinks, so a name
+        // that can be predicted is a name that can be waiting.
         const paths::fs::path tmp =
             paths::fs::temp_directory_path() /
-            paths::from_utf8("transcriptor_upload_" + std::to_string(std::rand()) + "_" + name);
+            paths::from_utf8("transcriptor_upload_" + random_token() + "_" + name);
 
         if (!paths::write_file(tmp, file.content)) {
             return send_error(res,
@@ -390,6 +423,8 @@ bool Server::start() {
                                 "Yüklenen dosya geçici klasöre yazılamadı."), 500);
         }
 
+        // False here now also covers a take too short to process, which used to
+        // come back as {ok:true} with the error phase already set.
         const bool ok = state->process_file(tmp, name);
 
         std::error_code ec;
@@ -473,11 +508,15 @@ bool Server::start() {
         body["summary"] = json(nullptr);
         if (paths::read_file(dir / "summary.txt", &raw)) {
             // Summaries written before the backends stripped reasoning still
-            // carry the model's <think> block. Clean the file itself, once,
-            // rather than filtering it on the way out for ever.
-            const std::string clean = llm::strip_reasoning(raw);
-            if (clean != raw) paths::write_file(dir / "summary.txt", clean);
-            body["summary"] = json(clean);
+            // carry the model's <think> block, so filter it on the way out.
+            //
+            // This used to rewrite summary.txt in place. A GET has none of the
+            // protection the pre-routing handler gives a POST -- no token, no
+            // Origin check -- so that made a file on disk writable by anything
+            // that could reach this port, and it truncated the file before
+            // checking whether the replacement could be written at all.
+            // Filtering costs a pass over a few kilobytes; keep GET read-only.
+            body["summary"] = json(llm::strip_reasoning(raw));
         }
 
         const std::string audio = library::find_audio(dir);
@@ -851,7 +890,18 @@ bool Server::start() {
             s.template_overrides = std::move(clean);
         }
 
-        s.save();
+        // Persist first, and say so if it did not work. The boolean used to be
+        // discarded: the settings were adopted in memory, the page was told
+        // {ok:true}, and everything the user had just edited was gone at the
+        // next launch. Nothing is adopted on failure either, so what is on
+        // screen still matches the app and Save can simply be pressed again.
+        if (!s.save()) {
+            return send_error(res,
+                              L("The settings could not be saved to ",
+                                "Ayarlar şuraya kaydedilemedi: ") +
+                                  paths::to_utf8(Settings::config_path()),
+                              500);
+        }
         state->replace_settings(s);
 
         const json snapshot = state->state_json();
