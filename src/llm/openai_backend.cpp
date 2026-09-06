@@ -61,10 +61,13 @@ public:
         if (active_) active_->stop();   // closes the socket; the call returns
     }
 
+    void reset_abort() override { abort_.store(false); }
+
     std::vector<std::string> list_models() override {
         auto client = make_client(10.0);
         if (!client) throw SummarizerError(tls_error());
         ActiveClient live(this, client.get());
+        throw_if_aborted();   // same window as summarize(); same answer
 
         auto res = client->Get(endpoint_.prefix + "/models", headers());
         if (!res) {
@@ -123,7 +126,11 @@ public:
 
     std::string summarize(const SummaryRequest& req,
                           const ProgressFn& progress) override {
-        abort_.store(false);
+        // Not abort_.store(false): the flag is cleared when the job is admitted
+        // (see reset_abort). Clearing it here threw away a shutdown raised
+        // between the health check above and this call, and the request below
+        // then ran to the full remote timeout -- ten minutes by default.
+        throw_if_aborted();
         if (build_user_message(req).empty()) {
             throw SummarizerError(L("There is no text to summarize.",
                                     "Özetlenecek metin yok."));
@@ -158,8 +165,26 @@ public:
         if (!client) throw SummarizerError(tls_error());
         ActiveClient live(this, client.get());
 
+        // Refuse the request rather than issue it. ActiveClient calls stop() on
+        // an abort it finds during setup, but a client that has not opened a
+        // socket yet has nothing to shut down -- so the POST went out anyway,
+        // the server answered, and a cancelled summary came back as a result.
+        //
+        // KNOWN LIMITATION: an abort landing between this check and the moment
+        // httplib opens its socket still cannot stop the request. stop() is not
+        // a sticky flag in cpp-httplib -- it acts on a connection in flight, and
+        // there is none yet -- so closing the window properly would mean owning
+        // the socket ourselves. What is left is microseconds wide rather than
+        // "any time before the POST", and the check after the response keeps a
+        // cancelled answer from being used; the cost is that a shutdown in that
+        // instant still waits out the remote timeout.
+        throw_if_aborted();
+
         auto res = client->Post(endpoint_.prefix + "/chat/completions", headers(),
                                 payload.dump(), "application/json");
+        // The abort is authoritative even when the answer beat it: nothing
+        // downstream wants a summary for an operation the user stopped.
+        throw_if_aborted();
         if (!res) {
             // A socket closed by request_abort() lands here too; say which it
             // was, rather than reporting the shutdown as a server failure.
@@ -239,6 +264,13 @@ private:
     private:
         OpenAIBackend* owner_;
     };
+
+    void throw_if_aborted() const {
+        if (abort_.load()) {
+            throw SummarizerError(L("Summarizing was cancelled.",
+                                    "Özetleme iptal edildi."));
+        }
+    }
 
     httplib::Headers headers() const {
         return {{"Authorization", "Bearer " + api_key_},

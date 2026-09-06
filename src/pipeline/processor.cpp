@@ -6,6 +6,7 @@
 #include <map>
 #include <stdexcept>
 
+#include "util/lang.h"
 #include "util/models.h"
 
 namespace transcriptor::pipeline {
@@ -146,21 +147,41 @@ OfflineProcessor::OfflineProcessor(Settings settings, DeviceInfo device)
 OfflineProcessor::~OfflineProcessor() = default;
 
 void OfflineProcessor::unload() {
+    std::lock_guard<std::mutex> lock(model_mutex_);
     if (transcriber_) transcriber_->unload();
     if (diarizer_) diarizer_->unload();
 }
 
 void OfflineProcessor::request_abort() {
+    // Recorded here first, so a transcriber that does not exist yet still
+    // inherits it when run() creates one.
+    aborted_.store(true);
     dl_cancel_.request();
+    // Held across the call, not just the read: the lock is what stops run()
+    // from destroying this transcriber while the abort is reaching into it.
+    std::lock_guard<std::mutex> lock(model_mutex_);
     if (transcriber_) transcriber_->request_abort();
+}
+
+void OfflineProcessor::reset_abort() {
+    aborted_.store(false);
+    dl_cancel_.reset();
+    std::lock_guard<std::mutex> lock(model_mutex_);
+    if (transcriber_) transcriber_->reset_abort();
+}
+
+void OfflineProcessor::throw_if_aborted() const {
+    if (aborted_.load()) {
+        throw std::runtime_error(L("Transcription was cancelled.",
+                                   "Metne dönüştürme iptal edildi."));
+    }
 }
 
 ProcessResult OfflineProcessor::run(const std::vector<float>& audio, int samplerate,
                                     const ProgressFn& progress) {
-    // A cancel from the previous run must not linger and refuse this one's
-    // downloads. Nothing is in flight here: run() is what starts them.
-    dl_cancel_.reset();
-
+    // The previous run's cancellation was cleared when this job was admitted
+    // (see reset_abort). Doing it here instead threw away a shutdown that had
+    // landed in between, and the download below has no timeout of its own.
     auto report = [&progress](const std::string& phase) {
         return [&progress, phase](const std::string& message, double fraction) {
             if (progress) progress(phase, fraction, message);
@@ -173,6 +194,11 @@ ProcessResult OfflineProcessor::run(const std::vector<float>& audio, int sampler
                           : 0.0;
 
     // -- transcribe --------------------------------------------------------
+    // Checked at the top of every stage, not only inside the engines. A model
+    // already on disk skips the download entirely, so the canceller below is
+    // never consulted and this is the only thing standing between a shutdown
+    // and a full transcription.
+    throw_if_aborted();
     if (progress) progress("transcribe", -1.0, "");
 
     if (std::string err = models::ensure_whisper_model(settings_, report("transcribe"),
@@ -180,13 +206,25 @@ ProcessResult OfflineProcessor::run(const std::vector<float>& audio, int sampler
         !err.empty()) {
         throw std::runtime_error(err);
     }
+    throw_if_aborted();
 
-    if (!transcriber_ || transcriber_->model_name() != settings_.whisper_model) {
-        transcriber_ = std::make_unique<stt::WhisperTranscriber>(
-            settings_.whisper_model, device_, settings_.language,
-            settings_.stt_threads);
+    // Swap the handle under the lock, then work through a raw pointer outside
+    // it: transcribe() is minutes long and must not hold off a cancellation,
+    // but the swap itself has to be exclusive of request_abort().
+    stt::WhisperTranscriber* transcriber = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(model_mutex_);
+        if (!transcriber_ || transcriber_->model_name() != settings_.whisper_model) {
+            transcriber_ = std::make_unique<stt::WhisperTranscriber>(
+                settings_.whisper_model, device_, settings_.language,
+                settings_.stt_threads);
+        }
+        // A cancel that arrived before this object existed still applies to it:
+        // request_abort() had nothing to forward to at the time.
+        if (aborted_.load()) transcriber_->request_abort();
+        transcriber = transcriber_.get();
     }
-    const auto segments = transcriber_->transcribe(
+    const auto segments = transcriber->transcribe(
         audio, settings_.whisper_model_file(), report("transcribe"));
 
     // -- diarize (optional) ------------------------------------------------
@@ -202,6 +240,7 @@ ProcessResult OfflineProcessor::run(const std::vector<float>& audio, int sampler
         return result;
     }
 
+    throw_if_aborted();
     if (progress) progress("diarize", -1.0, "");
 
     if (std::string err = models::ensure_diarization_models(settings_,
@@ -210,11 +249,17 @@ ProcessResult OfflineProcessor::run(const std::vector<float>& audio, int sampler
         !err.empty()) {
         throw std::runtime_error(err);
     }
+    throw_if_aborted();
 
-    if (!diarizer_) {
-        diarizer_ = std::make_unique<diarize::Diarizer>(settings_, device_);
+    diarize::Diarizer* diarizer = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(model_mutex_);
+        if (!diarizer_) {
+            diarizer_ = std::make_unique<diarize::Diarizer>(settings_, device_);
+        }
+        diarizer = diarizer_.get();
     }
-    const auto turns = diarizer_->diarize(audio, samplerate, report("diarize"));
+    const auto turns = diarizer->diarize(audio, samplerate, report("diarize"));
 
     // -- attribute ---------------------------------------------------------
     if (progress) progress("attribute", -1.0, "");

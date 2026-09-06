@@ -122,27 +122,34 @@ ProcResult run_win(const std::vector<std::string>& argv, double timeout_sec,
     bool  exited = false;
 
     for (;;) {
+        // The deadline is the first thing checked, on every pass. It used to be
+        // tested only when the pipe came back empty, and the drain below
+        // `continue`s -- so a child that kept its output flowing was never
+        // timed out at all and could run for as long as it liked.
+        if (timeout_sec > 0 && std::chrono::steady_clock::now() >= deadline) {
+            timed_out = true;
+            break;
+        }
+
         // Peek first: ReadFile on an empty pipe blocks, and this loop must stay
         // free to notice the deadline and the child's exit.
         DWORD avail = 0;
         if (PeekNamedPipe(read_end, nullptr, 0, nullptr, &avail, nullptr) &&
             avail > 0) {
+            // One chunk per pass, never "everything buffered": a drain that
+            // loops here is a drain that is not looking at the clock.
             const DWORD want = avail < sizeof(chunk) ? avail
                                                      : static_cast<DWORD>(sizeof(chunk));
             if (!ReadFile(read_end, chunk, want, &got, nullptr) || got == 0) break;
             if (res.output.size() < kMaxCapturedOutput) res.output.append(chunk, got);
-            continue;   // take everything buffered before waiting again
+            continue;
         }
 
         // Nothing to read. Give the child a moment to exit or say something;
-        // 20 ms is short enough that the deadline below stays close.
+        // 20 ms is short enough that the deadline above stays close.
         if (WaitForSingleObject(pi.hProcess, 20) == WAIT_OBJECT_0) {
             exited = true;
             break;      // the tail after the loop drains what it left behind
-        }
-        if (timeout_sec > 0 && std::chrono::steady_clock::now() >= deadline) {
-            timed_out = true;
-            break;
         }
     }
 
@@ -279,8 +286,40 @@ ProcResult run_posix(const std::vector<std::string>& argv, double timeout_sec,
     if (timed_out) kill(pid, SIGKILL);
     close(fds[0]);
 
-    // Hand the child back before reaping it: once waitpid returns, the pid is
-    // free to be reused, and a cancel arriving after that would hit a stranger.
+    // The pipe ending is not the child ending: it can close stdout and stderr
+    // and keep running. Reaping unconditionally here waited on such a child for
+    // ever -- straight past its own deadline, and past the release() below, so
+    // the Canceller could not reach it either.
+    //
+    // So wait on the process itself, to its deadline, but observe the exit with
+    // WNOWAIT: that reports the child has finished *without* reaping it. The
+    // difference matters. waitpid() frees the pid the moment it returns, and
+    // the Canceller still published it until release() below -- a cancel landing
+    // in that gap would signal whichever process the OS had since given that
+    // number to. Leaving the child unreaped keeps the pid ours to talk about.
+    for (;;) {
+        siginfo_t info{};
+        info.si_pid = 0;
+        const int rc = waitid(P_PID, static_cast<id_t>(pid), &info,
+                              WEXITED | WNOWAIT | WNOHANG);
+        if (rc == 0 && info.si_pid == pid) break;   // finished, still unreaped
+        if (rc < 0) {
+            if (errno == EINTR) continue;
+            break;   // ECHILD and friends: nothing left here to wait for
+        }
+        // Killed once, not once per pass: SIGKILL is prompt but not instant,
+        // and re-sending it in a tight loop would spin until it landed.
+        if (!timed_out && timeout_sec > 0 &&
+            std::chrono::steady_clock::now() >= deadline) {
+            timed_out = true;
+            kill(pid, SIGKILL);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+
+    // Unpublish before reaping, never after: from the reap onward the pid can
+    // belong to somebody else, so this is the last moment a cancel may still
+    // find it here.
     if (cancel) cancel->release();
 
     int status = 0;

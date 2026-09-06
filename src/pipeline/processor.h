@@ -4,8 +4,10 @@
 // them on demand so the summarizer gets the GPU to itself.
 #pragma once
 
+#include <atomic>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -68,13 +70,36 @@ public:
     // Cancel button did nothing until curl had finished fetching gigabytes.
     void request_abort();
 
+    // Clear a previous run's cancellation. Called when a job is admitted, not
+    // when run() starts: resetting on the way in erased a shutdown that had
+    // already been requested, and the join behind it then waited out a
+    // multi-gigabyte model download that nothing was left able to stop.
+    void reset_abort();
+
 private:
+    // Throws with the cancellation message when an abort is outstanding.
+    void throw_if_aborted() const;
+
     Settings   settings_;
     DeviceInfo device_;
 
-    // Kills the curl behind a first-run model fetch. Cleared at the top of
-    // run(), so a cancelled run does not stop the next one from downloading.
+    // Cancellation lives here, at processor scope, not only in the engines it
+    // is forwarded to. A cancel raised before run() creates its transcriber had
+    // nowhere to be recorded: the download canceller was set, but a model
+    // already on disk never consults it, and the brand-new WhisperTranscriber
+    // started with a clear flag -- so shutdown was ignored and the load and the
+    // inference ran anyway.
+    std::atomic<bool> aborted_{false};
+
+    // Kills the curl behind a first-run model fetch.
     net::Canceller dl_cancel_;
+
+    // Guards the two model handles below -- the pointers, not the work done
+    // through them. request_abort() runs on whichever thread is cancelling
+    // while run() owns the worker, and run() replaces transcriber_ whenever the
+    // Whisper model changes: unsynchronized, the cancelling thread could reach
+    // into an object make_unique had just freed.
+    mutable std::mutex model_mutex_;
 
     std::unique_ptr<stt::WhisperTranscriber> transcriber_;
     std::unique_ptr<diarize::Diarizer>       diarizer_;

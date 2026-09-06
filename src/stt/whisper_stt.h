@@ -58,6 +58,11 @@ public:
     // Makes an in-flight transcribe() return early.
     void request_abort() { abort_.store(true); }
 
+    // Clears a previous run's abort. Deliberately not done by transcribe()
+    // itself: a shutdown raised just before the worker got here was then
+    // erased, and the join behind it waited out the whole transcription.
+    void reset_abort() { abort_.store(false); }
+
 private:
     struct Impl;
 

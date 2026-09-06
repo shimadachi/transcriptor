@@ -199,7 +199,13 @@ std::vector<TranscriptSegment> WhisperTranscriber::transcribe(
     const std::vector<float>& audio, const paths::fs::path& model_path,
     const ProgressFn& progress) {
 
-    abort_.store(false);
+    // The abort flag is cleared when a job is admitted, not here -- see
+    // reset_abort(). Clearing it on entry lost every cancellation raised
+    // between admission and this line.
+    if (abort_.load()) {
+        throw std::runtime_error(L("Transcription was cancelled.",
+                                   "Metne dönüştürme iptal edildi."));
+    }
 
     const std::string path_utf8 = paths::to_utf8(model_path);
 

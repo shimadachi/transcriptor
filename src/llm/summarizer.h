@@ -65,6 +65,12 @@ public:
     virtual void unload() {}
 
     virtual void request_abort() {}
+
+    // Clears a previous run's abort. Called when a job is admitted rather than
+    // by summarize() on the way in: clearing it there lost every cancellation
+    // raised between admission and the first line of the backend, and shutdown
+    // then blocked until the model or the remote timeout was done.
+    virtual void reset_abort() {}
 };
 
 // Picks the backend named by settings.llm_backend.
