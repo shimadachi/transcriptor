@@ -138,6 +138,22 @@ const STR = {
   'toast.recCancelled': {en: 'Recording cancelled', tr: 'Kayıt iptal edildi'},
   'toast.emptyRec':     {en: 'Empty recording', tr: 'Boş kayıt'},
   'toast.processing':   {en: 'Processing…', tr: 'İşleniyor…'},
+  'toast.captureFailed':{en: 'Recording could not be started', tr: 'Kayıt başlatılamadı'},
+  'toast.recError':     {en: 'The recording stopped on an error — what was captured was kept',
+                         tr: 'Kayıt hatayla durdu — o ana kadarki kısım saklandı'},
+  'toast.sourceEnded':  {en: 'The shared audio source ended — finishing the recording',
+                         tr: 'Paylaşılan ses kaynağı sona erdi — kayıt tamamlanıyor'},
+  'toast.pendingDropped': {en: 'Recording discarded', tr: 'Kayıt silindi'},
+  'toast.resolvePending': {en: 'A recording is still waiting to be uploaded — retry, save or discard it first',
+                           tr: 'Yüklenmeyi bekleyen bir kayıt var — önce yeniden deneyin, kaydedin ya da silin'},
+
+  // -- a recording the server has not accepted yet --------------------------
+  'pending.k':        {en: 'Not uploaded →', tr: 'Yüklenemedi →'},
+  'pending.retry':    {en: 'Retry', tr: 'Yeniden dene'},
+  'pending.save':     {en: 'Save a copy', tr: 'Kopyasını kaydet'},
+  'pending.drop':     {en: 'Discard', tr: 'Sil'},
+  'pending.dropAsk':  {en: 'Discard this recording? It has not been saved anywhere else.',
+                       tr: 'Bu kayıt silinsin mi? Başka hiçbir yere kaydedilmedi.'},
 
   // -- settings: shared -----------------------------------------------------
   'set.title':      {en: 'Settings', tr: 'Ayarlar'},

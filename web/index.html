@@ -86,6 +86,16 @@
         <span class="saved-k" data-i18n="saved.failed">Not saved →</span>
         <code id="saveErrMsg"></code>
       </div>
+      <!-- A browser-side take the server has not accepted. It is the only copy
+           the moment the capture is torn down, so it stays here, with something
+           to press, until it lands or the user lets it go. -->
+      <div id="pendingRow" class="saved save-err" style="display:none;">
+        <span class="saved-k" data-i18n="pending.k">Not uploaded →</span>
+        <code id="pendingMsg"></code>
+        <button id="pendingRetry" class="mini" data-i18n="pending.retry">Retry</button>
+        <button id="pendingSave" class="mini" data-i18n="pending.save">Save a copy</button>
+        <button id="pendingDrop" class="mini" data-i18n="pending.drop">Discard</button>
+      </div>
       <div id="savedRow" class="saved" style="display:none;">
         <span class="saved-k" data-i18n="saved.k">Saved →</span>
         <code id="savedPath"></code>

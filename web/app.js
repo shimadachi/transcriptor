@@ -325,16 +325,17 @@ async function poll() {
   $('recBtn').title = rec ? t('rec.stop') : t('rec.start');
   $('recBtn').setAttribute('aria-pressed', rec ? 'true' : 'false');
 
-  const busy = rec || s.processing || browserStarting;
+  const busy = rec || s.processing || browserStarting || browserUploading;
   // Only the models can't be interrupted — and a capture that is still asking
-  // for permission, which has nothing to stop yet.
-  $('recBtn').disabled = s.processing || browserStarting;
+  // for permission, which has nothing to stop yet, or one whose take is still
+  // on its way to the server.
+  $('recBtn').disabled = s.processing || browserStarting || browserUploading;
   $('pauseBtn').disabled = !rec;
   $('pauseBtn').textContent = paused ? t('src.resume') : t('src.pause');
   $('pauseBtn').classList.toggle('on', paused);
   // Cancel: while recording, or when there's a junk result/error to discard
   // (but not mid-processing — the models can't be interrupted safely).
-  $('cancelBtn').disabled = s.processing ||
+  $('cancelBtn').disabled = s.processing || browserUploading ||
     !(rec || s.has_audio || s.has_result || s.has_summary || s.phase === 'error');
   disableSelect('source', busy);
   disableSelect('micSource', busy);
@@ -385,8 +386,14 @@ async function poll() {
   const freshSummary = sumRev !== prevSummaryRev;
 
   if (freshResult || freshSummary) {
-    prevResultRev = resRev; prevSummaryRev = sumRev;
-    await loadResult();   // renders the empty state too, so a cleared panel clears
+    // Commit the revisions only once the panels have actually been rendered.
+    // Committing first meant a single failed /api/result — a blip, a restart —
+    // left the stale transcript on screen for good: every later poll then
+    // compared equal and never tried the reload again.
+    try {
+      // renders the empty state too, so a cleared panel clears
+      if (await loadResult()) { prevResultRev = resRev; prevSummaryRev = sumRev; }
+    } catch (e) { /* leave the revisions be; the next poll retries */ }
   }
 
   // Nothing transcribed yet: say what the panel is waiting for. Runs after the
@@ -402,10 +409,28 @@ async function poll() {
 }
 
 // ---- results ----
+// Returns whether this call rendered. One fetch at a time: each poll tick is
+// 700ms and a fetch can outlast that, so several can be in the air at once.
+//
+// Discarding the superseded responses instead — a generation counter — starved
+// the panels outright whenever responses were consistently slower than the
+// interval: every response was already stale by the time it arrived, nothing
+// rendered, no revision was ever committed, and each tick launched yet another
+// request. Declining to start a second one has the same protection against
+// out-of-order renders and cannot starve: the caller leaves the revision
+// uncommitted, so the next tick simply tries again.
+let resultLoading = false;
 async function loadResult() {
-  const d = await api('/api/result');
-  renderTranscript(d.result);
-  renderSummary(d.summary);
+  if (resultLoading) return false;
+  resultLoading = true;
+  try {
+    const d = await api('/api/result');
+    renderTranscript(d.result);
+    renderSummary(d.summary);
+    return true;
+  } finally {
+    resultLoading = false;
+  }
 }
 function renderTranscript(res, el) {
   el = el || $('transcript');
@@ -800,11 +825,13 @@ $('dlLlm').onclick = async () => {
 
   setLlmDlActive(true);
   setLlmNote(t('llm.starting'));
-  const r = await api('/api/llm/download',
-                      { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ id: id }) });
+  // post(), not a hand-built header set. Building the headers here omitted
+  // X-Transcriptor-Token, so the server answered every download with 403
+  // "This page is out of date — reload it" — which reloading could not fix,
+  // because the header was never being sent in the first place.
+  const r = await post('/api/llm/download', { id: id });
   if (r.error) {
-    $('dlLlm').disabled = false;
+    setLlmDlActive(false);   // both controls back, not just Download
     setLlmNote(r.error, true);
     return;
   }
@@ -1045,7 +1072,14 @@ $('saveSettings').onclick = async () => {
 // browserRec cannot: it is only true once the user has granted, and poll() puts
 // the Record button back within 700ms because the *server* is idle — so a
 // second click during the prompt started a second capture over the first.
+// browserUploading covers the handoff after the capture is torn down but before
+// the server has the take: browserRec is already false there, so polling would
+// otherwise re-enable Record and let a second take start on top of the upload.
 let browserRec = false, browserStarting = false, browserPaused = false, _cancelled = false;
+let browserUploading = false;
+// Whether the current take has already been handed off. Both the recorder's
+// stop event and the error fallback can arrive; only the first may act.
+let _finalized = false;
 let _startTs = 0, _pausedMs = 0, _pauseTs = 0;
 let _mr = null, _chunks = [], _streams = [], _actx = null, _analyser = null, _abuf = null;
 
@@ -1075,7 +1109,11 @@ function _cleanupStreams() {
   _analyser = null; _abuf = null;
 }
 async function startBrowserCapture(kind) {
-  if (browserRec || browserStarting) return;
+  if (browserRec || browserStarting || browserUploading) return;
+  // A retained take is the only copy of a recording. Starting another one would
+  // hand the slot to the new take and quietly drop the old, so make the user
+  // resolve it first — retry, save a copy, or discard.
+  if (_pendingBlob) { toast(t('toast.resolvePending')); return; }
   if (!navigator.mediaDevices || !window.MediaRecorder) {
     toast(t('toast.noBrowserRec'));
     return;
@@ -1090,6 +1128,9 @@ async function startBrowserCapture(kind) {
   const streams = [];
   const drop = () => streams.forEach(s => s.getTracks().forEach(t => t.stop()));
   let actx = null;
+  // Only the very last statement sets this. Everything before it is an attempt
+  // that has to leave nothing behind, whichever way it ends.
+  let live = false;
   try {
     try {
       if (kind === 'mic' || kind === 'both') {
@@ -1101,7 +1142,7 @@ async function startBrowserCapture(kind) {
         ds.getVideoTracks().forEach(t => t.stop());  // we only want the audio
         streams.push(ds);
       }
-    } catch (e) { toast(t('toast.noPermission')); drop(); return; }
+    } catch (e) { toast(t('toast.noPermission')); return; }
 
     // Mix every captured stream into one track (mic + system together).
     actx = new (window.AudioContext || window.webkitAudioContext)();
@@ -1112,10 +1153,7 @@ async function startBrowserCapture(kind) {
         actx.createMediaStreamSource(s).connect(dest); hasAudio = true;
       }
     });
-    if (!hasAudio) {
-      toast(t('toast.noAudio'));
-      drop(); try { actx.close(); } catch {} return;
-    }
+    if (!hasAudio) { toast(t('toast.noAudio')); return; }
 
     // Past every await and every way out: this attempt is the capture now, so
     // publish its resources into the globals the rest of the page works with.
@@ -1128,11 +1166,53 @@ async function startBrowserCapture(kind) {
     const mime = _pickMime();
     _mr = new MediaRecorder(dest.stream, mime ? {mimeType: mime} : undefined);
     _mr.ondataavailable = e => { if (e.data && e.data.size) _chunks.push(e.data); };
+    _finalized = false;
     _mr.onstop = onBrowserStop;
+    // An encoder that gives up used to be silent: no onstop, browserRec stuck
+    // true, streams still open, and the only way out a page reload.
+    //
+    // Report it, but do NOT finish the take here. The recording spec ends an
+    // errored recording the ordinary way — a final `dataavailable`, then `stop`
+    // — so finalizing on the error as well uploaded the chunks captured so far
+    // as one take and the final chunk as a second, competing one. Let onstop do
+    // the handoff; the timer is only for a browser that sends no stop event.
+    _mr.onerror = () => {
+      if (_finalized) return;
+      toast(t('toast.recError'));
+      setTimeout(onBrowserStop, 2000);   // no-op if stop already finished it
+    };
+
+    // The recorder is fed by the AudioContext destination, whose track never
+    // ends — so the browser's own "Stop sharing" bar was invisible here and the
+    // page went on cheerfully recording silence. Watch the real sources.
+    streams.forEach(s => s.getAudioTracks().forEach(track => {
+      track.addEventListener('ended', () => {
+        if (!browserRec) return;
+        toast(t('toast.sourceEnded'));
+        stopBrowserCapture();   // keeps the take; onstop uploads it
+      });
+    }));
+
     _mr.start(1000);
     browserRec = true; browserPaused = false; _cancelled = false;
     _startTs = performance.now(); _pausedMs = 0; _pauseTs = 0;
+    live = true;
+  } catch (e) {
+    // Everything after the permission prompt — the AudioContext, the audio
+    // graph, the MediaRecorder constructor, start() — used to fall straight
+    // through the finally below, which only lowered browserStarting. The
+    // microphone stayed open, invisibly, until the page was reloaded.
+    toast(t('toast.captureFailed'));
   } finally {
+    if (!live) {
+      drop();
+      if (actx) { try { actx.close(); } catch (e) {} }
+      // The globals may already point at this attempt's resources; drop() and
+      // close() above have dealt with the objects, so just let go of them.
+      _mr = null; _chunks = [];
+      _streams = []; _actx = null; _analyser = null; _abuf = null;
+      browserRec = false;
+    }
     browserStarting = false;
   }
   poll();
@@ -1152,21 +1232,103 @@ function cancelBrowserCapture() {
   _cancelled = true;   // onBrowserStop will discard without uploading
   stopBrowserCapture();
 }
+// A take that has been captured but not yet accepted by the server. From the
+// moment the capture is torn down this Blob is the only copy in existence, so
+// it is held here — with something on screen to press — until the server has
+// it or the user says to let it go. It used to live in a local variable that
+// went out of scope the instant the upload failed: a dropped connection, a
+// busy server or a 403 turned an hour of meeting into a two-second toast.
+// _pendingId identifies which take currently occupies the slot. An upload only
+// clears the slot if it is still the one it was given, because "the upload
+// finished" and "the take on screen is that upload's" are different questions:
+// a retry that completed after a newer take had replaced it used to clear the
+// newer one, throwing away a recording the server had never seen.
+let _pendingBlob = null, _pendingName = '', _pendingId = 0;
+
+function showPending(message) {
+  $('pendingMsg').textContent = message || '';
+  $('pendingRow').style.display = 'flex';
+}
+function clearPending() {
+  _pendingBlob = null; _pendingName = '';
+  _pendingId += 1;            // whatever held the slot no longer does
+  $('pendingRow').style.display = 'none';
+}
+
+// Hands the take to the pipeline. Returns whether the server took it; keeps the
+// Blob and raises the retry row when it did not. Busy for its whole duration —
+// including from Retry, which used to leave the transport open and let a second
+// recording start on top of an upload in flight.
+async function uploadRecording(blob, name) {
+  _pendingBlob = blob; _pendingName = name;
+  const mine = ++_pendingId;
+  browserUploading = true;
+  let message = '';
+  try {
+    const fd = new FormData(); fd.append('file', blob, name);
+    const r = await (await fetch('/api/process_file',
+      {method: 'POST', headers: authHeaders(), body: fd})).json();
+    if (!r.error) {
+      // Only clear if this upload still owns the slot.
+      if (_pendingId === mine) clearPending();
+      return true;
+    }
+    message = r.error;
+  } catch (e) { message = t('toast.uploadErr'); }
+  finally { browserUploading = false; }
+  toast(message);
+  if (_pendingId === mine) showPending(message);
+  return false;
+}
+
+$('pendingRetry').onclick = async () => {
+  if (!_pendingBlob || browserUploading) return;
+  $('pendingRetry').disabled = true;
+  toast(t('toast.processing'));
+  try { await uploadRecording(_pendingBlob, _pendingName); }
+  finally { $('pendingRetry').disabled = false; poll(); }
+};
+// The way out that does not depend on the server working at all.
+$('pendingSave').onclick = () => {
+  if (!_pendingBlob) return;
+  const url = URL.createObjectURL(_pendingBlob);
+  const a = document.createElement('a');
+  a.href = url; a.download = _pendingName;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+};
+$('pendingDrop').onclick = () => {
+  if (!_pendingBlob) return;
+  if (!confirm(t('pending.dropAsk'))) return;
+  clearPending();
+  toast(t('toast.pendingDropped'));
+};
+
 async function onBrowserStop() {
+  // Idempotent: a take is handed off exactly once. Both the stop event and the
+  // error fallback lead here, and running twice split one recording across two
+  // uploads — the second carrying only whatever arrived after the first ran.
+  if (_finalized) return;
+  _finalized = true;
+
   browserRec = false; browserPaused = false;
   const type = (_chunks[0] && _chunks[0].type) || 'audio/webm';
   const blob = new Blob(_chunks, {type}); _chunks = [];
   _cleanupStreams();
-  if (_cancelled) { _cancelled = false; toast(t('toast.recCancelled')); return; }
-  if (!blob.size) { toast(t('toast.emptyRec')); return; }
+  if (_cancelled) { _cancelled = false; toast(t('toast.recCancelled')); poll(); return; }
+  if (!blob.size) { toast(t('toast.emptyRec')); poll(); return; }
   const ext = type.includes('ogg') ? 'ogg' : 'webm';
-  const fd = new FormData(); fd.append('file', blob, 'recording.' + ext);
+  // Busy across the handoff: browserRec is already false, so without this the
+  // next poll would put Record back within 700ms and a second take could start
+  // on top of the multipart upload still in flight.
+  browserUploading = true;
   toast(t('toast.processing'));
   try {
-    const r = await (await fetch('/api/process_file',
-      {method: 'POST', headers: authHeaders(), body: fd})).json();
-    if (r.error) toast(r.error);
-  } catch (e) { toast(t('toast.uploadErr')); }
+    await uploadRecording(blob, 'recording.' + ext);
+  } finally {
+    browserUploading = false;
+  }
+  poll();
 }
 
 // ===== Library: past sessions read straight out of the output folder. The
