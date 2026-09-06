@@ -5,6 +5,7 @@
 // clustering. No PyTorch, no HuggingFace token, no network at inference time.
 #pragma once
 
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <string>
@@ -35,8 +36,14 @@ public:
     Diarizer& operator=(const Diarizer&) = delete;
 
     // `audio` is mono float32 at 16 kHz. Throws std::runtime_error on failure.
+    //
+    // `abort` is polled from inside the run, which is minutes long on a real
+    // recording. Without it Cancel only changed the status line: the models
+    // carried on to the end, and what they produced still went on to be saved
+    // over the result they were replacing.
     std::vector<Turn> diarize(const std::vector<float>& audio, int samplerate,
-                              const ProgressFn& progress);
+                              const ProgressFn& progress,
+                              const std::atomic<bool>* abort = nullptr);
 
     void unload();
 

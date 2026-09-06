@@ -87,6 +87,7 @@ function createEnv(root) {
     uploads: [],           // one entry per POST /api/process_file
     uploadFails: false,
     uploadGate: null,
+    libRuns: [],           // one entry per POST /api/library/{transcribe,summarize}
   };
 
   const media = {stopped: 0, ctxClosed: 0, failAt: null, recorders: []};
@@ -107,6 +108,13 @@ function createEnv(root) {
       if (server.uploadGate) await server.uploadGate;
       entry.done = true;
       if (server.uploadFails) throw new Error('network down');
+      return {json: async () => ({ok: true})};
+    }
+    if (url === '/api/library/transcribe' || url === '/api/library/summarize') {
+      server.libRuns.push({
+        kind: url.slice(url.lastIndexOf('/') + 1),
+        body: JSON.parse((opts && opts.body) || '{}'),
+      });
       return {json: async () => ({ok: true})};
     }
     if (url === '/api/sources') return {json: async () => ({sources: []})};

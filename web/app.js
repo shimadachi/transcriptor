@@ -1369,6 +1369,14 @@ let browserUploading = false;
 // Whether the current take has already been handed off. Both the recorder's
 // stop event and the error fallback can arrive; only the first may act.
 let _finalized = false;
+// Which take the recorder callbacks belong to. _finalized alone is per-page and
+// is reset by every new capture, so a fallback timer left over from an errored
+// take found it false again and finished the take after it: the new recording
+// was cut off mid-sentence, its partial chunks uploaded as a whole take, and
+// the rest lost because the real stop event then found the work already done.
+let _takeId = 0, _stopTimer = null;
+// How long the error fallback waits for a stop event that may never come.
+let _stopFallbackMs = 2000;
 let _startTs = 0, _pausedMs = 0, _pauseTs = 0;
 let _mr = null, _chunks = [], _streams = [], _actx = null, _analyser = null, _abuf = null;
 
@@ -1456,7 +1464,10 @@ async function startBrowserCapture(kind) {
     _mr = new MediaRecorder(dest.stream, mime ? {mimeType: mime} : undefined);
     _mr.ondataavailable = e => { if (e.data && e.data.size) _chunks.push(e.data); };
     _finalized = false;
-    _mr.onstop = onBrowserStop;
+    // Every callback below names the take it was set up for, so nothing this
+    // recorder says can be acted on once a later one holds the microphone.
+    const take = ++_takeId;
+    _mr.onstop = () => onBrowserStop(take);
     // An encoder that gives up used to be silent: no onstop, browserRec stuck
     // true, streams still open, and the only way out a page reload.
     //
@@ -1466,9 +1477,10 @@ async function startBrowserCapture(kind) {
     // as one take and the final chunk as a second, competing one. Let onstop do
     // the handoff; the timer is only for a browser that sends no stop event.
     _mr.onerror = () => {
-      if (_finalized) return;
+      if (_finalized || take !== _takeId) return;
       toast(t('toast.recError'));
-      setTimeout(onBrowserStop, 2000);   // no-op if stop already finished it
+      clearTimeout(_stopTimer);
+      _stopTimer = setTimeout(() => onBrowserStop(take), _stopFallbackMs);
     };
 
     // The recorder is fed by the AudioContext destination, whose track never
@@ -1599,12 +1611,18 @@ $('pendingDrop').onclick = async () => {
   toast(t('toast.pendingDropped'));
 };
 
-async function onBrowserStop() {
+async function onBrowserStop(take) {
+  // Only the take that is still live may be finished. A caller with no take —
+  // the recovery paths, and the tests — means "whichever one that is".
+  if (take !== undefined && take !== _takeId) return;
   // Idempotent: a take is handed off exactly once. Both the stop event and the
   // error fallback lead here, and running twice split one recording across two
   // uploads — the second carrying only whatever arrived after the first ran.
   if (_finalized) return;
   _finalized = true;
+  // Nothing is waiting for a stop event any more. Left scheduled, this is the
+  // timer that used to come back two seconds later and end the next recording.
+  clearTimeout(_stopTimer); _stopTimer = null;
 
   browserRec = false; browserPaused = false;
   const type = (_chunks[0] && _chunks[0].type) || 'audio/webm';
@@ -2059,7 +2077,14 @@ $('libRunCancel').onclick = closeLibRun;
 $('libRunStart').onclick = () => {
   const mode = $('libRun').querySelector('input[name="libRunMode"]:checked');
   const wantNew = mode && mode.value === 'new';
-  const name = wantNew ? $('libRunName').value.trim() : '';
+  // Overwrite means the version the dialog just named — the one on screen —
+  // which is only the session's original when that is what is selected. An
+  // empty name is how the server is told "the original", so sending it
+  // unconditionally aimed every replacement at transcript.txt / summary.txt:
+  // the file the user had not asked about was destroyed, and the named version
+  // they were looking at came back unchanged.
+  const shown = libRunKind === 'transcribe' ? libTx : libSum;
+  const name = wantNew ? $('libRunName').value.trim() : shown;
   if (wantNew && !name) { toast(t('lib.runNameNeeded')); return; }
   // Dots and separators would let a name reach past its own file; the server
   // refuses them too, but saying so here costs nothing and reads better.

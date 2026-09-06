@@ -110,6 +110,11 @@ bool save_json(const fs::path& path, const nlohmann::json& obj) {
     return paths::write_file(path, obj.dump(2));
 }
 
+bool save_transcript(const fs::path& txt_path, const std::string& text,
+                     const fs::path& json_path, const nlohmann::json& obj) {
+    return paths::write_files({{txt_path, text}, {json_path, obj.dump(2)}});
+}
+
 bool open_in_file_manager(const fs::path& path) {
 #ifdef _WIN32
     HINSTANCE rc = ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr,

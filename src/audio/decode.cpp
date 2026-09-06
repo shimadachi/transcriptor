@@ -12,10 +12,15 @@ namespace transcriptor::audio {
 
 namespace {
 
+[[noreturn]] void throw_cancelled() {
+    throw std::runtime_error(L("Decoding was cancelled.", "Çözme iptal edildi."));
+}
+
 // Read the whole stream in chunks; ma_decoder already converts format,
 // channel count and sample rate to what we asked for.
 std::vector<float> decode_with_miniaudio(const paths::fs::path& path,
-                                         int samplerate, bool* handled) {
+                                         int samplerate, bool* handled,
+                                         net::Canceller* cancel) {
     *handled = false;
 
     ma_decoder_config cfg = ma_decoder_config_init(ma_format_f32, 1,
@@ -41,6 +46,13 @@ std::vector<float> decode_with_miniaudio(const paths::fs::path& path,
     constexpr std::size_t kChunk = 16384;
     std::vector<float> buf(kChunk);
     for (;;) {
+        // Between chunks, so a cancelled hour-long file stops in milliseconds
+        // rather than at the end of the decode. The decoder is closed on the
+        // way out; the exception carries the reason.
+        if (cancel && cancel->requested()) {
+            ma_decoder_uninit(&decoder);
+            throw_cancelled();
+        }
         ma_uint64 read = 0;
         rc = ma_decoder_read_pcm_frames(&decoder, buf.data(), kChunk, &read);
         if (read > 0) {
@@ -53,16 +65,19 @@ std::vector<float> decode_with_miniaudio(const paths::fs::path& path,
     return out;
 }
 
-std::vector<float> decode_with_ffmpeg(const paths::fs::path& path, int samplerate) {
+std::vector<float> decode_with_ffmpeg(const paths::fs::path& path, int samplerate,
+                                      net::Canceller* cancel) {
     // ffmpeg writes raw f32le to a temp file; reading a pipe would mean
     // reimplementing the streaming reader for a rare path.
     const paths::fs::path raw = path.string() + ".f32";
 
+    // run() kills the child on a cancel, which is the only way to interrupt it:
+    // this thread is blocked in the wait until ffmpeg is done with the file.
     net::ProcResult r = net::run({
         "ffmpeg", "-nostdin", "-y", "-loglevel", "error",
         "-i", paths::to_utf8(path),
         "-f", "f32le", "-ac", "1", "-ar", std::to_string(samplerate),
-        paths::to_utf8(raw)});
+        paths::to_utf8(raw)}, 0, cancel);
 
     std::error_code ec;
     struct Cleanup {
@@ -70,6 +85,7 @@ std::vector<float> decode_with_ffmpeg(const paths::fs::path& path, int samplerat
         ~Cleanup() { std::error_code e; paths::fs::remove(p, e); }
     } cleanup{raw};
 
+    if (r.cancelled) throw_cancelled();
     if (!r.launched) {
         throw std::runtime_error(
             L("This audio format could not be decoded and ffmpeg was not found. "
@@ -98,18 +114,22 @@ std::vector<float> decode_with_ffmpeg(const paths::fs::path& path, int samplerat
 
 }  // namespace
 
-std::vector<float> decode_file(const paths::fs::path& path, int samplerate) {
+std::vector<float> decode_file(const paths::fs::path& path, int samplerate,
+                               net::Canceller* cancel) {
     std::error_code ec;
     if (!paths::fs::exists(path, ec)) {
         throw std::runtime_error(L("File not found: ", "Dosya bulunamadı: ") +
                                  paths::to_utf8(path));
     }
+    // A cancel that arrived before this call starts still counts: the worker
+    // may have been admitted seconds ago and only reached the decode now.
+    if (cancel && cancel->requested()) throw_cancelled();
 
     bool handled = false;
-    std::vector<float> out = decode_with_miniaudio(path, samplerate, &handled);
+    std::vector<float> out = decode_with_miniaudio(path, samplerate, &handled, cancel);
     if (handled && !out.empty()) return out;
 
-    return decode_with_ffmpeg(path, samplerate);
+    return decode_with_ffmpeg(path, samplerate, cancel);
 }
 
 }  // namespace transcriptor::audio

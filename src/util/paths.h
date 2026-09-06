@@ -3,6 +3,8 @@
 
 #include <filesystem>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace transcriptor::paths {
 
@@ -29,6 +31,14 @@ std::string to_utf8(const fs::path& p);
 fs::path from_utf8(const std::string& s);
 
 bool read_file(const fs::path& p, std::string* out);
+
+// Replace a file's contents. The destination is left untouched unless the whole
+// write succeeds, so a full disk costs the new content and not the old.
 bool write_file(const fs::path& p, const std::string& data);
+
+// The same, for files that are only meaningful as a set. Every one of them is
+// written in full before any destination is touched, so the ordinary failure --
+// running out of room partway through - leaves all of them as they were.
+bool write_files(const std::vector<std::pair<fs::path, std::string>>& files);
 
 }  // namespace transcriptor::paths

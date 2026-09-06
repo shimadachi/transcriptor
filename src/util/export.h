@@ -24,6 +24,12 @@ bool save_audio_wav(const fs::path& path, const std::vector<float>& audio,
 bool save_text(const fs::path& path, const std::string& text);
 bool save_json(const fs::path& path, const nlohmann::json& obj);
 
+// The two shapes of one transcript, replaced together or not at all: a run that
+// rewrote the .txt and then failed on the .json left the session claiming a
+// result it no longer had.
+bool save_transcript(const fs::path& txt_path, const std::string& text,
+                     const fs::path& json_path, const nlohmann::json& obj);
+
 // Best-effort: explorer / open / xdg-open.
 bool open_in_file_manager(const fs::path& path);
 

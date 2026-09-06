@@ -28,6 +28,7 @@
 #include "config.h"
 #include "fake_capture.h"
 #include "util/export.h"
+#include "util/models.h"
 #include "util/paths.h"
 
 using namespace transcriptor;
@@ -402,6 +403,170 @@ void test_empty_transcripts_are_recognized() {
     test::check("one line with words is enough", spoken.has_text());
 }
 
+#ifndef _WIN32
+
+// A fake ffmpeg on PATH that holds the decode open until it is released, so the
+// window a cancel has to land in is a gate rather than a race. It emits one
+// second of f32le at the rate the caller asked for, into the output path (which
+// is always ffmpeg's last argument).
+struct GatedDecoder {
+    paths::fs::path bin, started, go;
+    std::string     saved_path;
+
+    explicit GatedDecoder(const paths::fs::path& dir)
+        : bin(dir / "bin"), started(dir / "decoding"), go(dir / "go") {
+        std::error_code ec;
+        paths::fs::create_directories(bin, ec);
+        const std::string script =
+            "#!/bin/sh\n"
+            "for last; do :; done\n"
+            ": > \"" + paths::to_utf8(started) + "\"\n"
+            "while [ ! -f \"" + paths::to_utf8(go) + "\" ]; do sleep 0.02; done\n"
+            "head -c 64000 /dev/zero > \"$last\"\n";
+        paths::write_file(bin / "ffmpeg", script);
+        paths::fs::permissions(bin / "ffmpeg", paths::fs::perms::owner_all, ec);
+
+        const char* p = std::getenv("PATH");
+        saved_path = p ? p : "";
+        setenv("PATH", (paths::to_utf8(bin) + ":" + saved_path).c_str(), 1);
+    }
+    ~GatedDecoder() { setenv("PATH", saved_path.c_str(), 1); }
+
+    // Something miniaudio cannot open, so decoding falls through to ffmpeg.
+    void write_input(const paths::fs::path& p) const {
+        paths::write_file(p, std::string(2048, '\x01'));
+    }
+
+    bool wait_until_decoding() const {
+        std::error_code ec;
+        for (int i = 0; i < 250; ++i) {
+            if (paths::fs::exists(started, ec)) return true;
+            std::this_thread::sleep_for(20ms);
+        }
+        return false;
+    }
+    void release() const { paths::write_file(go, ""); }
+};
+
+// Cancel during an upload's decode was accepted -- cancel_job() returned true
+// and raised the flags -- and then quietly undone: the flags were cleared where
+// the worker starts, which for an upload is on the far side of the decode. With
+// automatic transcription on, the cancelled upload carried straight on into the
+// pipeline.
+void test_cancel_during_upload_decode() {
+    const paths::fs::path out = fresh_output_dir();
+    fake_capture::reset();
+
+    const GatedDecoder decoder(out);
+    const paths::fs::path upload = out / "upload.mka";
+    decoder.write_input(upload);
+
+    Settings s = test_settings(out);
+    s.auto_transcribe = true;   // what turned a lost cancel into a run
+    app::AppState state(s);
+
+    bool accepted = true;
+    std::thread uploader([&] { accepted = state.process_file(upload, "upload.mka"); });
+
+    test::check("the upload reaches the decoder", decoder.wait_until_decoding());
+    test::check("cancel is accepted while the file is decoding", state.cancel_job());
+    decoder.release();   // for the unfixed code, which never kills the child
+    uploader.join();
+
+    test::check("a cancelled upload is not accepted", !accepted);
+    test::check("a cancelled upload ends cancelled rather than transcribing",
+                state.phase() == "idle",
+                "phase=" + state.phase() + " message=" + state.message());
+    test::check("the job slot is handed back", !state.processing());
+    test::check("the cancelled upload is not held for transcription",
+                !json_bool(state.state_json(), "has_audio"));
+}
+
+// The library's Delete checked only the studio session folder. A re-run works in
+// a folder session_dir_ never names, so its target could be deleted mid-run --
+// and the worker then recreated the directory through write_file() and saved
+// into it, leaving one transcript where a whole recording had been.
+void test_a_rerun_protects_the_folder_it_writes_into() {
+    const paths::fs::path out = fresh_output_dir();
+    fake_capture::reset();
+
+    const GatedDecoder decoder(out);
+    const paths::fs::path dir   = out / "2026-09-06_10-00-00";
+    const paths::fs::path other = out / "2026-09-06_09-00-00";
+    std::error_code ec;
+    paths::fs::create_directories(dir, ec);
+    paths::fs::create_directories(other, ec);
+    decoder.write_input(dir / "audio.webm");
+    exporter::save_text(other / "transcript.txt", "an unrelated session\n");
+
+    // Admission asks whether the speech model is there; the run itself will
+    // fail on it, which is fine -- this test is about the window before that.
+    Settings s = test_settings(out);
+    const paths::fs::path model = out / "fake-whisper.bin";
+    paths::write_file(model, "not really a model");
+    s.whisper_model_path = paths::to_utf8(model);
+    app::AppState state(s);
+
+    std::string error;
+    const bool started =
+        state.start_library_transcribe("2026-09-06_10-00-00", "second pass", &error);
+    test::check("a library re-run starts", started, error);
+    test::check("the re-run reaches the decoder", decoder.wait_until_decoding());
+
+    test::check("its target cannot be deleted while it runs",
+                state.delete_library_session(dir, s.output_dir) ==
+                    app::AppState::DeleteOutcome::kBusy);
+    test::check("the recording is still there",
+                paths::fs::is_regular_file(dir / "audio.webm", ec));
+
+    // ...and an unrelated session is still deletable, which is what a guard that
+    // is too broad would break.
+    test::check("another session can still be deleted",
+                state.delete_library_session(other, s.output_dir) ==
+                    app::AppState::DeleteOutcome::kOk);
+
+    decoder.release();
+    state.shutdown();   // joins the worker, which fails on the fake model
+
+    test::check("the folder survives the run either way",
+                paths::fs::is_regular_file(dir / "audio.webm", ec));
+    test::check("and it is deletable once nothing is writing to it",
+                state.delete_library_session(dir, s.output_dir) ==
+                    app::AppState::DeleteOutcome::kOk);
+}
+
+#endif  // _WIN32
+
+// A directory is not a model. file_size() fails on one and hands back the
+// unsigned error sentinel, which is greater than zero -- so a folder given as a
+// custom model path reported itself ready and the failure surfaced much later,
+// somewhere far less legible.
+void test_a_directory_is_not_a_model_file() {
+    const paths::fs::path out = fresh_output_dir();
+    std::error_code ec;
+
+    Settings s = test_settings(out);
+    const paths::fs::path folder = out / "large-v3.bin";   // a folder, despite the name
+    paths::fs::create_directories(folder, ec);
+    s.whisper_model_path = paths::to_utf8(folder);
+    test::check("a directory is not a usable speech model",
+                !models::whisper_ready(s),
+                "reason=" + models::whisper_missing_reason(s));
+
+    const paths::fs::path empty = out / "empty.bin";
+    paths::write_file(empty, "");
+    s.whisper_model_path = paths::to_utf8(empty);
+    test::check("an empty file is not one either", !models::whisper_ready(s));
+
+    s.whisper_model_path = paths::to_utf8(out / "absent.bin");
+    test::check("a missing file is not one either", !models::whisper_ready(s));
+
+    const paths::fs::path real = out / "real.bin";
+    paths::write_file(real, "weights");
+    s.whisper_model_path = paths::to_utf8(real);
+    test::check("a file with something in it still counts", models::whisper_ready(s));
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -434,6 +599,11 @@ int main(int argc, char** argv) {
     test_failed_device_open_releases_the_claim();
     test_build_features_reach_their_code();
     test_empty_transcripts_are_recognized();
+    test_a_directory_is_not_a_model_file();
+#ifndef _WIN32
+    test_cancel_during_upload_decode();
+    test_a_rerun_protects_the_folder_it_writes_into();
+#endif
 
     return test::summary("recording lifecycle");
 }

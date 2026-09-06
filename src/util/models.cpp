@@ -21,10 +21,18 @@ const std::map<std::string, std::uint64_t> kLegacyWhisperSizes = {
     {"large-v2", 3'094'600'000ULL},
 };
 
+// A model is a regular file with something in it. `exists` was too generous:
+// file_size() on a directory fails and hands back the unsigned error sentinel,
+// which compares comfortably greater than zero -- so a folder entered as a
+// custom model path reported itself ready and the failure surfaced much later,
+// inside the inference loader, as something unrecognisable. A folder left on a
+// download destination did the same and stopped the downloader replacing it.
 bool has_file(const paths::fs::path& p) {
+    if (p.empty()) return false;
     std::error_code ec;
-    return !p.empty() && paths::fs::exists(p, ec) &&
-           paths::fs::file_size(p, ec) > 0;
+    if (!paths::fs::is_regular_file(p, ec)) return false;
+    const auto size = paths::fs::file_size(p, ec);
+    return !ec && size > 0;
 }
 
 std::string fetch(const ModelSpec& spec, const paths::fs::path& dest,

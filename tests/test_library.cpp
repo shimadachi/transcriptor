@@ -122,6 +122,43 @@ void test_a_json_only_transcript_is_not_lost() {
           tx.size() == 2 && tx[0].structured && tx[1].structured);
 }
 
+// A session is whatever the variant scan can find. Discovery used to ask only
+// about transcript.json / transcript.txt / summary.txt, so a session whose
+// originals had been deleted -- or one copied in holding only named output --
+// was filtered out of the list, and everything it held became unreachable.
+void test_a_session_of_only_named_versions_is_listed() {
+    const library::fs::path root = g_scratch / "output";
+    const library::fs::path dir = root / "2026-09-06_10-00-00";
+    std::error_code ec;
+    library::fs::create_directories(dir, ec);
+    touch(dir / "transcript.second pass.txt", "what was actually said\n");
+    touch(dir / "summary.shorter.txt", "the short version\n");
+
+    const library::Entry e = library::describe(dir);
+    check("a named transcript counts as having a transcript", e.has_transcript);
+    check("a named summary counts as having a summary", e.has_summary);
+    check("the preview comes from the version that exists",
+          e.preview.rfind("what was actually said", 0) == 0, e.preview);
+
+    const auto sessions = library::list(paths::to_utf8(root));
+    check("the session is in the library", sessions.size() == 1,
+          std::to_string(sessions.size()) + " session(s)");
+
+    // A folder holding none of it is still not a session.
+    const library::fs::path empty = root / "2026-09-06_11-00-00";
+    library::fs::create_directories(empty, ec);
+    touch(empty / "notes.md");
+    check("a folder with no session artifacts is still skipped",
+          library::list(paths::to_utf8(root)).size() == 1);
+
+    // With the original there, it is the one previewed -- variants are listed
+    // original-first and that is what the panel opens on.
+    touch(dir / "transcript.txt", "the first attempt\n");
+    check("the original is preferred for the preview",
+          library::describe(dir).preview.rfind("the first attempt", 0) == 0,
+          library::describe(dir).preview);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -138,5 +175,6 @@ int main(int argc, char** argv) {
     test_file_names();
     test_scan_lists_originals_first();
     test_a_json_only_transcript_is_not_lost();
+    test_a_session_of_only_named_versions_is_listed();
     return test::summary("library");
 }

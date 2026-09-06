@@ -267,7 +267,16 @@ ProcessResult OfflineProcessor::run(const std::vector<float>& audio, int sampler
         }
         diarizer = diarizer_.get();
     }
-    const auto turns = diarizer->diarize(audio, samplerate, report("diarize"));
+    // aborted_ travels into the run itself: this stage is the long one on a
+    // meeting-length recording, and it was the one stage Cancel could not reach.
+    const auto turns =
+        diarizer->diarize(audio, samplerate, report("diarize"), &aborted_);
+
+    // The last gate before a result exists. A cancelled run that got this far
+    // must not return one: the caller saves what it is handed, and for a
+    // re-transcription that means overwriting the transcript -- and discarding
+    // the summary belonging to it -- on behalf of a job the user stopped.
+    throw_if_aborted();
 
     // -- attribute ---------------------------------------------------------
     if (progress) progress("attribute", -1.0, "");

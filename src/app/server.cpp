@@ -520,8 +520,8 @@ bool Server::start() {
 
         // Every saved transcript and summary, so the panel can offer the older
         // ones beside whatever the last re-run produced. The requested one wins
-        // when it exists; otherwise this falls back to the original, which is
-        // what a stale selection in the page should land on.
+        // when it exists; otherwise this falls back to the first one on offer,
+        // which is where a stale selection in the page should land.
         const auto variants_json = [](const std::vector<library::Variant>& vs) {
             json arr = json::array();
             for (const library::Variant& v : vs) {
@@ -536,7 +536,11 @@ bool Server::start() {
             for (const library::Variant& v : vs) {
                 if (v.name == want) return want;
             }
-            return std::string();
+            // The variants are listed original-first, so this is the original
+            // wherever there is one. Returning "" regardless named a file that
+            // need not exist: a session kept only as named versions opened with
+            // an empty transcript panel and no way to reach what it held.
+            return vs.empty() ? std::string() : vs.front().name;
         };
 
         const auto tx_variants  = library::transcript_variants(dir);
@@ -654,17 +658,20 @@ bool Server::start() {
             return send_error(res, L("That recording is no longer there.",
                                      "Bu kayıt artık yerinde değil."), 404);
         }
-        // The live session is still being written to; deleting it underneath
-        // the pipeline would leave half a folder behind.
-        if (state->processing() && state->session_dir() == dir) {
-            return send_error(res, L("That recording is still being written.",
-                                     "Bu kayıt hâlâ yazılıyor."));
+        // A folder still being written to is not deletable, and the state is
+        // what knows that: the check and the removal happen together in there,
+        // under the same lock that admits a re-run, because either one alone
+        // leaves a window for the other.
+        switch (state->delete_library_session(dir, s.output_dir)) {
+            case AppState::DeleteOutcome::kBusy:
+                return send_error(res, L("That recording is still being written.",
+                                         "Bu kayıt hâlâ yazılıyor."));
+            case AppState::DeleteOutcome::kFailed:
+                return send_error(res, L("The folder could not be deleted.",
+                                         "Klasör silinemedi."), 500);
+            case AppState::DeleteOutcome::kOk:
+                break;
         }
-        if (!exporter::remove_session_dir(dir, s.output_dir)) {
-            return send_error(res, L("The folder could not be deleted.",
-                                     "Klasör silinemedi."), 500);
-        }
-        state->forget_session_dir(dir);
         send_json(res, json{{"ok", true}, {"id", paths::to_utf8(dir.filename())}});
     });
 

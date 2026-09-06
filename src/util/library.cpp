@@ -234,9 +234,15 @@ Entry describe(const fs::path& dir) {
     e.path  = paths::to_utf8(dir);
     e.mtime = mtime_seconds(dir);
 
-    e.has_transcript = fs::is_regular_file(dir / "transcript.json", ec) ||
-                       fs::is_regular_file(dir / "transcript.txt", ec);
-    e.has_summary    = fs::is_regular_file(dir / "summary.txt", ec);
+    // What the session holds is whatever the variant scan can find, not only
+    // the three original names. Someone who keeps a re-run and deletes the
+    // first attempt still has a transcript; asking only about transcript.txt
+    // said they had none, and list() then dropped the whole session -- so the
+    // versions it held could not be reached from the app at all.
+    const std::vector<Variant> txs  = transcript_variants(dir);
+    const std::vector<Variant> sums = summary_variants(dir);
+    e.has_transcript = !txs.empty();
+    e.has_summary    = !sums.empty();
 
     e.audio = find_audio(dir);
     if (!e.audio.empty()) {
@@ -245,11 +251,16 @@ Entry describe(const fs::path& dir) {
     }
 
     // The transcript makes the better preview; the summary is the fallback for
-    // a session saved with "save transcript" switched off.
+    // a session saved with "save transcript" switched off. Both are read from
+    // the version the panel will open on -- the original where there is one,
+    // since the variants are listed original-first.
     std::string raw;
-    if (paths::read_file(dir / "transcript.txt", &raw) && !raw.empty()) {
+    if (!txs.empty() &&
+        paths::read_file(transcript_txt_file(dir, txs.front().name), &raw) &&
+        !raw.empty()) {
         e.preview = snippet(raw);
-    } else if (paths::read_file(dir / "summary.txt", &raw)) {
+    } else if (!sums.empty() &&
+               paths::read_file(summary_file(dir, sums.front().name), &raw)) {
         e.preview = snippet(raw);
     }
     return e;

@@ -51,15 +51,22 @@ int diar_threads() {
 }
 
 struct ProgressBridge {
-    const ProgressFn* fn = nullptr;
+    const ProgressFn*        fn = nullptr;
+    const std::atomic<bool>* abort = nullptr;
 };
 
 int32_t on_progress(int32_t processed, int32_t total, void* arg) {
     auto* bridge = static_cast<ProgressBridge*>(arg);
-    if (bridge && bridge->fn && *bridge->fn && total > 0) {
+    if (!bridge) return 0;
+    // The one place a cancellation can reach this run: sherpa calls back as it
+    // works, and non-zero is how it is told to stop. Returning 0 unconditionally
+    // meant Cancel was accepted, said "Stopping…", and then sat through the rest
+    // of the separation anyway.
+    if (bridge->abort && bridge->abort->load()) return 1;
+    if (bridge->fn && *bridge->fn && total > 0) {
         (*bridge->fn)("", static_cast<double>(processed) / total);
     }
-    return 0;   // non-zero would abort
+    return 0;
 }
 
 // The C API hands back raw pointers with matching destroy functions; these
@@ -108,7 +115,8 @@ void Diarizer::unload() {
 }
 
 std::vector<Turn> Diarizer::diarize(const std::vector<float>& audio, int samplerate,
-                                    const ProgressFn& progress) {
+                                    const ProgressFn& progress,
+                                    const std::atomic<bool>* abort) {
     if (audio.empty()) return {};
 
     const std::string seg = paths::to_utf8(settings_.segmentation_model_file());
@@ -183,11 +191,19 @@ std::vector<Turn> Diarizer::diarize(const std::vector<float>& audio, int sampler
 
     if (progress) progress("", 0.0);
 
-    ProgressBridge bridge{&progress};
+    ProgressBridge bridge{&progress, abort};
     ResultGuard result;
     result.r = SherpaOnnxOfflineSpeakerDiarizationProcessWithCallback(
         impl_->sd, audio.data(), static_cast<int32_t>(audio.size()), on_progress,
         &bridge);
+    // A run that was stopped comes back empty, or holding whatever it had
+    // clustered so far. Neither is an answer, and saying so here keeps it out
+    // of the caller's hands -- reported as "produced no result", a cancellation
+    // read as a failure.
+    if (abort && abort->load()) {
+        throw std::runtime_error(L("Speaker separation was cancelled.",
+                                   "Konuşmacı ayrımı iptal edildi."));
+    }
     if (!result.r) {
         throw std::runtime_error(L("Speaker separation produced no result.",
                                    "Konuşmacı ayrımı sonuç üretmedi."));
@@ -233,7 +249,8 @@ Diarizer::~Diarizer() = default;
 void Diarizer::unload() {}
 
 std::vector<Turn> Diarizer::diarize(const std::vector<float>&, int,
-                                    const ProgressFn&) {
+                                    const ProgressFn&,
+                                    const std::atomic<bool>*) {
     throw std::runtime_error(
         L("This build was compiled without speaker separation (rebuild with "
           "-DTRANSCRIPTOR_DIARIZE=ON).",

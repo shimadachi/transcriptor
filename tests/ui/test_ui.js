@@ -7,6 +7,8 @@
 //   G1  a second take, or an overlapping retry, destroyed a retained take
 //   G2  a recorder error uploaded one take as two
 //   G3  slow /api/result responses starved every render
+//   G4  an errored take's fallback timer terminated the take after it
+//   G5  overwriting a named version overwrote the session's original instead
 
 const path = require('path');
 const {createEnv} = require('./harness');
@@ -130,6 +132,46 @@ async function run() {
           `${env.server.uploads.length} upload(s)`);
     check('G2 the page is not left recording after an error',
           env.peek('browserRec') === false);
+  }
+
+  // ----------------------------------------------------------------- G4 ----
+  // The error fallback is a timer for a browser that never sends stop. When
+  // stop does arrive, that timer has to go with the take it belonged to: it
+  // used to survive, find the shared _finalized flag reset by the next
+  // capture, and end that recording two seconds in — uploading its opening
+  // chunks as a whole take and losing everything said afterwards, because the
+  // real stop event then found the handoff already done.
+  {
+    const env = createEnv(ROOT);
+    env.poke('_stopFallbackMs = 40;');   // the shipped 2s, without the wait
+
+    await env.app.startBrowserCapture('both');
+    await env.settle();
+    const first = env.media.recorders[env.media.recorders.length - 1];
+    first.ondataavailable({data: {size: 7, type: 'audio/webm'}});
+    first.failWithError();               // error, then the ordinary data + stop
+    await env.settle();
+    check('G4 the errored take is handed off once', env.server.uploads.length === 1,
+          `${env.server.uploads.length} upload(s)`);
+
+    // A second take, started inside the old take's fallback window.
+    await env.app.startBrowserCapture('both');
+    await env.settle();
+    const second = env.media.recorders[env.media.recorders.length - 1];
+    check('G4 the next take starts',
+          env.peek('browserRec') === true && second.state === 'recording');
+
+    await env.settle(80);                // past when the old timer would fire
+    check('G4 a stale fallback timer does not end the next take',
+          env.peek('browserRec') === true && env.server.uploads.length === 1,
+          `browserRec=${env.peek('browserRec')} uploads=${env.server.uploads.length}`);
+    check('G4 the next take still holds its recorder', second.state === 'recording');
+
+    // ...and it still hands off everything when it really does stop.
+    second.stop();
+    await env.settle();
+    check('G4 the next take is uploaded when it stops',
+          env.server.uploads.length === 2, `${env.server.uploads.length} upload(s)`);
   }
 
   // ----------------------------------------------------------------- N5 ----
@@ -298,6 +340,69 @@ async function run() {
     check('nothing stored lands on the placeholder',
           blank.els.s_model.value === '',
           JSON.stringify(blank.els.s_model.value));
+  }
+
+  // ----------------------------------------------------------------- G5 ----
+  // The dialog says "Replace the transcript shown (second pass)". The handler
+  // sent an empty name for every overwrite, and an empty name is how the server
+  // is told "the session's original" — so the version the user was looking at
+  // came back unchanged and transcript.txt, which nobody had mentioned, was
+  // destroyed.
+  {
+    const env = createEnv(ROOT);
+    // A radio group where nothing is checked is the overwrite branch; the "keep
+    // both" case sets its own querySelector below. Starting a run re-reads the
+    // library, and this harness's library is empty, so the selection is put
+    // back before each press rather than carried over.
+    const select = (tx, sum) => {
+      env.poke('libCurrent = "2026-09-06_10-00-00";');
+      env.poke('libItem = {id: "2026-09-06_10-00-00", audio: "audio.wav",' +
+               ' transcripts: [{name: ""}, {name: "second pass"}],' +
+               ' summaries: [{name: ""}, {name: "shorter"}]};');
+      env.poke(`libTx = ${JSON.stringify(tx)}; libSum = ${JSON.stringify(sum)};`);
+    };
+
+    select('second pass', 'shorter');
+    env.poke('libRunKind = "transcribe";');
+    env.els.libRunStart.onclick();
+    await env.settle();
+    check('G5 overwriting a named transcript aims at that version',
+          env.server.libRuns.length === 1 &&
+              env.server.libRuns[0].kind === 'transcribe' &&
+              env.server.libRuns[0].body.name === 'second pass',
+          JSON.stringify(env.server.libRuns.map(r => r.body.name)));
+
+    select('second pass', 'shorter');
+    env.poke('libRunKind = "summarize";');
+    env.els.libRunStart.onclick();
+    await env.settle();
+    check('G5 overwriting a named summary aims at that version',
+          env.server.libRuns.length === 2 &&
+              env.server.libRuns[1].kind === 'summarize' &&
+              env.server.libRuns[1].body.name === 'shorter',
+          JSON.stringify(env.server.libRuns.map(r => r.body.name)));
+
+    // The original is still reachable: it is what "the version shown" means
+    // when the original is the one selected.
+    select('', 'shorter');
+    env.poke('libRunKind = "transcribe";');
+    env.els.libRunStart.onclick();
+    await env.settle();
+    check('G5 overwriting the original still names the original',
+          env.server.libRuns.length === 3 && env.server.libRuns[2].body.name === '',
+          JSON.stringify(env.server.libRuns.map(r => r.body.name)));
+
+    // And "keep both" is unaffected: it sends the name that was typed.
+    env.els.libRun.querySelector = () => ({value: 'new'});
+    env.els.libRunName.value = '  third pass  ';
+    select('second pass', 'shorter');
+    env.poke('libRunKind = "transcribe";');
+    env.els.libRunStart.onclick();
+    await env.settle();
+    check('G5 keeping both sends the name that was typed',
+          env.server.libRuns.length === 4 &&
+              env.server.libRuns[3].body.name === 'third pass',
+          JSON.stringify(env.server.libRuns.map(r => r.body.name)));
   }
 
   // -------------------------------------------------- cancelling a run ------

@@ -114,6 +114,22 @@ public:
     // the library, so nothing writes into it again.
     void forget_session_dir(const paths::fs::path& dir);
 
+    // -- library deletion --------------------------------------------------
+    // Remove one session folder, refusing while a job is writing into it.
+    //
+    // "Writing into it" is not only the studio session: a library re-run works
+    // in a folder of its own, which session_dir_ never named, so the old guard
+    // let its target be deleted mid-run. What followed was worse than losing
+    // the folder — the worker saves through write_file(), which recreates the
+    // directories it needs, so the recording, the audio and every other version
+    // stayed deleted and a lone transcript reappeared in their place.
+    //
+    // Serialized against job admission, so neither can slip through the other's
+    // window.
+    enum class DeleteOutcome { kOk, kBusy, kFailed };
+    DeleteOutcome delete_library_session(const paths::fs::path& dir,
+                                         const std::string& base);
+
     bool            recording() const { return recording_.load(); }
     bool            processing() const { return processing_.load(); }
     std::string     phase() const;
@@ -212,6 +228,11 @@ private:
     // worker_, and assigning over a joinable thread calls std::terminate.
     bool claim_job();
 
+    // Record which output folder the job that just claimed the slot writes
+    // into. Only the library re-runs need it: everything else works in the
+    // studio session, which session_dir_ already names.
+    void set_job_dir(const paths::fs::path& dir);
+
     // Run `body` on the worker thread, releasing the job slot when it returns.
     // Owns the thread handle, so joining the previous worker and installing the
     // next one happen under job_mutex_ and can never interleave.
@@ -251,6 +272,13 @@ private:
     // taken while either of the others is held.
     std::mutex record_mutex_;
 
+    // Serializes taking on an output folder against deleting one. Both are
+    // short; what matters is that they cannot interleave, so a re-run cannot be
+    // admitted for a folder that is being deleted, and a folder cannot be
+    // deleted in the gap between a re-run being admitted and its target being
+    // recorded. Outermost again: output_mutex_ -> job_mutex_ -> mutex_.
+    std::mutex output_mutex_;
+
     Settings   settings_;          // guarded by mutex_
     DeviceInfo device_;            // guarded by mutex_
 
@@ -283,6 +311,11 @@ private:
     int                                    summary_rev_ = 0;
     paths::fs::path                        session_dir_;
 
+    // Where the running job writes, when that is not the studio session: the
+    // library folder a re-run was asked for. Empty whenever no such job holds
+    // the slot. Guarded by mutex_.
+    paths::fs::path                        job_dir_;
+
     std::string summary_context_;
     std::string summary_template_;
 
@@ -304,6 +337,11 @@ private:
     // Kills the curl behind the catalog download. Reset when one starts, so a
     // cancelled download does not block the next.
     net::Canceller dl_cancel_;
+
+    // The same, for the decode inside a job: it kills the ffmpeg child and is
+    // polled between miniaudio chunks. Cleared in claim_job() alongside the
+    // rest of the cancellation state.
+    net::Canceller job_cancel_;
 
     // Bumped by every deliberate end of a take: a new recording, and a cancel.
     // stop_and_process() reads it before closing the device and again before

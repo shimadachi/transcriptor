@@ -127,7 +127,29 @@ bool AppState::claim_job() {
     // a request that passed its check just before a recording started could
     // still get here. stop_and_process() lowers the flag before it claims.
     if (recording_.load()) return false;
-    return !processing_.exchange(true);
+    if (processing_.exchange(true)) return false;
+
+    // The last job's cancellation is cleared here, where the slot is taken --
+    // not in start_job(), which for an upload does not run until the file has
+    // been decoded. Cancel is accepted from the moment processing_ is up, so
+    // clearing it later erased a cancellation the user had already been told
+    // was taken: the flag went down, the backends were un-aborted, and the
+    // "cancelled" upload carried on into transcription as though nothing had
+    // been asked.
+    job_cancelled_.store(false);
+    job_cancel_.reset();
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        job_dir_.clear();
+        if (processor_) processor_->reset_abort();
+        if (llm_) llm_->reset_abort();
+    }
+    return true;
+}
+
+void AppState::set_job_dir(const paths::fs::path& dir) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    job_dir_ = dir;
 }
 
 void AppState::start_job(std::function<void()> body) {
@@ -138,24 +160,21 @@ void AppState::start_job(std::function<void()> body) {
     join_worker_locked();
     claim_backends();
 
-    // Clear the last job's cancellation here, where the worker does not exist
-    // yet, rather than inside the processor and the backends as they start.
-    // Doing it there meant a shutdown could be requested and then erased by the
-    // job it was meant to stop, leaving join_worker() below to wait out a whole
+    // The last job's cancellation was cleared in claim_job(), before whatever
+    // this caller did between taking the slot and getting here. Clearing it
+    // again would undo a cancel raised in that window -- and clearing it inside
+    // the processor and the backends as they start, which is where it lived
+    // before that, meant a shutdown could be requested and then erased by the
+    // very job it was meant to stop, leaving join_worker() to wait out a whole
     // transcription, summary, or gigabyte model download.
-    {
-        std::lock_guard<std::mutex> mlock(mutex_);
-        if (processor_) processor_->reset_abort();
-        if (llm_) llm_->reset_abort();
-    }
-    // ...and if the shutdown landed while this job was being admitted, put it
-    // straight back: claim_job() checked the flag before that store, not after.
+    //
+    // What does belong here: a shutdown that landed while this job was being
+    // admitted. claim_job() checked the flag before it stored, not after.
     if (shutting_down_.load()) {
         std::lock_guard<std::mutex> mlock(mutex_);
         if (processor_) processor_->request_abort();
         if (llm_) llm_->request_abort();
     }
-    job_cancelled_.store(false);
     worker_ = std::thread([this, body = std::move(body)] {
         try {
             body();
@@ -172,6 +191,12 @@ void AppState::start_job(std::function<void()> body) {
         // written its result; say so rather than reporting it as stopped.
         if (job_cancelled_.load() && phase() != "idle") {
             set_phase("idle", -1.0, cancelled_message());
+        }
+        // Nothing is writing into that folder any more, so the library is free
+        // to delete it again.
+        {
+            std::lock_guard<std::mutex> mlock(mutex_);
+            job_dir_.clear();
         }
         release_backends();
         processing_.store(false);
@@ -208,6 +233,26 @@ paths::fs::path AppState::session_dir() const {
 void AppState::forget_session_dir(const paths::fs::path& dir) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!dir.empty() && session_dir_ == dir) session_dir_.clear();
+}
+
+AppState::DeleteOutcome AppState::delete_library_session(const paths::fs::path& dir,
+                                                         const std::string& base) {
+    // Held across the check and the removal both, and taken by library job
+    // admission as well, so the two cannot interleave.
+    std::lock_guard<std::mutex> guard(output_mutex_);
+
+    if (!dir.empty() && processing_.load()) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        // Both folders a job can be writing into: the studio's session, and a
+        // library re-run's target. Asking only about the first was the whole
+        // hole -- a re-run's folder is never session_dir_, so every one of them
+        // was deletable while its job ran.
+        if (session_dir_ == dir || job_dir_ == dir) return DeleteOutcome::kBusy;
+    }
+    if (!exporter::remove_session_dir(dir, base)) return DeleteOutcome::kFailed;
+
+    forget_session_dir(dir);
+    return DeleteOutcome::kOk;
 }
 
 Settings AppState::settings_copy() const {
@@ -405,6 +450,10 @@ bool AppState::cancel_job() {
     // Raised before the engines are asked, so the worker cannot finish and
     // report a failure in the window between the two.
     job_cancelled_.store(true);
+    // The decode is part of the job too: an upload spends its first minutes
+    // here, and until this was wired through, Cancel during that stretch was
+    // accepted and then quietly forgotten.
+    job_cancel_.request();
     {
         std::lock_guard<std::mutex> lock(mutex_);
         // Both, not whichever is thought to be running: a job moves between
@@ -486,11 +535,24 @@ bool AppState::process_file(const paths::fs::path& tmp_path,
 
     std::vector<float> audio;
     try {
-        audio = audio::decode_file(tmp_path, settings_copy().samplerate);
+        audio = audio::decode_file(tmp_path, settings_copy().samplerate, &job_cancel_);
     } catch (const std::exception& e) {
-        set_phase("error", -1.0,
-                  std::string(L("Could not decode the file: ",
-                                "Dosya çözülemedi: ")) + e.what());
+        // A decode the user stopped is not a decode that failed, and must not
+        // be reported as one.
+        if (job_cancelled_.load()) {
+            set_phase("idle", -1.0, cancelled_message());
+        } else {
+            set_phase("error", -1.0,
+                      std::string(L("Could not decode the file: ",
+                                    "Dosya çözülemedi: ")) + e.what());
+        }
+        processing_.store(false);
+        return false;
+    }
+    // Cancel can also land between the decoder's last chunk and here, and
+    // begin() below would take that as permission to start transcribing.
+    if (job_cancelled_.load()) {
+        set_phase("idle", -1.0, cancelled_message());
         processing_.store(false);
         return false;
     }
@@ -745,10 +807,10 @@ void AppState::save_transcript() {
         if (dir.empty() || !result_.has_value() || !settings_.save_transcript) return;
 
         const std::string lang = settings_.summary_language;
-        failed = !exporter::save_text(dir / "transcript.txt",
-                                      result_->plain_text(lang, true));
-        failed |= !exporter::save_json(dir / "transcript.json",
-                                       result_->to_json(lang));
+        failed = !exporter::save_transcript(dir / "transcript.txt",
+                                            result_->plain_text(lang, true),
+                                            dir / "transcript.json",
+                                            result_->to_json(lang));
     }
     if (failed) {
         note_save_error(L("The transcript could not be written to ",
@@ -965,6 +1027,12 @@ paths::fs::path AppState::library_dir(const std::string& id, std::string* error)
 bool AppState::start_library_transcribe(const std::string& id,
                                         const std::string& name,
                                         std::string* error) {
+    // Admission and deletion take the same lock: without it a Delete could pass
+    // its "is anything writing here?" check in the gap between this claim and
+    // the folder being recorded as the job's, and take the recording out from
+    // under a run that then put a transcript back in the empty space.
+    std::lock_guard<std::mutex> guard(output_mutex_);
+
     const paths::fs::path dir = library_dir(id, error);
     if (dir.empty()) return false;
 
@@ -994,6 +1062,7 @@ bool AppState::start_library_transcribe(const std::string& id,
         return false;
     }
 
+    set_job_dir(dir);
     const paths::fs::path audio_path = dir / paths::from_utf8(audio_name);
     start_job([this, dir, audio_path, name] {
         do_library_transcribe(dir, audio_path, name);
@@ -1007,18 +1076,18 @@ void AppState::do_library_transcribe(const paths::fs::path& dir,
     const Settings settings = settings_copy();
 
     set_phase("transcribe", -1.0, L("Reading the recording…", "Kayıt okunuyor…"));
-    std::vector<float> audio = audio::decode_file(audio_path, settings.samplerate);
+    std::vector<float> audio =
+        audio::decode_file(audio_path, settings.samplerate, &job_cancel_);
 
     const pipeline::ProcessResult result = run_pipeline(audio, settings);
 
     // Written whatever save_transcript says: this run is not a side effect of
     // recording, it is the thing the user asked for.
     const std::string lang = settings.summary_language;
-    const bool ok_txt = exporter::save_text(library::transcript_txt_file(dir, name),
-                                            result.plain_text(lang, true));
-    const bool ok_json = exporter::save_json(library::transcript_json_file(dir, name),
-                                             result.to_json(lang));
-    if (!ok_txt || !ok_json) {
+    if (!exporter::save_transcript(library::transcript_txt_file(dir, name),
+                                   result.plain_text(lang, true),
+                                   library::transcript_json_file(dir, name),
+                                   result.to_json(lang))) {
         throw std::runtime_error(L("The transcript could not be written to ",
                                    "Metin şuraya yazılamadı: ") + paths::to_utf8(dir));
     }
@@ -1031,6 +1100,8 @@ bool AppState::start_library_summarize(const std::string& id,
                                        const std::string& context,
                                        const std::string& template_id,
                                        std::string* error) {
+    std::lock_guard<std::mutex> guard(output_mutex_);   // see the sibling above
+
     const paths::fs::path dir = library_dir(id, error);
     if (dir.empty()) return false;
 
@@ -1065,6 +1136,7 @@ bool AppState::start_library_summarize(const std::string& id,
         }
     }
 
+    set_job_dir(dir);
     start_job([this, dir, text, name, context, tpl] {
         do_library_summarize(dir, text, name, context, tpl);
     });
