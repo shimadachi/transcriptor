@@ -49,7 +49,8 @@ struct Settings {
     std::string diar_segmentation_model;      // empty = managed download
     std::string diar_embedding_model;
     int         num_speakers      = 0;        // 0 = estimate from clustering
-    float       cluster_threshold = 0.5f;
+    // There is deliberately no clustering-threshold setting. See
+    // cluster_threshold(), which derives it from `language`.
 
     // -- summarizer -------------------------------------------------------
     // "embedded" = llama.cpp in-process; "remote" = OpenAI-compatible server.
@@ -121,6 +122,9 @@ struct Settings {
 
     nlohmann::json to_json() const;
     void from_json(const nlohmann::json& j);
+
+    // The clustering threshold to hand sherpa, derived from `language`.
+    float cluster_threshold() const;
 
     // Resolved model file locations (managed download path when unset).
     paths::fs::path whisper_model_file() const;

@@ -188,7 +188,7 @@ through `curl`, which ships with Windows 10 1803+, macOS, and Linux:
 |---|---|---|
 | Whisper `tiny` … `large-v3` | 74 MB – 2.9 GB | Chosen and downloaded in Settings |
 | pyannote segmentation-3.0 (ONNX) | ~6 MB | First speaker separation |
-| 3D-Speaker ERes2NetV2 embedding | ~69 MB | First speaker separation |
+| 3D-Speaker CAM++ embedding | ~27 MB | First speaker separation |
 
 The speech models, smallest to best: `tiny` and `base` are for checking that
 audio arrives; `small` is the lightest one worth putting a real conversation

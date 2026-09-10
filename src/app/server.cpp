@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -833,7 +834,13 @@ bool Server::start() {
             {"diar_segmentation_model", s.diar_segmentation_model},
             {"diar_embedding_model", s.diar_embedding_model},
             {"num_speakers", s.num_speakers},
-            {"cluster_threshold", s.cluster_threshold},
+            // Read-only: derived from the transcription language, not settable.
+            // Reported so anything driving the API can see which value is in
+            // force. Rounded because widening the float would otherwise print
+            // 0.800000011920929. The settings panel keeps its own copy of the
+            // table (CLTHR_BY_LANG in web/app.js) so it can preview a language
+            // the user has picked but not yet saved.
+            {"cluster_threshold", std::round(s.cluster_threshold() * 100.0) / 100.0},
 
             {"llm_backend", s.llm_backend},
             {"llm_model_path", s.llm_model_path},
@@ -955,7 +962,10 @@ bool Server::start() {
 
         clamped_float("mic_gain", &s.mic_gain, 0.0f, 4.0f);
         clamped_float("system_gain", &s.system_gain, 0.0f, 4.0f);
-        clamped_float("cluster_threshold", &s.cluster_threshold, 0.05f, 0.95f);
+        // No "cluster_threshold" here: it follows the transcription language
+        // now, so there is nothing for a POST to set. A body still carrying one
+        // is ignored rather than refused -- an old page left open should not
+        // fail to save the rest of its settings.
         clamped_int("num_speakers", &s.num_speakers, 0, 20);
         // 0 is "size it from the model and the machine"; anything the user
         // types by hand starts where a chat template alone stops fitting.

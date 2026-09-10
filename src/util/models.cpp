@@ -193,10 +193,23 @@ ModelSpec segmentation_spec() {
 ModelSpec embedding_spec() {
     // Hosted on HuggingFace rather than the sherpa-onnx GitHub release: the
     // release assets move between tags, the HF path is stable.
-    return {"3dspeaker-eres2netv2",
+    //
+    // CAM++ rather than the ERes2NetV2 this used to fetch. Embedding extraction
+    // is about 90% of a diarization run -- 252s of the 278s a 17-minute Turkish
+    // meeting took here -- so the embedding model very nearly is the runtime.
+    // Measured with eval/, each model at its own tuned threshold:
+    //
+    //                          Turkish   English    time
+    //   ERes2NetV2 (71 MB)     26.50%     6.95%    285s / 897s
+    //   CAM++      (28 MB)     26.37%     8.98%     84s / 210s
+    //
+    // Turkish is a tie and CAM++ is 3.4x faster, which is the trade this app
+    // is for. The English column is the cost: CAM++ gives up two points of
+    // diarization error rate on conversational English. See eval/README.md.
+    return {"3dspeaker-campplus",
             "https://huggingface.co/csukuangfj/speaker-embedding-models/"
-            "resolve/main/3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common.onnx",
-            71'441'526ULL,
+            "resolve/main/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx",
+            28'281'138ULL,
             L("Speaker embedding model", "Konuşmacı ses izi modeli")};
 }
 

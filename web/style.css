@@ -86,7 +86,11 @@ body::after {
 .workspace { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr);
   gap: 18px; align-items: start; }
 .workspace .panel { margin-bottom: 0; }
-@media (max-width: 960px) { .workspace { grid-template-columns: 1fr; } }
+/* minmax(0,1fr), never a bare 1fr. A bare 1fr is minmax(auto,1fr), and that
+   auto floor is min-content: the track then refuses to go below the widest
+   thing inside it and the panel grows straight through the window instead of
+   wrapping. Every collapse rule in this file has to say it. */
+@media (max-width: 960px) { .workspace { grid-template-columns: minmax(0, 1fr); } }
 
 /* ---------- header ---------- */
 header {
@@ -310,12 +314,18 @@ input[type=checkbox]:disabled, input[type=radio]:disabled {
 .tab.on::after { transform: scaleX(1); }
 
 /* ---------- library ---------- */
+/* Paths are truncated at the front, because the end is the half that says
+   which one it is. direction:rtl is what moves the ellipsis there — and on its
+   own it also drags the leading slash of an absolute path to the far right, so
+   /home/user/Transcriptor renders as home/user/Transcriptor/. The text
+   sits in a <bdi dir="ltr"> to stop that: the box stays rtl and clips at the
+   front, the text inside is laid out ltr and keeps its slash. */
 .lib-dir { font-family: var(--mono); font-size: 11px; color: var(--muted);
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; direction: rtl; text-align: left; }
 .lib-grid { display: grid; grid-template-columns: 330px minmax(0, 1fr);
   gap: 20px; align-items: start; }
-@media (max-width: 900px) { .lib-grid { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .lib-grid { grid-template-columns: minmax(0, 1fr); } }
 
 .lib-list { display: flex; flex-direction: column; gap: 6px;
   max-height: 68vh; overflow-y: auto; padding-right: 4px; }
@@ -346,9 +356,13 @@ input[type=checkbox]:disabled, input[type=radio]:disabled {
 .lib-head-text { flex: 1 1 240px; min-width: 0; }
 .lib-title { font-family: var(--display); font-weight: 700; font-size: 19px;
   letter-spacing: -.01em; color: var(--ink); line-height: 1.2; }
+/* Same treatment as .lib-dir, and for a stronger reason: what gets cut off the
+   end of this one is the session id, the only part that differs between two
+   recordings. See the <bdi> note there. */
 .lib-path { display: block; font-family: var(--mono); font-size: 11px;
   color: var(--muted); margin-top: 4px; overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap; }
+  text-overflow: ellipsis; white-space: nowrap;
+  direction: rtl; text-align: left; }
 
 /* Where a re-run's output goes. Sits under the head, only while it is being
    asked, and reads as a question rather than a panel. */
@@ -475,7 +489,7 @@ input[type=checkbox]:disabled, input[type=radio]:disabled {
 
 .lib-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 20px; align-items: start; }
-@media (max-width: 1100px) { .lib-cols { grid-template-columns: 1fr; } }
+@media (max-width: 1100px) { .lib-cols { grid-template-columns: minmax(0, 1fr); } }
 .lib-cols .tx-head { margin-bottom: 12px; }
 /* A session saved before transcript.json existed only has the flat .txt. */
 .lib-raw { white-space: pre-wrap; color: var(--ink); font-size: 14px; }
@@ -564,6 +578,20 @@ input[type=checkbox]:disabled, input[type=radio]:disabled {
 .tx-body .ts[data-at]:hover { color: var(--rec); text-decoration: underline; }
 .tx-body .ts[data-at]:focus-visible { outline: 2px solid var(--vu);
   outline-offset: 2px; text-decoration: underline; }
+/* The line being spoken, while a saved recording plays. It borrows the
+   speaker's own colour where there is one, so following the audio and reading
+   who is talking stay the same piece of information rather than two competing
+   ones. Background only — no weight or size change, which would reflow the
+   column every time the highlight moved. */
+.tx-body .line.at {
+  background: color-mix(in srgb, var(--sc, var(--vu)) 14%, transparent);
+  border-left-color: var(--sc, var(--vu));
+  border-radius: 0 4px 4px 0;
+  transition: background .18s var(--ease);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tx-body .line.at { transition: none; }
+}
 .tx-body .txt { color: var(--ink); }
 .empty { color: var(--faint); font-style: italic; font-family: var(--mono); font-size: 13px; }
 
@@ -719,7 +747,7 @@ button.save:hover { background: var(--rec-2); border-color: var(--rec-2); }
 /* ---------- responsive ---------- */
 @media (max-width: 720px) {
   .brand .mark { font-size: 40px; }
-  .console { grid-template-columns: 1fr; }
+  .console { grid-template-columns: minmax(0, 1fr); }
   .rec-wrap { margin: 0 auto; }
 }
 @media (prefers-reduced-motion: reduce) {

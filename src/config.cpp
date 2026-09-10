@@ -70,7 +70,6 @@ nlohmann::json Settings::to_json() const {
         {"diar_segmentation_model", diar_segmentation_model},
         {"diar_embedding_model", diar_embedding_model},
         {"num_speakers", num_speakers},
-        {"cluster_threshold", cluster_threshold},
 
         {"llm_backend", llm_backend},
         {"llm_model_path", llm_model_path},
@@ -125,7 +124,8 @@ void Settings::from_json(const nlohmann::json& j) {
     get(j, "diar_segmentation_model", &diar_segmentation_model);
     get(j, "diar_embedding_model", &diar_embedding_model);
     get(j, "num_speakers", &num_speakers);
-    get(j, "cluster_threshold", &cluster_threshold);
+    // "cluster_threshold" is deliberately not read. Older files still carry the
+    // one this used to expose; it is ignored, and the next save drops it.
 
     get(j, "llm_backend", &llm_backend);
     get(j, "llm_model_path", &llm_model_path);
@@ -234,6 +234,26 @@ paths::fs::path Settings::whisper_model_file() const {
     return paths::models_dir() / ("ggml-" + whisper_model + ".bin");
 }
 
+float Settings::cluster_threshold() const {
+    // Derived, never stored. Where the cut between two speakers falls is a
+    // property of the embedding space *and* of the audio, so one constant
+    // cannot serve both languages -- which is what this used to be, a single
+    // 0.5 sitting in Settings for anyone to guess at. Swept with eval/ on the
+    // CAM++ model this ships; diarization error rate, so lower is better, with
+    // English measured on VoxConverse and Turkish on Common Voice:
+    //
+    //              0.50    0.65    0.80
+    //   English   11.2%    9.5%   13.2%
+    //   Turkish   48.7%   33.5%   26.4%
+    //
+    // Each language peaks a long way from the other, and 0.5 is well off both.
+    // With no language pinned there is nothing to choose from, so 0.70 splits
+    // them. Adding a language to the UI means adding a row here.
+    if (language == "tr") return 0.80f;
+    if (language == "en") return 0.65f;
+    return 0.70f;
+}
+
 paths::fs::path Settings::segmentation_model_file() const {
     if (!diar_segmentation_model.empty())
         return paths::expand_user(diar_segmentation_model);
@@ -243,7 +263,11 @@ paths::fs::path Settings::segmentation_model_file() const {
 paths::fs::path Settings::embedding_model_file() const {
     if (!diar_embedding_model.empty())
         return paths::expand_user(diar_embedding_model);
-    return paths::models_dir() / "diarize" / "speaker-embedding.onnx";
+    // Named after the model, not the role. The plain "speaker-embedding.onnx"
+    // this used to be meant that swapping models::embedding_spec() left every
+    // existing install running the old weights for ever: the file was there, so
+    // nothing ever downloaded the new one.
+    return paths::models_dir() / "diarize" / "speaker-embedding-campplus.onnx";
 }
 
 }  // namespace transcriptor

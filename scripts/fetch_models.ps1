@@ -43,8 +43,8 @@ Write-Host ""
 Write-Host "Konusmaci ayrimi:"
 Fetch "https://huggingface.co/csukuangfj/sherpa-onnx-pyannote-segmentation-3-0/resolve/main/model.onnx" `
       "$Dest\diarize\segmentation.onnx"
-Fetch "https://huggingface.co/csukuangfj/speaker-embedding-models/resolve/main/3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common.onnx" `
-      "$Dest\diarize\speaker-embedding.onnx"
+Fetch "https://huggingface.co/csukuangfj/speaker-embedding-models/resolve/main/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx" `
+      "$Dest\diarize\speaker-embedding-campplus.onnx"
 
 Write-Host ""
 Write-Host "Bitti. Ozetleyici modelini uygulamadan indirebilirsiniz:"

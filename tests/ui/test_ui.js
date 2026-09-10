@@ -432,6 +432,159 @@ async function run() {
           JSON.stringify(env.els.cancelBtn.title));
   }
 
+  // ----------------------------- following the transcript while it plays ----
+  // The line being spoken is lit as a saved recording runs, so the panel can be
+  // read and listened to at once. It is driven off the player's clock, not off
+  // a timer of its own, so scrubbing moves it as well as playing.
+  {
+    const env = createEnv(ROOT);
+    const doc = {diarized: false, lines: [
+      {speaker: null, text: 'first',  start: 0,    end: 5,    ts: '0:00'},
+      {speaker: null, text: 'second', start: 36.1, end: 40,   ts: '0:36'},
+      {speaker: null, text: 'third',  start: 74.9, end: 80.2, ts: '1:14'},
+    ]};
+    const el = env.peek("$('libTranscript')");
+    const audio = env.peek("$('libAudio')");
+    audio.setAttribute('src', '/api/library/audio?id=x');
+    audio.getAttribute = () => '/api/library/audio?id=x';
+    audio.paused = true;               // no chasing the line in these checks
+    env.app.renderTranscript(doc, el, true);
+
+    const lit = () => el.children.findIndex(l => l._cls.has('at'));
+    const at = (sec) => { audio.currentTime = sec; env.app.plPaint(); return lit(); };
+
+    check('nothing is lit before the recording starts moving', lit() === -1);
+    check('the opening line lights at 0:00', at(0) === 0, String(at(0)));
+    check('and stays lit through the line', at(3.4) === 0, String(at(3.4)));
+    check('a later moment lights the line that covers it',
+          at(37) === 1, String(at(37)));
+    check('scrubbing backwards moves it back', at(1) === 0, String(at(1)));
+    check('the last line lights too', at(75) === 2, String(at(75)));
+
+    // A gap shorter than the grace holds the previous line rather than
+    // blinking the highlight off between two turns that butt up together.
+    check('a moment just past a line still holds it', at(40.8) === 1,
+          String(at(40.8)));
+    // A real silence is longer than that, and does go dark.
+    check('a real silence clears it', at(60) === -1, String(at(60)));
+    check('and past the end it goes dark as well', at(200) === -1,
+          String(at(200)));
+
+    // A recording saved without its audio has nothing to follow, so the lines
+    // are never indexed and nothing is ever lit.
+    env.app.renderTranscript(doc, el, false);
+    audio.currentTime = 37;
+    env.app.plPaint();
+    check('a transcript with no audio is never lit', lit() === -1, String(lit()));
+
+    // The studio panel redraws on every poll. It must not wipe the index built
+    // for the recording open in the library tab.
+    env.app.renderTranscript(doc, el, true);
+    audio.currentTime = 37;
+    env.app.plPaint();
+    env.app.renderTranscript(doc, env.peek("$('transcript')"));
+    env.app.plPaint();
+    check('a studio redraw leaves the library highlight alone',
+          lit() === 1, String(lit()));
+
+    // Opening a session whose transcript is a plain .txt never reaches
+    // renderTranscript. The index has to be dropped anyway, or the highlight
+    // keeps chasing lines that are no longer on the page.
+    env.poke('libItem = {id: "x", audio: "audio.wav", transcript_text: "no stamps"}');
+    env.app.renderLibraryDetail();
+    audio.currentTime = 37;
+    env.app.plPaint();
+    check('a transcript with no timestamps drops the old index',
+          env.peek('plLines.length') === 0,
+          String(env.peek('plLines.length')));
+  }
+
+  // ------------------------------------------ Cancel asks before it acts ----
+  // One button gives up three different things, so the question has to name
+  // the one in front of it, and declining has to leave the run alone.
+  {
+    const env = createEnv(ROOT);
+    env.server.state.processing = true;
+    env.server.state.phase = 'transcribe';
+    await env.app.poll();
+
+    const pending = env.els.cancelBtn.onclick();
+    await env.settle();
+    check('a running job is asked about before it is stopped',
+          env.els.askTitle.textContent === 'ask.cancelJobTitle',
+          env.els.askTitle.textContent);
+    check('and the decline button offers to let it run',
+          env.els.askNo.textContent === 'ask.cancelJobNo',
+          env.els.askNo.textContent);
+    env.els.askNo.onclick();
+    await pending;
+    check('declining sends nothing at all',
+          env.server.cancels.length === 0,
+          JSON.stringify(env.server.cancels.length));
+
+    const accepted = env.els.cancelBtn.onclick();
+    await env.settle();
+    env.els.askYes.onclick();
+    await accepted;
+    check('accepting stops the run', env.server.cancels.length === 1);
+  }
+
+  // A take or a result on screen is a different loss, and says so.
+  {
+    const env = createEnv(ROOT);
+    env.server.state.processing = false;
+    env.server.state.phase = 'done';
+    env.server.state.has_result = true;
+    env.server.cancelReply = {ok: true};
+    await env.app.poll();
+
+    const pending = env.els.cancelBtn.onclick();
+    await env.settle();
+    check('a finished result is asked about as a discard',
+          env.els.askTitle.textContent === 'ask.cancelDiscardTitle',
+          env.els.askTitle.textContent);
+    env.els.askYes.onclick();
+    await pending;
+    check('and is discarded once agreed', env.server.cancels.length === 1);
+  }
+
+  // Nothing running, nothing held, just an error banner: asking there would
+  // train the answer out of people, so it goes straight through.
+  {
+    const env = createEnv(ROOT);
+    Object.assign(env.server.state, {
+      processing: false, recording: false, phase: 'error',
+      has_audio: false, has_result: false, has_summary: false,
+    });
+    env.server.cancelReply = {ok: true};
+    await env.app.poll();
+
+    await env.els.cancelBtn.onclick();
+    check('clearing an error asks nothing',
+          !env.els.askBg._cls.has('on') && env.server.cancels.length === 1,
+          JSON.stringify(env.server.cancels.length));
+  }
+
+  // The run can finish while the question is on screen. /api/cancel on a
+  // finished run discards its result rather than stopping anything, and
+  // agreeing to stop a job is not agreeing to throw the transcript away.
+  {
+    const env = createEnv(ROOT);
+    env.server.state.processing = true;
+    env.server.state.phase = 'transcribe';
+    await env.app.poll();
+
+    const pending = env.els.cancelBtn.onclick();
+    await env.settle();
+    env.server.state.processing = false;      // it finished while we deliberated
+    env.server.state.phase = 'done';
+    env.els.askYes.onclick();
+    await pending;
+    check('a run that finished while the question was up is left alone',
+          env.server.cancels.length === 0,
+          JSON.stringify(env.server.cancels.length));
+  }
+
   console.log(failures ? `\nui: ${failures} check(s) FAILED`
                        : '\nui: all checks passed');
   process.exit(failures ? 1 : 0);

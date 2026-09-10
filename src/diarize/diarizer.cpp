@@ -121,12 +121,16 @@ std::vector<Turn> Diarizer::diarize(const std::vector<float>& audio, int sampler
 
     const std::string seg = paths::to_utf8(settings_.segmentation_model_file());
     const std::string emb = paths::to_utf8(settings_.embedding_model_file());
+    // Derived from the transcription language, so it changes when that does --
+    // which is why the staleness check below compares it rather than assuming
+    // the clusterer built for the last run still applies.
+    const float threshold = settings_.cluster_threshold();
 
     // Rebuild when any model or clustering knob changed since last time.
     const bool stale = impl_->sd && (impl_->seg_path != seg ||
                                      impl_->emb_path != emb ||
                                      impl_->num_speakers != settings_.num_speakers ||
-                                     impl_->threshold != settings_.cluster_threshold);
+                                     impl_->threshold != threshold);
     if (stale) unload();
 
     if (!impl_->sd) {
@@ -157,10 +161,10 @@ std::vector<Turn> Diarizer::diarize(const std::vector<float>& audio, int sampler
         // -1 lets the distance threshold decide how many there are.
         if (settings_.num_speakers > 0) {
             config.clustering.num_clusters = settings_.num_speakers;
-            config.clustering.threshold    = settings_.cluster_threshold;
+            config.clustering.threshold    = threshold;
         } else {
             config.clustering.num_clusters = -1;
-            config.clustering.threshold    = settings_.cluster_threshold;
+            config.clustering.threshold    = threshold;
         }
 
         config.min_duration_on  = 0.3f;   // drop shorter blips
@@ -176,7 +180,7 @@ std::vector<Turn> Diarizer::diarize(const std::vector<float>& audio, int sampler
         impl_->seg_path     = seg;
         impl_->emb_path     = emb;
         impl_->num_speakers = settings_.num_speakers;
-        impl_->threshold    = settings_.cluster_threshold;
+        impl_->threshold    = threshold;
     }
 
     const int32_t expected_rate =

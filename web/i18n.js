@@ -167,6 +167,8 @@ const STR = {
   'toast.cancelled':    {en: 'Cancelled', tr: 'İptal edildi'},
   'toast.jobStopped':   {en: 'Stopping — nothing was discarded',
                          tr: 'Durduruluyor — hiçbir şey silinmedi'},
+  'toast.jobAlreadyDone': {en: 'The run finished while you were deciding — nothing was discarded',
+                           tr: 'Siz karar verirken işlem bitti — hiçbir şey silinmedi'},
   'btn.cancelJob':      {en: 'Stop the run. The audio and transcript are kept.',
                          tr: 'Çalışmayı durdur. Ses ve metin korunur.'},
   'toast.uploading':    {en: 'Uploading: ', tr: 'Yükleniyor: '},
@@ -216,6 +218,24 @@ const STR = {
   'ask.discardTitle': {en: 'Discard the recording?', tr: 'Kayıt silinsin mi?'},
   'ask.discard':      {en: 'Discard', tr: 'Sil'},
   'ask.deleteTitle':  {en: 'Delete this recording?', tr: 'Bu kayıt silinsin mi?'},
+
+  // Cancel asks before it acts, and what it is about to give up depends on
+  // what is running. The decline button says what carries on, never "Cancel" —
+  // on a question about cancelling, that word answers nothing.
+  'ask.cancelJobTitle':     {en: 'Stop the run?', tr: 'İşlem durdurulsun mu?'},
+  'ask.cancelJob':          {en: 'The run stops where it is. The recording is kept, and so is any transcript it has already finished.',
+                             tr: 'İşlem olduğu yerde durur. Kayıt ve o ana kadar tamamlanmış metin korunur.'},
+  'ask.cancelJobYes':       {en: 'Stop the run', tr: 'İşlemi durdur'},
+  'ask.cancelJobNo':        {en: 'Let it run', tr: 'Devam etsin'},
+
+  'ask.cancelRec':          {en: 'Recording stops and the take is thrown away. It has not been saved anywhere yet.',
+                             tr: 'Kayıt durur ve alınan ses atılır. Henüz hiçbir yere kaydedilmedi.'},
+  'ask.cancelRecNo':        {en: 'Keep recording', tr: 'Kayda devam et'},
+
+  'ask.cancelDiscardTitle': {en: 'Discard what is on screen?', tr: 'Ekrandakiler silinsin mi?'},
+  'ask.cancelDiscard':      {en: 'The take, the transcript and the summary on screen are cleared. Files already written to the output folder stay where they are.',
+                             tr: 'Ekrandaki kayıt, metin ve özet temizlenir. Çıktı klasörüne yazılmış dosyalar yerinde kalır.'},
+  'ask.cancelDiscardNo':    {en: 'Keep it', tr: 'Kalsın'},
 
   'set.cancel':     {en: 'Cancel', tr: 'İptal'},
   'set.save':       {en: 'Save', tr: 'Kaydet'},
@@ -320,8 +340,8 @@ const STR = {
                      tr: 'Konuşmacı ayrımı · sherpa-onnx'},
   'set.nspk':       {en: 'Number of speakers (0 = detect automatically)',
                      tr: 'Konuşmacı sayısı (0 = otomatik bul)'},
-  'set.clthr':      {en: 'Clustering threshold (0.05–0.95) — a lower value yields more speakers',
-                     tr: 'Ayrım eşiği (0.05–0.95) — düşük değer daha çok konuşmacı üretir'},
+  'set.clthr':      {en: 'Clustering threshold: {v}, from the transcription language. No longer a setting — the best value differs by language, and one number served neither.',
+                     tr: 'Ayrım eşiği: {v}, konuşma dilinden geliyor. Artık bir ayar değil — en iyi değer dile göre değişiyor, tek bir sayı ikisine de uymuyordu.'},
   'set.segModel':   {en: 'Segmentation model (empty = download automatically)',
                      tr: 'Bölütleme modeli (boş = otomatik indir)'},
   'set.embModel':   {en: 'Speaker-embedding model (empty = download automatically)',

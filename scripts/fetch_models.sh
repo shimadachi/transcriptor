@@ -45,8 +45,8 @@ echo
 echo "Konuşmacı ayrımı:"
 fetch "https://huggingface.co/csukuangfj/sherpa-onnx-pyannote-segmentation-3-0/resolve/main/model.onnx" \
       "$DEST/diarize/segmentation.onnx"
-fetch "https://huggingface.co/csukuangfj/speaker-embedding-models/resolve/main/3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common.onnx" \
-      "$DEST/diarize/speaker-embedding.onnx"
+fetch "https://huggingface.co/csukuangfj/speaker-embedding-models/resolve/main/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx" \
+      "$DEST/diarize/speaker-embedding-campplus.onnx"
 
 echo
 echo "Bitti. Özetleyici modelini uygulamadan indirebilirsiniz:"

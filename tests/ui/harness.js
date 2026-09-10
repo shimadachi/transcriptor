@@ -88,6 +88,11 @@ function createEnv(root) {
     uploadFails: false,
     uploadGate: null,
     libRuns: [],           // one entry per POST /api/library/{transcribe,summarize}
+    // One entry per POST /api/cancel, each carrying the state the server was in
+    // when it arrived — Cancel is gated behind a question now, and what matters
+    // is whether the request was sent at all.
+    cancels: [],
+    cancelReply: {stopped: 'job'},
   };
 
   const media = {stopped: 0, ctxClosed: 0, failAt: null, recorders: []};
@@ -116,6 +121,10 @@ function createEnv(root) {
         body: JSON.parse((opts && opts.body) || '{}'),
       });
       return {json: async () => ({ok: true})};
+    }
+    if (url === '/api/cancel') {
+      server.cancels.push({state: JSON.parse(JSON.stringify(server.state))});
+      return {json: async () => server.cancelReply};
     }
     if (url === '/api/sources') return {json: async () => ({sources: []})};
     if (url === '/api/settings') return {json: async () => ({templates: [], llm_catalog: []})};

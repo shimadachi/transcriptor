@@ -28,6 +28,14 @@ transcriptor_test(test_reasoning
     "${APP_SRC}/llm/reasoning.cpp")
 add_test(NAME reasoning COMMAND test_reasoning)
 
+# -- diarization clustering threshold -----------------------------------------
+transcriptor_test(test_diar_threshold
+    "${TESTS_SRC}/test_diar_threshold.cpp"
+    "${APP_SRC}/config.cpp"
+    "${APP_SRC}/util/paths.cpp")
+target_link_libraries(test_diar_threshold PRIVATE nlohmann_json::nlohmann_json)
+add_test(NAME diar_threshold COMMAND test_diar_threshold)
+
 # -- library versions ---------------------------------------------------------
 transcriptor_test(test_library
     "${TESTS_SRC}/test_library.cpp"
@@ -88,6 +96,12 @@ if(TRANSCRIPTOR_NODE)
              COMMAND "${TRANSCRIPTOR_NODE}" "${TESTS_SRC}/ui/test_ui.js"
                      "${CMAKE_SOURCE_DIR}")
     set_tests_properties(ui PROPERTIES TIMEOUT 60)
+
+    # Constants the browser and the C++ each hold a copy of.
+    add_test(NAME ui_tables
+             COMMAND "${TRANSCRIPTOR_NODE}" "${TESTS_SRC}/ui/test_tables.js"
+                     "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(ui_tables PROPERTIES TIMEOUT 60)
 else()
     message(STATUS "node not found -- the UI regression tests will not run")
 endif()

@@ -144,7 +144,12 @@
     <section class="panel">
       <div class="tx-head">
         <span class="label" data-i18n="lib.label">Library</span>
-        <code id="libDir" class="lib-dir"></code>
+        <!-- The path lives inside a <bdi>, not directly in the <code>. The
+             <code> is direction:rtl so the ellipsis lands at the front, where
+             a truncated path can still be identified; the <bdi dir="ltr">
+             isolates the text from that, so the leading slash stays a leading
+             slash instead of being dragged to the far end. -->
+        <code class="lib-dir"><bdi id="libDir" dir="ltr"></bdi></code>
         <button id="libRefresh" class="mini" data-i18n-title="lib.refresh">⟳</button>
       </div>
 
@@ -162,7 +167,7 @@
             <div class="lib-head">
               <div class="lib-head-text">
                 <div id="libTitle" class="lib-title"></div>
-                <code id="libPath" class="lib-path"></code>
+                <code class="lib-path"><bdi id="libPath" dir="ltr"></bdi></code>
               </div>
               <button id="libRetx" class="mini" data-i18n-title="lib.retxTitle" data-i18n="lib.retx">↻ Transcribe</button>
               <button id="libResum" class="mini" data-i18n-title="lib.resumTitle" data-i18n="lib.resum">↻ Summarize</button>
@@ -431,8 +436,7 @@
           <div class="t" data-i18n="set.diarGrp">Speaker separation · sherpa-onnx</div>
           <div class="field"><label data-i18n="set.nspk">Number of speakers (0 = detect automatically)</label>
             <input type="number" id="s_nspk" min="0" max="20" step="1"></div>
-          <div class="field"><label data-i18n="set.clthr">Clustering threshold (0.05–0.95) — a lower value yields more speakers</label>
-            <input type="number" id="s_clthr" min="0.05" max="0.95" step="0.05"></div>
+          <div class="field"><div id="clthrNote" class="dlnote"></div></div>
           <div class="field"><label data-i18n="set.segModel">Segmentation model (empty = download automatically)</label>
             <input type="text" id="s_segmodel" placeholder="…/segmentation.onnx"></div>
           <div class="field"><label data-i18n="set.embModel">Speaker-embedding model (empty = download automatically)</label>

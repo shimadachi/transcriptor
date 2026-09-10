@@ -192,7 +192,7 @@ kullanılır — Windows 10 1803+, macOS ve Linux'ta hazır gelir.
 |---|---|---|
 | Whisper `tiny` … `large-v3` | 74 MB – 2.9 GB | Ayarlar'dan seçilip indirilir |
 | pyannote segmentation-3.0 (ONNX) | ~6 MB | İlk konuşmacı ayrımında |
-| 3D-Speaker ERes2NetV2 ses izi | ~69 MB | İlk konuşmacı ayrımında |
+| 3D-Speaker CAM++ ses izi | ~27 MB | İlk konuşmacı ayrımında |
 
 Konuşma modelleri, küçükten iyiye: `tiny` ve `base` sesin geldiğini denemek
 için; `small` gerçek bir konuşmayı verebileceğiniz en hafif model; `medium`

@@ -538,6 +538,12 @@ function transcriptHasText(res) {
 // and does nothing is worse than one that never offered.
 function renderTranscript(res, el, seekable) {
   el = el || $('transcript');
+  // Only the library panel is followed along with the audio, so only its lines
+  // go into the index. Keyed on the element rather than on `seekable`, because
+  // the studio panel redraws on every poll and would otherwise wipe an index
+  // built for the recording open in the other tab.
+  const indexed = (el === $('libTranscript'));
+  if (indexed) plIndexReset();
   if (!res || !res.lines || !res.lines.length) {
     el.innerHTML = '<span class="empty">' + esc(t('tx.none')) + '</span>'; return;
   }
@@ -545,6 +551,11 @@ function renderTranscript(res, el, seekable) {
   const idx = {};
   res.lines.forEach(l => {
     const div = document.createElement('div'); div.className = 'line';
+    if (indexed && seekable && typeof l.start === 'number') {
+      plLines.push({start: l.start,
+                    end: typeof l.end === 'number' ? l.end : l.start,
+                    el: div});
+    }
     if (l.ts) {
       // Named `ts`, not `t`: `t` is the translation lookup.
       const ts = document.createElement('span');
@@ -605,7 +616,43 @@ $('pauseBtn').onclick = async () => {
   const paused = $('pauseBtn').classList.contains('on');
   await post(paused ? '/api/record/resume' : '/api/record/pause');
 };
+// Cancel is three actions wearing one button, and each gives up something
+// different. A single "are you sure?" would be worth nothing here, so the
+// question names what this particular press is about to throw away.
+const CANCEL_ASK = {
+  job:     {title: 'ask.cancelJobTitle',     body: 'ask.cancelJob',
+            yes:   'ask.cancelJobYes',       no:   'ask.cancelJobNo'},
+  rec:     {title: 'ask.discardTitle',       body: 'ask.cancelRec',
+            yes:   'ask.discard',            no:   'ask.cancelRecNo'},
+  discard: {title: 'ask.cancelDiscardTitle', body: 'ask.cancelDiscard',
+            yes:   'ask.discard',            no:   'ask.cancelDiscardNo'},
+};
+
 $('cancelBtn').onclick = async () => {
+  // Which of the three this is decides the question, so read the state now
+  // rather than trusting whatever the last poll left on the screen.
+  let s = {};
+  try { s = await api('/api/state'); } catch { /* ask anyway, below */ }
+  const rec = browserRec || s.recording;
+  const kind = rec ? 'rec' : (s.processing ? 'job' : 'discard');
+
+  // An error banner over an empty studio is the one press with nothing to
+  // lose. Asking there would train the answer out of people.
+  if (rec || s.processing || s.has_audio || s.has_result || s.has_summary) {
+    const q = CANCEL_ASK[kind];
+    const go = await ask({title: t(q.title), body: t(q.body),
+                          yes:   t(q.yes),   no:   t(q.no)});
+    if (!go) return;
+    // A run can finish while the question is on screen, and /api/cancel on a
+    // finished run discards its result instead of stopping anything. Agreeing
+    // to stop a job is not agreeing to throw away the transcript it produced.
+    if (kind === 'job') {
+      let now = {};
+      try { now = await api('/api/state'); } catch { return; }
+      if (!now.processing) { toast(t('toast.jobAlreadyDone')); poll(); return; }
+    }
+  }
+
   if (browserRec) cancelBrowserCapture();   // stop + skip upload
   const r = await post('/api/cancel');
   if (r && r.error) { toast(r.error); return; }
@@ -1093,6 +1140,13 @@ $('libTranscript').addEventListener('keydown', (e) => {
   e.preventDefault();
   seekLibraryTo(at);
 });
+// Reading ahead of the playhead has to be possible. These three are the
+// reader's own scrolling and nothing else -- listening for 'scroll' instead
+// would also catch plFollow's own, and the panel would freeze itself.
+['wheel', 'touchmove', 'pointerdown'].forEach(ev => {
+  $('libTranscript').addEventListener(ev, () => { plScrolledAt = Date.now(); },
+                                      {passive: true});
+});
 
 $('dlLlm').onclick     = () => startDownload('llm');
 $('dlWhisper').onclick = () => startDownload('whisper');
@@ -1104,6 +1158,20 @@ $('rescanGguf').onclick = async () => {
   fillGgufList(s.gguf_models, $('s_llmpath').value);
   toast((s.gguf_models || []).length + t('toast.modelsFound'));
 };
+
+// The clustering threshold is not a setting any more: it is derived from the
+// transcription language by Settings::cluster_threshold in src/config.cpp. The
+// panel still says which value that is, and follows the language select live
+// rather than waiting for a save and a reopen.
+const CLTHR_BY_LANG = {tr: 0.80, en: 0.65, '': 0.70};
+
+function showClthrNote() {
+  const note = $('clthrNote');
+  if (!note) return;
+  const value = CLTHR_BY_LANG[$('s_language').value];
+  note.textContent = t('set.clthr')
+    .replace('{v}', (value === undefined ? CLTHR_BY_LANG[''] : value).toFixed(2));
+}
 
 async function openSettings() {
   const s = await api('/api/settings');
@@ -1128,7 +1196,7 @@ async function openSettings() {
   APP_VERSION = s.version || APP_VERSION;
   APP_REPO = s.repo || APP_REPO;
   $('s_nspk').value = s.num_speakers;
-  $('s_clthr').value = s.cluster_threshold;
+  showClthrNote();
   $('s_segmodel').value = s.diar_segmentation_model || '';
   $('s_embmodel').value = s.diar_embedding_model || '';
 
@@ -1173,6 +1241,9 @@ async function openSettings() {
   $('s_uilang').value = s.ui_language || LANG;
   ['s_device','s_model','s_language','s_llmmodel','s_sumlang','s_llmbackend','s_llmdl',
    's_uilang','s_theme'].forEach(refreshSelect);
+  // Assigned, not added: openSettings() runs on every open, and addEventListener
+  // would stack another copy of the handler each time.
+  $('s_language').onchange = showClthrNote;
   showSetTab('general');
   $('modalBg').classList.add('on');
 }
@@ -1212,6 +1283,7 @@ function setLang(lang, persist) {
 // Re-render the parts of the UI that JS owns rather than the markup.
 window.afterLangChange = () => {
   loadSources(); initTpl(); renderLibraryList(); renderLibraryDetail();
+  showClthrNote();   // written by JS, so the i18n sweep does not reach it
 };
 
 // ---- tabs (studio / library) ----
@@ -1307,7 +1379,6 @@ $('saveSettings').onclick = async () => {
 
     enable_diarization: $('s_diar').checked,
     num_speakers: parseInt($('s_nspk').value, 10) || 0,
-    cluster_threshold: parseFloat($('s_clthr').value),
     diar_segmentation_model: $('s_segmodel').value,
     diar_embedding_model: $('s_embmodel').value,
 
@@ -1673,6 +1744,8 @@ async function loadLibrary() {
   try { d = await api('/api/library'); } catch (e) { d = {sessions: []}; }
   libSessions = d.sessions || [];
   $('libDir').textContent = d.output_dir || '';
+  // Truncated in the middle of a path, so the whole of it has to be reachable.
+  $('libDir').title = d.output_dir || '';
   // A recording deleted outside the app leaves the detail pane pointing at
   // nothing; drop the selection rather than showing a stale one.
   if (libCurrent && !libSessions.some(x => x.id === libCurrent)) {
@@ -1743,6 +1816,8 @@ function renderLibraryDetail() {
   const s = libSessions.find(x => x.id === d.id);
   $('libTitle').textContent = s ? libDate(s) : d.id;
   $('libPath').textContent = d.path || '';
+  // The element truncates, so the whole path has to be reachable somehow.
+  $('libPath').title = d.path || '';
 
   // The version pickers appear only once there is a choice: one transcript and
   // one summary is the normal state, and an empty dropdown beside each panel
@@ -1774,6 +1849,11 @@ function renderLibraryDetail() {
   // transcript.json keeps the speakers and timestamps, so it renders exactly
   // like the live panel; the .txt is the fallback for older sessions.
   const tx = $('libTranscript');
+  // Every branch below replaces the panel's contents, and only the first one
+  // reaches renderTranscript. Without this, opening a session whose transcript
+  // is a plain .txt would leave the previous recording's lines in the index,
+  // pointing at elements that are no longer on the page.
+  plIndexReset();
   if (d.transcript && d.transcript.lines && d.transcript.lines.length) {
     // Seekable only when this recording actually kept its audio — a session
     // saved with Save Audio off has a transcript and nothing to play.
@@ -1787,6 +1867,11 @@ function renderLibraryDetail() {
   } else {
     tx.innerHTML = '<span class="empty">' + esc(t('lib.noTx')) + '</span>';
   }
+
+  // plPaint() ran above, before the lines existed. Light the right one now that
+  // they do, so opening a recording part-way through lands on the moment it is
+  // already at rather than waiting for the next tick of the clock.
+  plHighlight();
 
   renderSummary(d.summary, $('libSummary'), t('lib.noSum'));
 }
@@ -1826,6 +1911,66 @@ function plPaintBars(fraction) {
   plLit = lit;
 }
 
+// ---- following the transcript while it plays ----
+// The line being spoken is lit as the recording runs, so a saved session can be
+// read and listened to at the same time. Built from the same start/end the
+// clickable timestamps use, so the highlight and a click on a stamp always
+// agree about which line a moment belongs to.
+let plLines = [];      // [{start, end, el}], in order, library panel only
+let plLineLit = null;      // the element currently lit, so it can be un-lit
+let plScrolledAt = 0;  // when the reader last scrolled by hand
+
+// Seconds past a line's end before the highlight goes dark. Turns usually butt
+// up against each other, and blinking the highlight off in the fraction of a
+// second between them would be worse than holding it; a real silence is longer
+// than this and does clear it.
+const PL_GAP_GRACE = 1.5;
+
+function plIndexReset() {
+  plLines = [];
+  plLineLit = null;
+}
+
+// The last line that has started by `sec`, or null in a silence.
+function plLineAt(sec) {
+  let lo = 0, hi = plLines.length - 1, found = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (plLines[mid].start <= sec) { found = mid; lo = mid + 1; }
+    else hi = mid - 1;
+  }
+  if (found < 0) return null;
+  return sec <= plLines[found].end + PL_GAP_GRACE ? plLines[found] : null;
+}
+
+// Bring the lit line back into view, but never fight someone who is reading
+// ahead: a scroll of their own buys a few seconds of being left alone.
+function plFollow(el) {
+  if (Date.now() - plScrolledAt < 4000) return;
+  const box = $('libTranscript');
+  if (!box || !box.getBoundingClientRect || !el.getBoundingClientRect) return;
+  const b = box.getBoundingClientRect(), r = el.getBoundingClientRect();
+  if (!b.height) return;
+  if (r.top >= b.top && r.bottom <= b.bottom) return;   // already on screen
+  box.scrollTop += (r.top - b.top) - (b.height - r.height) / 2;
+}
+
+function plHighlight() {
+  const a = $('libAudio');
+  const line = (plLines.length && a.getAttribute('src'))
+    ? plLineAt(a.currentTime || 0) : null;
+  const next = line ? line.el : null;
+  if (next === plLineLit) return;
+  if (plLineLit && plLineLit.classList) plLineLit.classList.remove('at');
+  plLineLit = next;
+  if (!plLineLit || !plLineLit.classList) return;
+  plLineLit.classList.add('at');
+  // Only chase the line while it is actually playing. Scrubbing or seeking
+  // moves the highlight too, and yanking the panel around under a stationary
+  // cursor is not helpful.
+  if (!a.paused) plFollow(plLineLit);
+}
+
 function plPaint() {
   const a = $('libAudio');
   const dur = a.duration, cur = a.currentTime || 0;
@@ -1844,6 +1989,8 @@ function plPaint() {
   track.setAttribute('aria-valuemax', known ? Math.floor(dur) : 0);
   track.setAttribute('aria-valuenow', Math.floor(cur));
   track.setAttribute('aria-valuetext', plClock(cur));
+
+  plHighlight();
 }
 
 function plSeekAt(clientX) {
