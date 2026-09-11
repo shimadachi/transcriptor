@@ -1,8 +1,17 @@
-# Cuts a GitHub Release from a version tag: builds every preset through the
-# same _build.yml the per-target workflows use, then attaches the packages.
+# Cuts a GitHub Release from a version tag: opens the release as a draft,
+# builds every preset through the same _build.yml the per-target workflows use,
+# and each build attaches its own package as it finishes. The last job takes
+# the draft live.
 #
 # Tag the release commit `X.Y.Z` (matching project(VERSION) in CMakeLists.txt)
 # and push the tag; everything below follows from that.
+#
+# The packages used to travel as artifacts, from the builds to a job that
+# downloaded them and attached them here. Eight of them are about 1.2 GB, the
+# two CUDA ones being 1.1 GB of that, against an artifact allowance of 500 MB
+# on a private repo -- so a release spent more than twice the whole allowance
+# on files it was about to hand to the Release anyway. Release assets are not
+# counted as Actions storage, so attaching them directly costs nothing.
 name: release
 
 on:
@@ -11,78 +20,19 @@ on:
   # Re-run a release by dispatching this workflow with a tag selected as the ref.
   workflow_dispatch:
 
-# gh release create writes to the repo; nothing here needs more than that.
+# gh release create/upload/edit all write to the repo; nothing here needs more
+# than that. Set here rather than per job because the called workflow takes its
+# permissions from this one, and that is where the packages are attached.
 permissions:
   contents: write
 
 jobs:
-  linux:
-    uses: ./.github/workflows/_build.yml
-    with:
-      preset: linux
-      os: ubuntu-latest
-
-  linux-cuda:
-    uses: ./.github/workflows/_build.yml
-    with:
-      preset: linux-cuda
-      os: ubuntu-latest
-      cuda: true
-
-  linux-vulkan:
-    uses: ./.github/workflows/_build.yml
-    with:
-      preset: linux-vulkan
-      os: ubuntu-latest
-      vulkan: true
-
-  mac-arm64:
-    uses: ./.github/workflows/_build.yml
-    with:
-      preset: mac-arm64
-      os: macos-14
-
-  mac-x64:
-    uses: ./.github/workflows/_build.yml
-    with:
-      preset: mac-x64
-      os: macos-15-intel
-
-  win-msvc:
-    uses: ./.github/workflows/_build.yml
-    with:
-      preset: win-msvc
-      os: windows-2022
-
-  win-cuda:
-    uses: ./.github/workflows/_build.yml
-    with:
-      preset: win-cuda
-      os: windows-2022
-      cuda: true
-
-  win-vulkan:
-    uses: ./.github/workflows/_build.yml
-    with:
-      preset: win-vulkan
-      os: windows-2022
-      vulkan: true
-
-  release:
-    name: publish
-    # Every target has to land before the release exists, so a half-built
-    # release is never published.
-    needs:
-      - linux
-      - linux-cuda
-      - linux-vulkan
-      - mac-arm64
-      - mac-x64
-      - win-msvc
-      - win-cuda
-      - win-vulkan
+  # Opening the draft before anything is built gives the builds something to
+  # attach to, and means a release that fails half way is visibly a draft
+  # rather than a published release missing three platforms.
+  draft:
+    name: draft
     runs-on: ubuntu-latest
-
     steps:
       # A dispatch can be pointed at a branch, where there is no tag to release.
       - name: Require a tag
@@ -94,17 +44,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0   # the notes below log against the previous tag
-
-      # Package names carry os/arch/backend (see cmake/package.cmake), so the
-      # eight uploads flatten into one directory without colliding.
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          pattern: transcriptor-*
-          merge-multiple: true
-
-      - name: List packages
-        run: ls -lh dist
 
       # Nothing here lands through a pull request, so --generate-notes has no
       # titles to list and prints the compare link alone. The commit subjects
@@ -129,11 +68,115 @@ jobs:
 
           cat notes.md
 
-      - name: Publish release
+      # Idempotent on purpose: a release that failed part way through is
+      # re-run against the same tag, and the draft it already opened is the
+      # one its packages are attached to.
+      - name: Open the draft
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" dist/* \
-            --title "Transcriptor ${{ github.ref_name }}" \
-            --notes-file notes.md \
-            --verify-tag
+          tag="${{ github.ref_name }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; reusing it."
+            gh release edit "$tag" --notes-file notes.md
+          else
+            gh release create "$tag" --draft --verify-tag \
+              --title "Transcriptor $tag" --notes-file notes.md
+          fi
+
+  linux:
+    needs: draft
+    uses: ./.github/workflows/_build.yml
+    with:
+      preset: linux
+      os: ubuntu-latest
+      release_tag: ${{ github.ref_name }}
+
+  linux-cuda:
+    needs: draft
+    uses: ./.github/workflows/_build.yml
+    with:
+      preset: linux-cuda
+      os: ubuntu-latest
+      cuda: true
+      release_tag: ${{ github.ref_name }}
+
+  linux-vulkan:
+    needs: draft
+    uses: ./.github/workflows/_build.yml
+    with:
+      preset: linux-vulkan
+      os: ubuntu-latest
+      vulkan: true
+      release_tag: ${{ github.ref_name }}
+
+  mac-arm64:
+    needs: draft
+    uses: ./.github/workflows/_build.yml
+    with:
+      preset: mac-arm64
+      os: macos-14
+      release_tag: ${{ github.ref_name }}
+
+  mac-x64:
+    needs: draft
+    uses: ./.github/workflows/_build.yml
+    with:
+      preset: mac-x64
+      os: macos-15-intel
+      release_tag: ${{ github.ref_name }}
+
+  win-msvc:
+    needs: draft
+    uses: ./.github/workflows/_build.yml
+    with:
+      preset: win-msvc
+      os: windows-2022
+      release_tag: ${{ github.ref_name }}
+
+  win-cuda:
+    needs: draft
+    uses: ./.github/workflows/_build.yml
+    with:
+      preset: win-cuda
+      os: windows-2022
+      cuda: true
+      release_tag: ${{ github.ref_name }}
+
+  win-vulkan:
+    needs: draft
+    uses: ./.github/workflows/_build.yml
+    with:
+      preset: win-vulkan
+      os: windows-2022
+      vulkan: true
+      release_tag: ${{ github.ref_name }}
+
+  publish:
+    name: publish
+    # Every target has to land before the release goes live, so a half-built
+    # release is never published.
+    needs:
+      - linux
+      - linux-cuda
+      - linux-vulkan
+      - mac-arm64
+      - mac-x64
+      - win-msvc
+      - win-cuda
+      - win-vulkan
+    runs-on: ubuntu-latest
+
+    steps:
+      # Package names carry os/arch/backend (see cmake/package.cmake), so the
+      # eight uploads sit together without colliding. Listed before the draft
+      # goes live so the log says what was published.
+      - name: Take the draft live
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="${{ github.ref_name }}"
+          gh release view "$tag" --json assets \
+            --jq '.assets[] | "\(.name)  \(.size)"'
+          gh release edit "$tag" --draft=false

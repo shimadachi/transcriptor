@@ -17,6 +17,13 @@ on:
       vulkan:
         default: false
         type: boolean
+      # Set by release.yml to the tag being cut. When it is set the package
+      # goes straight onto the draft Release and never becomes an artifact:
+      # release assets are storage of a different kind, and a release's worth
+      # of packages is more than twice the whole artifact allowance.
+      release_tag:
+        default: ''
+        type: string
 
 jobs:
   build:
@@ -209,15 +216,37 @@ jobs:
         working-directory: build/${{ inputs.preset }}
         run: cpack
 
-      # The repo keeps artifacts for 90 days by default, which is how eight
-      # presets at ~1.2 GB a run -- the two CUDA packages are 1.1 GB of that --
-      # came to hold 25 GB against a 500 MB allowance. A tag's package is
-      # downloaded by release.yml minutes later and attached to the Release,
-      # which is storage of a different kind and not counted here, so the
-      # artifact itself has nothing left to do once that job has run. Everything
-      # else is someone wanting the build behind a commit, and a week is longer
-      # than that interest lasts.
+      # A release package goes onto the draft Release the moment it is built,
+      # rather than travelling there as an artifact. The old route uploaded
+      # eight packages -- ~1.2 GB, and 1.1 GB of that is the two CUDA ones --
+      # into a 500 MB artifact allowance, only for release.yml to download them
+      # again minutes later and attach them here anyway.
+      #
+      # --clobber so a re-run of a half-finished release replaces its own
+      # assets instead of colliding with them. nullglob because only one of the
+      # three patterns matches on any given platform, and an unmatched glob
+      # would otherwise be handed to gh as a literal filename.
+      - name: Attach to the release
+        if: inputs.release_tag != ''
+        shell: bash
+        working-directory: build/${{ inputs.preset }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          files=(*.zip *.dmg *.tar.gz)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::cpack produced no package for ${{ inputs.preset }}"
+            exit 1
+          fi
+          printf 'attaching: %s\n' "${files[@]}"
+          gh release upload "${{ inputs.release_tag }}" "${files[@]}" --clobber
+
+      # Every other run is someone wanting the build behind a commit, and a
+      # week is longer than that interest lasts. The repo default is 90 days,
+      # which is how this came to hold 25 GB against that same allowance.
       - uses: actions/upload-artifact@v4
+        if: inputs.release_tag == ''
         with:
           name: transcriptor-${{ inputs.preset }}
           path: |
@@ -225,4 +254,4 @@ jobs:
             build/${{ inputs.preset }}/*.dmg
             build/${{ inputs.preset }}/*.tar.gz
           if-no-files-found: error
-          retention-days: ${{ github.ref_type == 'tag' && 1 || 7 }}
+          retention-days: 7
