@@ -180,13 +180,15 @@ Run the binary and a window opens. From a console:
 ## Models
 
 No model is bundled. The speech model is chosen and downloaded by hand in
-Settings → General — there is no default, and nothing is fetched during a
-transcription. The rest arrive the first time they are needed. Downloads go
-through `curl`, which ships with Windows 10 1803+, macOS, and Linux:
+Settings → General — there is no default, and no speech model is ever fetched
+during a transcription. The rest arrive the first time they are needed.
+Downloads go through `curl`, which ships with Windows 10 1803+, macOS, and
+Linux:
 
 | Model | Size | When |
 |---|---|---|
 | Whisper `tiny` … `large-v3` | 74 MB – 2.9 GB | Chosen and downloaded in Settings |
+| Silero VAD v5.1.2 (GGML) | ~0.9 MB | With the speech model, or on first transcription |
 | pyannote segmentation-3.0 (ONNX) | ~6 MB | First speaker separation |
 | 3D-Speaker CAM++ embedding | ~27 MB | First speaker separation |
 
@@ -195,6 +197,17 @@ audio arrives; `small` is the lightest one worth putting a real conversation
 through; `medium` is clearly better on accents and crosstalk; `large-v3-turbo`
 is the recommended default — close to `large-v3` at a fraction of the time and
 half the size; `large-v3` is the most accurate and the slowest.
+
+The voice detector is not a choice, which is why it is not in Settings. Whisper
+hallucinates over silence — it was trained on scraped subtitles, and a great
+many of those end with a translator credit laid over a silent end card, so
+silent audio makes it reach for one. Turkish recordings get "Altyazı M.K." or a
+broadcaster's audio-description disclaimer. It is not a confidence problem the
+decoder's own thresholds can catch: the phrases are memorised and decode as
+confidently as real speech, and a hallucination can fill a whole 30-second
+window, taking the speech in it down as well. Running the detector first means
+the decoder only ever sees speech. A transcription still runs without it, the
+old way, when the file is missing.
 
 Location: `%APPDATA%\Transcriptor\models` (Windows),
 `~/Library/Application Support/Transcriptor/models` (macOS),

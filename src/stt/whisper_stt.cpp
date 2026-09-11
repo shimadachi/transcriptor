@@ -1,15 +1,13 @@
 #include "stt/whisper_stt.h"
+#include "stt/credits.h"
 #include "util/cpu.h"
 #include "util/lang.h"
 
 #include <algorithm>
-#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <stdexcept>
 #include <thread>
-#include <unordered_map>
-#include <unordered_set>
 
 #include <whisper.h>
 
@@ -27,115 +25,45 @@ std::string trim(const std::string& s) {
     return s.substr(b, e - b + 1);
 }
 
-// -- subtitle-credit hallucinations ---------------------------------------
+// -- hallucination over silence -------------------------------------------
 //
 // Whisper was trained largely on video paired with scraped subtitles, and a
 // large share of those subtitle files ended with a translator credit laid over
-// silence or an end card. That teaches a strong prior: near-silent audio at the
-// end of a clip -> emit the credit. Short recordings hit it hardest, because a
-// few seconds of speech is zero-padded to the encoder's fixed 30 s window, so
-// most of what the decoder sees is exactly the context those credits were
-// trained on. Turkish models land on "Altyazı M.K." almost every time.
+// silence or an end card. That teaches a strong prior: near-silent audio ->
+// emit the credit. Turkish models land on "Altyazı M.K." or on a broadcaster's
+// audio-description disclaimer almost every time.
 //
 // The decoding-side knobs don't reach this. The phrase is memorised, so it
 // decodes with high confidence and sails past both no_speech_thold and
 // logprob_thold; suppress_nst only masks symbols, and the credits are plain
-// words. Filtering the decoded text is the only thing that reliably catches it.
+// words. Measured: beam search with a higher temperature fallback, a
+// no_speech_thold of 0.4 against a logprob_thold of -0.5, and suppress_nst
+// each produced the same disclaimer, word for word.
+//
+// Two things answer it. The voice-activity detector below keeps the silence
+// away from the decoder in the first place, which is the actual fix; the text
+// filter in credits.cpp is what catches whatever still gets through.
 
-// Reduces text to a comparison key: Turkish letters mapped to ASCII, case
-// dropped, and everything that isn't a letter or digit removed -- so
-// "Altyazı M.K.", "ALTYAZI: M.K." and "altyazi mk" all fold to "altyazimk".
-std::string fold(const std::string& s) {
-    // Keyed by the two UTF-8 bytes of each Turkish letter, both cases.
-    static const std::unordered_map<std::uint16_t, char> kTurkish = {
-        {0xC3A7, 'c'}, {0xC387, 'c'},   // ç Ç
-        {0xC49F, 'g'}, {0xC49E, 'g'},   // ğ Ğ
-        {0xC4B1, 'i'}, {0xC4B0, 'i'},   // ı İ
-        {0xC3B6, 'o'}, {0xC396, 'o'},   // ö Ö
-        {0xC59F, 's'}, {0xC59E, 's'},   // ş Ş
-        {0xC3BC, 'u'}, {0xC39C, 'u'},   // ü Ü
-    };
-
-    std::string out;
-    out.reserve(s.size());
-    for (std::size_t i = 0; i < s.size();) {
-        const auto c = static_cast<unsigned char>(s[i]);
-        if (c < 0x80) {
-            if (std::isalnum(c)) {
-                out += static_cast<char>(std::tolower(c));
-            }
-            ++i;
-            continue;
-        }
-        if (i + 1 < s.size()) {
-            const auto pair = static_cast<std::uint16_t>(
-                (c << 8) | static_cast<unsigned char>(s[i + 1]));
-            const auto it = kTurkish.find(pair);
-            if (it != kTurkish.end()) {
-                out += it->second;
-                i += 2;
-                continue;
-            }
-        }
-        // Any other non-ASCII character: drop the whole UTF-8 sequence.
-        for (++i; i < s.size() && (static_cast<unsigned char>(s[i]) & 0xC0) == 0x80; ++i) {
-        }
-    }
-    return out;
-}
-
-// Matched against the *whole* of a segment (or of a trailing run of words), never
-// as a substring of running speech -- "Altyazıları açar mısın?" has to survive.
-// Extend this list as new ones turn up; keep entries in folded form.
-bool is_credit(const std::string& key) {
-    static const std::unordered_set<std::string> kCredits = {
-        // Turkish
-        "altyazimk",
-        "altyazimkcom",
-        "altyaziauthor",
-        "aboneolmayiunutmayin",
-        "kanalimaaboneolmayiunutmayin",
-        "videoyubegendiyseniz",
-        "bubolumunbetimlemesi",
-        // English / generic subtitle-site credits
-        "subtitlesbytheamaraorgcommunity",
-        "subtitlesbyamaraorg",
-        "amaraorg",
-        "thanksforwatching",
-        "thankyouforwatching",
-        "pleasesubscribe",
-        "subscribetomychannel",
-    };
-    return !key.empty() && kCredits.count(key) > 0;
-}
-
-// Rebuilds text and end time after words have been removed.
-void resync_from_words(TranscriptSegment& seg) {
-    std::string text;
-    for (const Word& w : seg.words) text += w.text;
-    seg.text = trim(text);
-    if (!seg.words.empty()) seg.end = seg.words.back().end;
-}
-
-// Whisper often appends the credit to real speech in one segment, e.g.
-// "...görüşmek üzere. Altyazı M.K." -- trim just the trailing words so the
-// real text survives. Bounded because a credit is never long.
-void trim_trailing_credit(TranscriptSegment& seg) {
-    // Needs at least one word left over; a lone credit word is the whole-segment
-    // case, already handled before the token loop.
-    if (seg.words.size() < 2) return;
-
-    const std::size_t max_tail = std::min<std::size_t>(8, seg.words.size() - 1);
-    std::string tail;
-    for (std::size_t n = 1; n <= max_tail; ++n) {
-        tail = fold(seg.words[seg.words.size() - n].text) + tail;
-        if (is_credit(tail)) {
-            seg.words.erase(seg.words.end() - static_cast<std::ptrdiff_t>(n),
-                            seg.words.end());
-            resync_from_words(seg);
-            return;
-        }
-    }
+// The detector costs about 2 seconds of CPU per 7 minutes of audio, and it runs
+// as one pass before the decode, where whisper's abort callback cannot reach it.
+// So Cancel waits it out: half a minute on a recording long enough to notice,
+// in front of a decode that will take very much longer than that.
+//
+// The defaults (30 ms of padding, 100 ms of silence to end a segment) hand
+// whisper speech spliced so tightly that it loses sentence boundaries: the
+// transcript comes back as long lowercase runs with no punctuation, because
+// every pause the decoder segments on has been cut out. Keeping a third of a
+// second either side of each speech region, and only treating silence as a
+// break after 700 ms, gives it back.
+whisper_vad_params vad_params() {
+    whisper_vad_params p = whisper_vad_default_params();
+    p.speech_pad_ms           = 400;
+    p.min_silence_duration_ms = 700;
+    // Overlap exists to stop a word being cut in half at a segment join, which
+    // the padding above already covers; left in, it repeats the overlapped
+    // words in the transcript.
+    p.samples_overlap         = 0.0f;
+    return p;
 }
 
 int default_threads(int configured) {
@@ -197,7 +125,7 @@ void WhisperTranscriber::unload() {
 
 std::vector<TranscriptSegment> WhisperTranscriber::transcribe(
     const std::vector<float>& audio, const paths::fs::path& model_path,
-    const ProgressFn& progress) {
+    const paths::fs::path& vad_model_path, const ProgressFn& progress) {
 
     // The abort flag is cleared when a job is admitted, not here -- see
     // reset_abort(). Clearing it on entry lost every cancellation raised
@@ -273,6 +201,24 @@ std::vector<TranscriptSegment> WhisperTranscriber::transcribe(
     wparams.language        = language_.empty() ? "auto" : language_.c_str();
     wparams.detect_language = false;
 
+    // Silence never reaches the decoder: whisper runs the Silero detector first
+    // and transcribes only the speech it finds, mapping the timestamps back to
+    // real time afterwards. This is what stops the hallucinated credits, and it
+    // stops them costing real words: a credit decoded over a silent opening
+    // does not stay in the silence, it fills the whole first 30 s window, and
+    // the speech inside that window goes down with it.
+    //
+    // Optional by design. The model is under a megabyte and is fetched with the
+    // speech weights, but an install that has not got it yet, or could not
+    // reach the network, transcribes the old way rather than failing.
+    const std::string vad_utf8 = paths::to_utf8(vad_model_path);
+    const bool use_vad = !vad_utf8.empty();
+    if (use_vad) {
+        wparams.vad            = true;
+        wparams.vad_model_path = vad_utf8.c_str();
+        wparams.vad_params     = vad_params();
+    }
+
     CallbackState cb_state{&progress, &abort_};
     wparams.progress_callback           = progress_callback;
     wparams.progress_callback_user_data = &cb_state;
@@ -281,8 +227,24 @@ std::vector<TranscriptSegment> WhisperTranscriber::transcribe(
 
     if (progress) progress("", 0.0);
 
-    const int rc = whisper_full(impl_->ctx, wparams,
-                                audio.data(), static_cast<int>(audio.size()));
+    int rc = whisper_full(impl_->ctx, wparams,
+                          audio.data(), static_cast<int>(audio.size()));
+
+    // -1 is whisper_full's own code for "the VAD step failed", and the only
+    // thing that returns it; everything the decoder itself can fail at is -2 or
+    // lower. A corrupt or half-downloaded detector model must not cost the user
+    // the transcription, so the run is repeated without it. It costs nothing in
+    // practice: VAD runs before the decode, so this fails in the first second.
+    if (rc == -1 && use_vad && !abort_.load()) {
+        std::fprintf(stderr,
+                     "whisper: the voice detector could not be used (%s); "
+                     "transcribing the whole recording instead\n",
+                     vad_utf8.c_str());
+        wparams.vad = false;
+        rc = whisper_full(impl_->ctx, wparams,
+                          audio.data(), static_cast<int>(audio.size()));
+    }
+
     if (rc != 0) {
         if (abort_.load()) {
             throw std::runtime_error(L("Transcription was cancelled.",
@@ -306,9 +268,6 @@ std::vector<TranscriptSegment> WhisperTranscriber::transcribe(
         seg.text = trim(raw ? raw : "");
         if (seg.text.empty()) continue;
 
-        // A segment that is nothing but a credit is pure hallucination.
-        if (is_credit(fold(seg.text))) continue;
-
         // Rebuild words from tokens: whisper emits sub-word pieces, and a piece
         // that starts with a space begins a new word.
         const int n_tokens = whisper_full_n_tokens(impl_->ctx, i);
@@ -319,20 +278,25 @@ std::vector<TranscriptSegment> WhisperTranscriber::transcribe(
             const char* piece = whisper_full_get_token_text(impl_->ctx, i, j);
             if (!piece || !*piece) continue;
 
-            const whisper_token_data td =
-                whisper_full_get_token_data(impl_->ctx, i, j);
+            // These accessors, not whisper_full_get_token_data(): with VAD on,
+            // the decoder works on audio with the silence cut out, and the
+            // token struct still holds timestamps in that compressed time.
+            // Only the accessors map them back to where the words really are --
+            // which is what speaker attribution and the [mm:ss] marks need.
+            const double t0 = cs_to_sec(whisper_full_get_token_t0(impl_->ctx, i, j));
+            const double t1 = cs_to_sec(whisper_full_get_token_t1(impl_->ctx, i, j));
 
             const bool starts_word = (piece[0] == ' ') || seg.words.empty();
             if (starts_word) {
                 Word w;
                 w.text  = piece;
-                w.start = cs_to_sec(td.t0);
-                w.end   = cs_to_sec(td.t1);
+                w.start = t0;
+                w.end   = t1;
                 seg.words.push_back(std::move(w));
             } else {
                 Word& w = seg.words.back();
                 w.text += piece;
-                w.end = cs_to_sec(td.t1);
+                w.end = t1;
             }
         }
 
@@ -345,9 +309,9 @@ std::vector<TranscriptSegment> WhisperTranscriber::transcribe(
             }
         }
 
-        // ...and a credit tacked onto the end of real speech loses just the tail.
-        trim_trailing_credit(seg);
-        if (seg.text.empty()) continue;
+        // A segment that is nothing but a hallucinated credit goes entirely;
+        // one tacked onto the end of real speech loses just the tail.
+        if (!strip_credits(seg)) continue;
 
         out.push_back(std::move(seg));
     }

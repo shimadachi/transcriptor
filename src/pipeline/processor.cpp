@@ -216,6 +216,14 @@ ProcessResult OfflineProcessor::run(const std::vector<float>& audio, int sampler
     }
     throw_if_aborted();
 
+    // Under a megabyte, and the transcription is better for it every time, so
+    // it is fetched here as well as with the speech weights -- an install from
+    // before the detector existed has the weights already and would otherwise
+    // never pick it up. The error is deliberately dropped: a machine that is
+    // offline still gets its transcript, just without the detector in front.
+    models::ensure_vad_model(report("transcribe"), &dl_cancel_);
+    throw_if_aborted();
+
     // Swap the handle under the lock, then work through a raw pointer outside
     // it: transcribe() is minutes long and must not hold off a cancellation,
     // but the swap itself has to be exclusive of request_abort().
@@ -233,7 +241,8 @@ ProcessResult OfflineProcessor::run(const std::vector<float>& audio, int sampler
         transcriber = transcriber_.get();
     }
     const auto segments = transcriber->transcribe(
-        audio, settings_.whisper_model_file(), report("transcribe"));
+        audio, settings_.whisper_model_file(), models::vad_model_if_present(),
+        report("transcribe"));
 
     // -- diarize (optional) ------------------------------------------------
     const bool want_diarization =

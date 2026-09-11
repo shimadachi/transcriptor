@@ -28,6 +28,13 @@ transcriptor_test(test_reasoning
     "${APP_SRC}/llm/reasoning.cpp")
 add_test(NAME reasoning COMMAND test_reasoning)
 
+# -- hallucinated subtitle / audio-description credits ------------------------
+transcriptor_test(test_credits
+    "${TESTS_SRC}/test_credits.cpp"
+    "${APP_SRC}/stt/credits.cpp")
+target_link_libraries(test_credits PRIVATE nlohmann_json::nlohmann_json)
+add_test(NAME credits COMMAND test_credits)
+
 # -- diarization clustering threshold -----------------------------------------
 transcriptor_test(test_diar_threshold
     "${TESTS_SRC}/test_diar_threshold.cpp"

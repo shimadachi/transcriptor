@@ -213,6 +213,33 @@ ModelSpec embedding_spec() {
             L("Speaker embedding model", "Konuşmacı ses izi modeli")};
 }
 
+ModelSpec vad_spec() {
+    // Silero VAD v5.1.2, converted to GGML by the whisper.cpp project and
+    // hosted alongside it. 865 KB, so it is fetched with the speech weights
+    // rather than being something the user has to know about.
+    return {"silero-v5.1.2",
+            "https://huggingface.co/ggml-org/whisper-vad/resolve/main/"
+            "ggml-silero-v5.1.2.bin",
+            885'098ULL,
+            L("Voice detector", "Konuşma algılayıcı")};
+}
+
+paths::fs::path vad_model_file() {
+    return paths::models_dir() / "ggml-silero-v5.1.2.bin";
+}
+
+bool vad_ready() { return has_file(vad_model_file()); }
+
+paths::fs::path vad_model_if_present() {
+    return vad_ready() ? vad_model_file() : paths::fs::path{};
+}
+
+std::string ensure_vad_model(const ProgressFn& progress, net::Canceller* cancel) {
+    const paths::fs::path dest = vad_model_file();
+    if (has_file(dest)) return {};
+    return fetch(vad_spec(), dest, progress, cancel);
+}
+
 const std::vector<LlmModelSpec>& llm_catalog() {
     // Q4_K_M quantizations, one file each (no split GGUFs — the downloader
     // fetches a single URL). Sizes are the real file sizes on HuggingFace.
@@ -297,8 +324,18 @@ std::string ensure_whisper_model_file(const WhisperModelSpec& spec,
                                       const ProgressFn& progress,
                                       net::Canceller* cancel) {
     const paths::fs::path dest = whisper_model_file(spec);
-    if (has_file(dest)) return {};
-    return fetch(whisper_spec(spec.id), dest, progress, cancel);
+    if (!has_file(dest)) {
+        if (std::string err = fetch(whisper_spec(spec.id), dest, progress, cancel);
+            !err.empty()) {
+            return err;
+        }
+    }
+    // The detector rides along with the weights: it is a thousandth of their
+    // size and the transcriber wants it every time. Its failure is not this
+    // download's failure, though -- the speech model is there, transcription
+    // works without the detector, and the pipeline tries the fetch again.
+    ensure_vad_model(progress, cancel);
+    return {};
 }
 
 std::string ensure_diarization_models(const Settings& s, const ProgressFn& progress,

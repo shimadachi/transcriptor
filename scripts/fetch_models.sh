@@ -42,6 +42,11 @@ fetch "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-${MODEL}.b
       "$DEST/ggml-${MODEL}.bin"
 
 echo
+echo "Konuşma algılayıcı:"
+fetch "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin" \
+      "$DEST/ggml-silero-v5.1.2.bin"
+
+echo
 echo "Konuşmacı ayrımı:"
 fetch "https://huggingface.co/csukuangfj/sherpa-onnx-pyannote-segmentation-3-0/resolve/main/model.onnx" \
       "$DEST/diarize/segmentation.onnx"

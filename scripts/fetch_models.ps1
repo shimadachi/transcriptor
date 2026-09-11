@@ -40,6 +40,11 @@ Fetch "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-$Model.bin
       "$Dest\ggml-$Model.bin"
 
 Write-Host ""
+Write-Host "Konusma algilayici:"
+Fetch "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin" `
+      "$Dest\ggml-silero-v5.1.2.bin"
+
+Write-Host ""
 Write-Host "Konusmaci ayrimi:"
 Fetch "https://huggingface.co/csukuangfj/sherpa-onnx-pyannote-segmentation-3-0/resolve/main/model.onnx" `
       "$Dest\diarize\segmentation.onnx"

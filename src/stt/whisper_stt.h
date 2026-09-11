@@ -43,9 +43,15 @@ public:
     WhisperTranscriber& operator=(const WhisperTranscriber&) = delete;
 
     // Loads the model if needed. `audio` is mono float32 at 16 kHz.
+    //
+    // `vad_model_path` is the Silero detector that keeps silence away from the
+    // decoder, which is what stops it hallucinating subtitle credits there. An
+    // empty path transcribes the whole recording, the way this used to.
+    //
     // Throws std::runtime_error on load or decode failure.
     std::vector<TranscriptSegment> transcribe(const std::vector<float>& audio,
                                               const paths::fs::path& model_path,
+                                              const paths::fs::path& vad_model_path,
                                               const ProgressFn& progress);
 
     // Frees the model (and its GPU memory). Safe to call when not loaded.

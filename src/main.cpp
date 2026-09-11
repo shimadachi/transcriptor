@@ -133,6 +133,8 @@ int run_check(const Settings& settings) {
     std::printf(L("\nModels:\n", "\nModeller:\n"));
     std::printf("  Whisper (%s): %s\n", settings.whisper_model.c_str(),
                 models::whisper_ready(settings) ? ready : will_get);
+    std::printf(L("  Voice detector     : %s\n", "  Konuşma algılayıcı : %s\n"),
+                models::vad_ready() ? ready : will_get);
     if (diarize::Diarizer::supported()) {
         std::printf(L("  Speaker separation : %s\n", "  Konuşmacı ayrımı : %s\n"),
                     !settings.enable_diarization

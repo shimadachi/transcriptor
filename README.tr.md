@@ -185,12 +185,13 @@ Binary'yi çalıştırın; pencere açılır. Konsoldan:
 
 Hiçbir model binary'ye gömülü değildir. Konuşma modeli Ayarlar → Genel'den
 elle seçilip indirilir; varsayılan yoktur ve metne dönüştürme sırasında hiçbir
-şey indirilmez. Diğerleri ilk ihtiyaç duyulduğunda iner. İndirme için `curl`
-kullanılır — Windows 10 1803+, macOS ve Linux'ta hazır gelir.
+konuşma modeli indirilmez. Diğerleri ilk ihtiyaç duyulduğunda iner. İndirme
+için `curl` kullanılır — Windows 10 1803+, macOS ve Linux'ta hazır gelir.
 
 | Model | Boyut | Ne zaman |
 |---|---|---|
 | Whisper `tiny` … `large-v3` | 74 MB – 2.9 GB | Ayarlar'dan seçilip indirilir |
+| Silero VAD v5.1.2 (GGML) | ~0,9 MB | Konuşma modeliyle ya da ilk dönüştürmede |
 | pyannote segmentation-3.0 (ONNX) | ~6 MB | İlk konuşmacı ayrımında |
 | 3D-Speaker CAM++ ses izi | ~27 MB | İlk konuşmacı ayrımında |
 
@@ -199,6 +200,17 @@ için; `small` gerçek bir konuşmayı verebileceğiniz en hafif model; `medium`
 aksanlarda ve üst üste konuşmalarda belirgin biçimde daha iyi;
 `large-v3-turbo` önerilen seçim — `large-v3` doğruluğuna yakın, çok daha kısa
 sürede ve yarı boyutta; `large-v3` en doğrusu ve en yavaşı.
+
+Konuşma algılayıcı bir tercih değil, o yüzden Ayarlar'da yok. Whisper
+sessizlikte halüsinasyon görür: eğitim verisinin büyük bölümü toplanmış
+altyazılardır ve bunların pek çoğu sessiz bir kapanış karesine bindirilmiş
+çevirmen künyesiyle biter; sessiz ses de modele o künyeyi yazdırır. Türkçe
+kayıtlarda "Altyazı M.K." ya da bir kanalın sesli betimleme anonsu çıkar. Bu,
+kod çözücünün kendi eşiklerinin yakalayabileceği bir güven sorunu değildir:
+bu cümleler ezberlenmiştir ve gerçek konuşma kadar yüksek güvenle çözülür, üstelik
+bir halüsinasyon 30 saniyelik pencerenin tamamını doldurup içindeki konuşmayı
+da götürebilir. Algılayıcı önce çalışınca kod çözücünün gördüğü tek şey konuşma
+olur. Dosya yoksa dönüştürme eskisi gibi, algılayıcısız sürer.
 
 Konum: `%APPDATA%\Transcriptor\models` (Windows),
 `~/Library/Application Support/Transcriptor/models` (macOS),

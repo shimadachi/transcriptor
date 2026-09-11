@@ -61,6 +61,22 @@ std::string whisper_missing_reason(const Settings& s);
 ModelSpec segmentation_spec();
 ModelSpec embedding_spec();
 
+// -- voice activity (Silero, GGML) ----------------------------------------
+// Under a megabyte, and not something a user picks: whisper runs it before the
+// decoder so that silence never reaches it, which is what keeps hallucinated
+// subtitle credits out of the transcript. There is no setting for it.
+ModelSpec vad_spec();
+
+// models_dir() / "ggml-silero-v5.1.2.bin". Named after the model so a newer
+// detector is a new file rather than stale weights an install keeps for ever.
+paths::fs::path vad_model_file();
+
+// The path when the detector is on disk, and an empty path when it is not --
+// which is what the transcriber takes to mean "run without it".
+paths::fs::path vad_model_if_present();
+
+bool vad_ready();
+
 // -- summarizer (GGUF) ----------------------------------------------------
 // Small instruct models the settings panel offers for download. Nothing here
 // ships inside the binary; the user picks one and it is fetched into the
@@ -106,6 +122,8 @@ std::string ensure_whisper_model_file(const WhisperModelSpec& spec,
                                       net::Canceller* cancel = nullptr);
 std::string ensure_diarization_models(const Settings& s, const ProgressFn& progress,
                                       net::Canceller* cancel = nullptr);
+std::string ensure_vad_model(const ProgressFn& progress,
+                             net::Canceller* cancel = nullptr);
 
 // True when every model the current settings need is already on disk.
 bool whisper_ready(const Settings& s);

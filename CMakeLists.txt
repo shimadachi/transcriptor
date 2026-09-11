@@ -63,6 +63,7 @@ set(TRANSCRIPTOR_CORE_SOURCES
     src/audio/decode.cpp
     src/audio/miniaudio_impl.c
     src/stt/whisper_stt.cpp
+    src/stt/credits.cpp
     src/diarize/diarizer.cpp
     src/llm/chunking.cpp
     src/llm/reasoning.cpp
