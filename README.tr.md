@@ -113,21 +113,21 @@ CI yalnızca derler, çalıştırmaz; GPU yapıları için ilgili CUDA ya da Vul
 sürücüsüne sahip bir makine gerekir.
 
 CUDA presetini **derlemek** için `nvcc` PATH'te olmalı (ya da
-`-DCMAKE_CUDA_COMPILER=/nvcc/yolu`). **Çalıştırmak** için gerekmez.
+`-DCMAKE_CUDA_COMPILER=/nvcc/yolu`).
 
-CUDA paketleri kendi `cudart` / `cublas` / `cublasLt` kütüphanelerini içinde
-taşır; bunlar sürücüyle değil CUDA **toolkit**'iyle gelir. Aksi hâlde yalnızca
-sürücüsü olan ya da farklı ana sürüm toolkit'i olan bir makinede uygulama hiç
-açılmaz (`libcudart.so.12: cannot open shared object file`,
-`cudart64_12.dll was not found`). CUDA arşivlerinin ~650 MB, Vulkan arşivinin
-~25 MB, CPU arşivinin ~15 MB olmasının sebebi budur; bu boyutun neredeyse
-tamamı NVIDIA'nın cuBLAS'ıdır. Yerelde derlerseniz kendi toolkit'inize
-bağlanır; hiçbir şey paketlenmez, binary küçük kalır.
+CUDA yapısını **çalıştırmak** için [CUDA
+Toolkit](https://developer.nvidia.com/cuda-downloads) 12.x kurulu olmalıdır.
+Paket `cudart` / `cublas` / `cublasLt` kütüphanelerini taşımaz: bunlar
+sürücüyle değil toolkit'le gelir ve tek başına cuBLAS neredeyse bir gigabayt
+tutuyor, bu da CUDA indirmesini diğerlerinin yaklaşık on katı yapıyordu.
+Toolkit yoksa uygulama hiç açılmaz ve hangi kütüphaneyi aradığını söyler:
+`libcudart.so.12: cannot open shared object file` ya da `cudart64_12.dll was
+not found`. Farklı ana sürümde bir toolkit de aynı hatayı verir.
 
 İndireceğiniz paketi seçmeden önce: Vulkan yapısı NVIDIA kartlarında da
-çalışır, çünkü Vulkan uygulamasını sürücünün kendisi getirir. CUDA daha
-hızlıdır, ama Vulkan yirmi beşte bir boyuttadır ve hiçbir şey paketlemeyi
-gerektirmez.
+çalışır, çünkü Vulkan uygulamasını sürücünün kendisi getirir ve o sürücünün
+ötesinde hiçbir kurulum istemez. CUDA daha hızlıdır; Vulkan sizden daha azını
+ister.
 
 #### CUDA yapıları hangi NVIDIA GPU'larını kapsar
 

@@ -65,68 +65,22 @@ endif()
 
 # CUDA builds link cudart/cublas/cublasLt, and those ship with the CUDA
 # *toolkit*, not with the driver — the driver only provides libcuda / nvcuda.
-# A machine with no toolkit, or one of a different major version, cannot start
-# the binary at all:
+# The package used to carry copies of all three so that a machine with nothing
+# but a driver could run it. cuBLAS alone is most of a gigabyte, which made the
+# CUDA download roughly ten times the size of every other one, for libraries a
+# great many of its users already have and the rest can install once.
+#
+# So the toolkit is a requirement of the CUDA build rather than part of it, and
+# both READMEs say so beside the download. Where it is missing the binary does
+# not start at all, and says which library it wanted before main() runs:
 #   libcudart.so.12: cannot open shared object file: No such file or directory
 #   The code execution cannot proceed because cudart64_12.dll was not found
-# So the package carries its own. It costs a few hundred MB and is what makes
-# the artifact runnable by someone who only ever installed a driver.
+# Anyone who would rather not install it has two builds that need nothing:
+# Vulkan runs on the same NVIDIA cards through the driver's own loader, and the
+# CPU build runs anywhere.
 if(TRANSCRIPTOR_CUDA)
-    find_package(CUDAToolkit QUIET)
-    if(CUDAToolkit_FOUND)
-        set(_cuda_libs "")
-        if(WIN32)
-            set(_cuda_dir  "${CUDAToolkit_BIN_DIR}")
-            set(_cuda_dest "${CMAKE_INSTALL_BINDIR}")     # beside the .exe
-            set(_cuda_glob "cudart64_*.dll" "cublas64_*.dll" "cublasLt64_*.dll")
-        else()
-            set(_cuda_dir  "${CUDAToolkit_LIBRARY_DIR}")
-            set(_cuda_dest "${CMAKE_INSTALL_LIBDIR}")
-            set(_cuda_glob "libcudart.so.*" "libcublas.so.*" "libcublasLt.so.*")
-        endif()
-
-        foreach(_pattern IN LISTS _cuda_glob)
-            file(GLOB _found "${_cuda_dir}/${_pattern}")
-            foreach(_f IN LISTS _found)
-                if(WIN32)
-                    list(APPEND _cuda_libs "${_f}")            # DLLs: real files
-                elseif(_f MATCHES "\\.so\\.[0-9]+$")
-                    # libfoo.so.12 is a symlink to libfoo.so.12.4.1, and
-                    # install(FILES) preserves the link rather than following
-                    # it. Shipping the link alone leaves it dangling; shipping
-                    # both means two copies of a library that runs to hundreds
-                    # of MB. So resolve it and install the real file under the
-                    # SONAME the binary actually asks for.
-                    file(REAL_PATH "${_f}" _real)
-                    get_filename_component(_soname "${_f}" NAME)
-                    install(FILES "${_real}" DESTINATION "${_cuda_dest}"
-                            RENAME "${_soname}" COMPONENT app)
-                    list(APPEND _cuda_libs "${_soname}")
-                endif()
-            endforeach()
-        endforeach()
-
-        if(_cuda_libs)
-            if(WIN32)
-                install(FILES ${_cuda_libs} DESTINATION "${_cuda_dest}"
-                        COMPONENT app)
-            endif()
-            message(STATUS "  bundling CUDA : ${_cuda_libs}")
-        else()
-            message(WARNING "TRANSCRIPTOR_CUDA is ON but no CUDA runtime "
-                            "libraries were found in ${_cuda_dir}; the package "
-                            "will only run where a matching toolkit exists.")
-        endif()
-
-        # bin/transcriptor has to find them in ../lib at runtime.
-        if(NOT WIN32 AND NOT APPLE)
-            set_target_properties(transcriptor PROPERTIES
-                INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
-        endif()
-    else()
-        message(WARNING "TRANSCRIPTOR_CUDA is ON but CUDAToolkit was not found; "
-                        "the package will not carry a CUDA runtime.")
-    endif()
+    message(STATUS "  CUDA runtime : not bundled — the toolkit must be "
+                   "installed to run this build")
 endif()
 
 # Package the "app" component and nothing else; ALL_COMPONENTS_IN_ONE keeps it

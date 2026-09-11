@@ -112,20 +112,20 @@ CI only compiles; it never runs the GPU builds. Those need a machine with the
 matching CUDA or Vulkan driver.
 
 **Building** a CUDA preset needs `nvcc` on `PATH` (or
-`-DCMAKE_CUDA_COMPILER=/path/to/nvcc`). **Running** the result does not.
+`-DCMAKE_CUDA_COMPILER=/path/to/nvcc`).
 
-The CUDA packages carry their own `cudart` / `cublas` / `cublasLt`, because
-those come with the CUDA *toolkit* and not with the driver — without them the
-binary will not start on a machine that has only a driver, or a toolkit of a
-different major version (`libcudart.so.12: cannot open shared object file`,
-`cudart64_12.dll was not found`). That is why the CUDA archives are ~650 MB,
-against ~25 MB for Vulkan and ~15 MB for the CPU one — almost all of it is
-NVIDIA's cuBLAS. Building locally links against your own toolkit, so nothing
-is bundled and the binary stays small.
+**Running** a CUDA build needs the [CUDA
+Toolkit](https://developer.nvidia.com/cuda-downloads) installed, version 12.x.
+The package does not carry `cudart` / `cublas` / `cublasLt`: those come with
+the toolkit rather than with the driver, and cuBLAS alone is most of a
+gigabyte, which made the CUDA download about ten times the size of every other
+one. Without the toolkit the binary does not start, and says which library it
+wanted: `libcudart.so.12: cannot open shared object file`, or `cudart64_12.dll
+was not found`. A toolkit of a different major version reports the same thing.
 
 Worth knowing before you pick a download: the Vulkan build also runs on NVIDIA
-cards, since the driver ships a Vulkan implementation. CUDA is faster, but
-Vulkan is a twenty-fifth of the size and needs nothing bundled at all.
+cards, since the driver ships a Vulkan implementation, and it needs nothing
+installed beyond that driver. CUDA is faster. Vulkan asks less of you.
 
 #### Which NVIDIA GPUs the CUDA builds cover
 
