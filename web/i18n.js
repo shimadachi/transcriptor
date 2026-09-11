@@ -117,6 +117,8 @@ const STR = {
                      tr: 'Sürükleyerek ilerleyin — ← → 5 sn, Shift ile 30 sn'},
   'pl.mute':        {en: 'Mute / unmute', tr: 'Sesi kapat / aç'},
   'pl.rate':        {en: 'Playback speed', tr: 'Oynatma hızı'},
+  'pl.follow':      {en: 'Follow the transcript — light the line being spoken and keep it on screen',
+                     tr: 'Metni takip et — konuşulan satırı vurgula ve ekranda tut'},
   // running the models again over a saved recording
   'lib.retx':       {en: '↻ Transcribe', tr: '↻ Metne dönüştür'},
   'lib.retxTitle':  {en: 'Transcribe this recording again with the current model and settings',

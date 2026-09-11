@@ -244,6 +244,26 @@
                   </svg>
                 </button>
                 <button id="plRate" class="pl-rate" data-i18n-title="pl.rate">1×</button>
+                <!-- Following the transcript: the line being spoken is lit and
+                     kept on screen. On by default, and off in one press for a
+                     reader working through the text at their own pace. Its
+                     home is here because it only means anything while there is
+                     audio, and this whole row goes away when there is none. -->
+                <button id="plFollowBtn" class="pl-icon" aria-pressed="true"
+                        data-i18n-title="pl.follow">
+                  <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+                    <path d="M3 5.5h9M3 14.5h9" fill="none" stroke="currentColor"
+                          stroke-width="1.6" stroke-linecap="round" opacity=".5"/>
+                    <path d="M3 10h6.5" fill="none" stroke="currentColor"
+                          stroke-width="1.6" stroke-linecap="round"/>
+                    <path class="pl-chase" d="M16 5.5v8m0 0l-2.3-2.4M16 13.5l2.3-2.4"
+                          fill="none" stroke="currentColor" stroke-width="1.6"
+                          stroke-linecap="round" stroke-linejoin="round"/>
+                    <path class="pl-x" d="M13.6 12.4l4.8-4.8M13.6 7.6l4.8 4.8"
+                          fill="none" stroke="currentColor" stroke-width="1.6"
+                          stroke-linecap="round"/>
+                  </svg>
+                </button>
               </div>
               <div id="libAudioName" class="lib-audio-name"></div>
             </div>

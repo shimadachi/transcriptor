@@ -340,6 +340,11 @@ listeler; seçtiğinizi gösterir: metin (konuşmacı ve zaman damgalarıyla, do
 indekslenmez — veritabanı diskteki klasörün kendisidir; dışarıdan kopyaladığınız
 bir oturum listede belirir, sildiğiniz kaybolur.
 
+Ses çalarken metin onu takip eder: konuşulan satır vurgulanır ve ekranda
+tutulur; herhangi bir zaman damgasına tıklamak oynatıcıyı oraya götürür.
+Oynatma çubuğundaki son düğme bu takibi kapatır, böylece metni kendi hızınızda
+okuyabilirsiniz; tercihiniz hatırlanır.
+
 ## Ayarlar
 
 Ayarlar genelden özele sıralanır. **Genel** (arayüz dili, görünüm, konuşma ve

@@ -293,6 +293,11 @@ timestamps, straight from `transcript.json`), the summary, and a player for
 whatever audio was saved. Nothing is indexed — the folder on disk is the whole
 database, so a session you copy in appears and one you delete disappears.
 
+While the audio plays, the transcript follows it: the line being spoken is lit
+and kept in view, and a click on any timestamp jumps the player there. The last
+button in the transport switches the following off for reading at your own pace,
+and remembers that you did.
+
 ## Settings
 
 Settings runs general to specific. **General** (interface language, appearance,

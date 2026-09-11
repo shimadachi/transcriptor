@@ -499,6 +499,75 @@ async function run() {
           String(env.peek('plLines.length')));
   }
 
+  // --------------------------------------- following is the reader's call ----
+  // Someone working through the text with the audio running behind it does not
+  // want the panel moving under them. One press stops it, and the highlight
+  // goes with it: a line lit where the panel will not go is half a feature.
+  {
+    const mkDoc = () => ({diarized: false, lines: [
+      {speaker: null, text: 'first',  start: 0,    end: 5,  ts: '0:00'},
+      {speaker: null, text: 'second', start: 36.1, end: 40, ts: '0:36'},
+    ]});
+    const play = (env) => {
+      const el = env.peek("$('libTranscript')");
+      const audio = env.peek("$('libAudio')");
+      audio.getAttribute = () => '/api/library/audio?id=x';
+      audio.paused = true;
+      env.app.renderTranscript(mkDoc(), el, true);
+      return {
+        lit: () => el.children.findIndex(l => l._cls.has('at')),
+        at: (sec) => { audio.currentTime = sec; env.app.plPaint(); },
+      };
+    };
+
+    {
+      const env = createEnv(ROOT);
+      const p = play(env);
+      const btn = env.els.plFollowBtn;
+
+      check('following is on when nothing has been said otherwise',
+            env.peek('plFollowOn') === true);
+      check('and the button does not read as switched off', !btn._cls.has('off'));
+
+      p.at(37);
+      check('the line being spoken is lit', p.lit() === 1, String(p.lit()));
+
+      btn.fire('click');
+      check('switching following off clears the lit line', p.lit() === -1,
+            String(p.lit()));
+      check('and the button shows it', btn._cls.has('off'));
+      p.at(1);
+      check('and no later moment lights one', p.lit() === -1, String(p.lit()));
+      check('the choice is remembered', env.storage.getItem('transcriptor-follow') === '0',
+            JSON.stringify(env.storage.getItem('transcriptor-follow')));
+
+      btn.fire('click');
+      check('switching it back on lights where the recording is now',
+            p.lit() === 0, String(p.lit()));
+      check('and the button reads as on again', !btn._cls.has('off'));
+      check('which is remembered too', env.storage.getItem('transcriptor-follow') === '1',
+            JSON.stringify(env.storage.getItem('transcriptor-follow')));
+    }
+
+    // A reader who switched it off finds it off next time, and only that
+    // stored answer turns it off: anything else is a session that starts on.
+    {
+      const env = createEnv(ROOT, {storage: {'transcriptor-follow': '0'}});
+      const p = play(env);
+      p.at(37);
+      check('a stored "off" survives the reload', env.peek('plFollowOn') === false);
+      check('and nothing is lit on the way in', p.lit() === -1, String(p.lit()));
+      check('the button comes up crossed out', env.els.plFollowBtn._cls.has('off'));
+    }
+    {
+      const env = createEnv(ROOT, {storage: {'transcriptor-follow': 'yes please'}});
+      const p = play(env);
+      p.at(37);
+      check('a value nobody wrote leaves following on', p.lit() === 1,
+            String(p.lit()));
+    }
+  }
+
   // ------------------------------------------ Cancel asks before it acts ----
   // One button gives up three different things, so the question has to name
   // the one in front of it, and declining has to leave the run alone.

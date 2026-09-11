@@ -472,6 +472,10 @@ input[type=checkbox]:disabled, input[type=radio]:disabled {
 .pl-icon.off .pl-wave { display: none; }
 .pl-icon.off .pl-x { display: block; }
 
+/* The follow toggle wears the same crossed-out "off" as mute: the arrow that
+   means "chase the line" goes, the slash arrives. */
+.pl-icon.off .pl-chase { display: none; }
+
 .pl-rate { min-width: 52px; font-size: 12px; letter-spacing: .06em; }
 .pl-rate:hover:not(:disabled) { transform: none; color: var(--ink); }
 .pl-rate.on { color: var(--vu); border-color: color-mix(in srgb, var(--vu) 45%, var(--line-2)); }
@@ -564,8 +568,15 @@ input[type=checkbox]:disabled, input[type=radio]:disabled {
    a second line, not squeeze the select down to its caret. */
 .tx-head { display: flex; justify-content: space-between; align-items: center;
   gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
-.tx-body { max-height: 48vh; overflow-y: auto; padding-right: 6px; }
-.tx-body .line { padding: 4px 0 4px 14px; margin-bottom: 4px; border-left: 2px solid transparent; }
+/* Following moves this panel by writing scrollTop, so the line it is chasing
+   glides into place rather than teleporting. Only programmatic scrolls are
+   affected: the reader's own wheel and drag are as immediate as ever. */
+.tx-body { max-height: 48vh; overflow-y: auto; padding-right: 6px;
+  scroll-behavior: smooth; }
+/* The fade belongs on the line, not on .at below: a transition that lives on
+   the lit state alone fades in and then snaps off when the highlight leaves. */
+.tx-body .line { padding: 4px 0 4px 14px; margin-bottom: 4px; border-left: 2px solid transparent;
+  transition: background .24s var(--ease), border-left-color .24s var(--ease); }
 .tx-body .line.spk { border-left-color: var(--sc, var(--rec)); }
 .spk-tag { font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
   color: var(--sc, var(--rec)); font-weight: 700; margin-right: 8px; }
@@ -587,10 +598,10 @@ input[type=checkbox]:disabled, input[type=radio]:disabled {
   background: color-mix(in srgb, var(--sc, var(--vu)) 14%, transparent);
   border-left-color: var(--sc, var(--vu));
   border-radius: 0 4px 4px 0;
-  transition: background .18s var(--ease);
 }
 @media (prefers-reduced-motion: reduce) {
-  .tx-body .line.at { transition: none; }
+  .tx-body { scroll-behavior: auto; }
+  .tx-body .line { transition: none; }
 }
 .tx-body .txt { color: var(--ink); }
 .empty { color: var(--faint); font-style: italic; font-family: var(--mono); font-size: 13px; }

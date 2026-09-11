@@ -1920,6 +1920,13 @@ let plLines = [];      // [{start, end, el}], in order, library panel only
 let plLineLit = null;      // the element currently lit, so it can be un-lit
 let plScrolledAt = 0;  // when the reader last scrolled by hand
 
+// Following is one feature — light the line, keep it on screen — and one
+// switch turns both halves off, because half of it is what makes the other
+// half worth having. On unless the reader has said otherwise, and remembered
+// across reloads: someone who reads at their own pace says so once.
+let plFollowOn = true;
+const PL_FOLLOW_KEY = 'transcriptor-follow';
+
 // Seconds past a line's end before the highlight goes dark. Turns usually butt
 // up against each other, and blinking the highlight off in the fraction of a
 // second between them would be worse than holding it; a real silence is longer
@@ -1945,8 +1952,10 @@ function plLineAt(sec) {
 
 // Bring the lit line back into view, but never fight someone who is reading
 // ahead: a scroll of their own buys a few seconds of being left alone.
-function plFollow(el) {
-  if (Date.now() - plScrolledAt < 4000) return;
+// `force` is the reader asking to be caught up — switching following back on —
+// which outranks the grace their last scroll bought them.
+function plFollow(el, force) {
+  if (!force && Date.now() - plScrolledAt < 4000) return;
   const box = $('libTranscript');
   if (!box || !box.getBoundingClientRect || !el.getBoundingClientRect) return;
   const b = box.getBoundingClientRect(), r = el.getBoundingClientRect();
@@ -1957,7 +1966,7 @@ function plFollow(el) {
 
 function plHighlight() {
   const a = $('libAudio');
-  const line = (plLines.length && a.getAttribute('src'))
+  const line = (plFollowOn && plLines.length && a.getAttribute('src'))
     ? plLineAt(a.currentTime || 0) : null;
   const next = line ? line.el : null;
   if (next === plLineLit) return;
@@ -1969,6 +1978,25 @@ function plHighlight() {
   // moves the highlight too, and yanking the panel around under a stationary
   // cursor is not helpful.
   if (!a.paused) plFollow(plLineLit);
+}
+
+// The one place the switch is thrown. `remember` is false for the reading at
+// startup, which is only painting what was already decided.
+function plSetFollow(on, remember) {
+  plFollowOn = !!on;
+  const b = $('plFollowBtn');
+  if (b) {
+    b.classList.toggle('off', !plFollowOn);
+    b.setAttribute('aria-pressed', plFollowOn ? 'true' : 'false');
+  }
+  if (remember) {
+    try { localStorage.setItem(PL_FOLLOW_KEY, plFollowOn ? '1' : '0'); } catch (e) {}
+  }
+  // Switching off clears the lit line; switching on lands on the moment the
+  // recording is at, paused or not, rather than waiting for the next line.
+  plScrolledAt = 0;
+  plHighlight();
+  if (plFollowOn && plLineLit) plFollow(plLineLit, true);
 }
 
 function plPaint() {
@@ -2067,6 +2095,13 @@ function plToggle() {
     $('plRate').textContent = next + '×';
     $('plRate').classList.toggle('on', next !== 1);
   });
+
+  // Anything but a stored "off" is on, so a first visit and a wiped store both
+  // start following.
+  let followPref = null;
+  try { followPref = localStorage.getItem(PL_FOLLOW_KEY); } catch (e) {}
+  plSetFollow(followPref !== '0', false);
+  $('plFollowBtn').addEventListener('click', () => plSetFollow(!plFollowOn, true));
 })();
 
 // ---- saved versions, and running the models again ----

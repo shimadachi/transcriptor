@@ -66,9 +66,19 @@ function mkStream(kinds, media) {
   };
 }
 
-function createEnv(root) {
+// `opts.storage` seeds localStorage before app.js runs, for the preferences it
+// reads on the way in. The store is real, and per-env, so what the app writes
+// can be read back without leaking into the next test.
+function createEnv(root, opts) {
   const els = {};
   const $$ = id => (els[id] = els[id] || mkEl(id));
+
+  const store = Object.assign({}, (opts && opts.storage) || {});
+  const storage = {
+    getItem: k => (k in store ? store[k] : null),
+    setItem: (k, v) => { store[k] = String(v); },
+    removeItem: k => { delete store[k]; },
+  };
 
   const server = {
     state: {
@@ -208,7 +218,7 @@ function createEnv(root) {
     FormData: class { constructor() { this._f = []; } append(k, v, n) { this._f.push([k, v, n]); } },
     URL: {createObjectURL: () => 'blob:x', revokeObjectURL: () => {}},
     performance: {now: () => Date.now()},
-    localStorage: {getItem: () => null, setItem: () => {}},
+    localStorage: storage,
     location: {hash: ''},
     setTimeout, clearTimeout, setInterval: () => 0, clearInterval: () => {},
     Uint8Array, Math, Date, JSON, Object, Array, String, Number, Promise, Error,
@@ -224,7 +234,7 @@ function createEnv(root) {
                   {filename: 'app.js'});
 
   return {
-    els, server, media, app: sandbox,
+    els, server, media, app: sandbox, storage,
     peek: expr => vm.runInContext(expr, sandbox),
     poke: stmt => vm.runInContext(stmt, sandbox),
     // Lets pending promise callbacks run.
