@@ -187,10 +187,17 @@ void AppState::start_job(std::function<void()> body) {
             if (job_cancelled_.load()) set_phase("idle", -1.0, cancelled_message());
             else set_phase("error", -1.0, e.what());
         }
-        // A job that ran to the end while a cancel was in flight has already
-        // written its result; say so rather than reporting it as stopped.
-        if (job_cancelled_.load() && phase() != "idle") {
-            set_phase("idle", -1.0, cancelled_message());
+        // A stop the body caught for itself -- the summarizers report being
+        // cancelled as an error of their own -- still ends as a stop, not a
+        // failure. But a job that ran to the end while the cancel was in
+        // flight has already written its result, and "done" is what
+        // happened: this used to report that as stopped too, over a summary
+        // sitting on screen and on disk.
+        if (job_cancelled_.load()) {
+            const std::string ended = phase();
+            if (ended != "idle" && ended != "done") {
+                set_phase("idle", -1.0, cancelled_message());
+            }
         }
         // Nothing is writing into that folder any more, so the library is free
         // to delete it again.
@@ -475,7 +482,19 @@ bool AppState::cancel_job() {
     // it here would block the request thread through a whisper batch, which can
     // be seconds. Keep whichever phase is running so the spinner does not jump
     // — only the line under it changes.
-    set_phase(phase(), -1.0, L("Stopping…", "Durduruluyor…"));
+    //
+    // Read and written under one lock, and only over a stage still running.
+    // As a separate read and write, the job could finish in between -- its
+    // last word already written -- and "Stopping…" then stood over an idle app
+    // until something else moved the phase.
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (phase_ != "idle" && phase_ != "done" && phase_ != "error" &&
+            phase_ != "ready") {
+            progress_ = -1.0;
+            message_  = L("Stopping…", "Durduruluyor…");
+        }
+    }
     return true;
 }
 
