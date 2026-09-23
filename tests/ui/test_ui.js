@@ -9,6 +9,7 @@
 //   G3  slow /api/result responses starved every render
 //   G4  an errored take's fallback timer terminated the take after it
 //   G5  overwriting a named version overwrote the session's original instead
+//   V1  Enter on a focused Cancel confirmed the dialog it was declining
 
 const path = require('path');
 const {createEnv} = require('./harness');
@@ -652,6 +653,24 @@ async function run() {
     check('a run that finished while the question was up is left alone',
           env.server.cancels.length === 0,
           JSON.stringify(env.server.cancels.length));
+  }
+
+  // ----------------------------------------------------------------- V1 ----
+  // The confirm dialog guards deleting a recording and discarding a take.
+  // Enter has to press the button that has focus, not always the first one.
+  {
+    const env = createEnv(ROOT);
+    const answer = env.app.ask({title: 'Delete this recording?'});
+    env.els.askNo.focus();                    // Tab over to Cancel
+    env.fireDoc('keydown', {key: 'Enter', preventDefault() {}});
+    check('V1 Enter on a focused Cancel declines', (await answer) === false);
+  }
+  {
+    const env = createEnv(ROOT);
+    const answer = env.app.ask({title: 'Delete this recording?'});
+    env.fireDoc('keydown', {key: 'Enter', preventDefault() {}});
+    check('V1 Enter on the button the dialog opens on still confirms',
+          (await answer) === true);
   }
 
   console.log(failures ? `\nui: ${failures} check(s) FAILED`

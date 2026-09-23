@@ -71,7 +71,17 @@ function mkStream(kinds, media) {
 // can be read back without leaking into the next test.
 function createEnv(root, opts) {
   const els = {};
-  const $$ = id => (els[id] = els[id] || mkEl(id));
+  // focus() moves document.activeElement, which is what the dialog's keyboard
+  // handling asks about.
+  const $$ = id => {
+    if (!els[id]) {
+      const el = mkEl(id);
+      el.focus = () => { document.activeElement = el; };
+      els[id] = el;
+    }
+    return els[id];
+  };
+  const docListeners = {};
 
   const store = Object.assign({}, (opts && opts.storage) || {});
   const storage = {
@@ -186,7 +196,8 @@ function createEnv(root, opts) {
     createElement: tag => { const e = mkEl(''); e.tagName = tag; return e; },
     querySelector: sel => (sel.includes('csrf') ? {content: 'TESTTOKEN'} : null),
     querySelectorAll: () => [],
-    addEventListener: () => {},
+    addEventListener: (name, fn) => { (docListeners[name] = docListeners[name] || []).push(fn); },
+    activeElement: null,
     documentElement: {setAttribute: () => {}, style: {}},
     body: mkEl('body'),
   };
@@ -235,6 +246,8 @@ function createEnv(root, opts) {
 
   return {
     els, server, media, app: sandbox, storage,
+    // Dispatches a document-level event, e.g. a key press while a dialog is up.
+    fireDoc: (name, ev) => (docListeners[name] || []).forEach(fn => fn(ev)),
     peek: expr => vm.runInContext(expr, sandbox),
     poke: stmt => vm.runInContext(stmt, sandbox),
     // Lets pending promise callbacks run.

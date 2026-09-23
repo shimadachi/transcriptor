@@ -206,7 +206,16 @@ $('askBg').onclick = (e) => { if (e.target === $('askBg')) askClose(false); };
 document.addEventListener('keydown', (e) => {
   if (!askResolve) return;
   if (e.key === 'Escape') { e.preventDefault(); askClose(false); }
-  else if (e.key === 'Enter') { e.preventDefault(); askClose(true); }
+  else if (e.key === 'Enter') {
+    // Enter answers with the button that has focus. Treating every Enter as
+    // "yes" turned Enter on a focused Cancel into the deletion it was
+    // declining. Anywhere else the key is swallowed: nothing behind the dialog
+    // may be pressed while it is up.
+    e.preventDefault();
+    const f = document.activeElement;
+    if (f === $('askYes')) askClose(true);
+    else if (f === $('askNo')) askClose(false);
+  }
 });
 document.addEventListener('click', closeAllSelects);
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAllSelects(); });
