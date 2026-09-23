@@ -3,6 +3,7 @@
 // between the browser and this struct.
 #pragma once
 
+#include <functional>
 #include <map>
 #include <string>
 
@@ -136,8 +137,22 @@ struct Settings {
     paths::fs::path segmentation_model_file() const;
     paths::fs::path embedding_model_file() const;
 
+    // Changes meant for this run only: the environment overrides load()
+    // applies, a --port on the command line. save() writes back what the
+    // file held for any setting they changed, unless it has been changed
+    // again since -- so a one-off TRANSCRIPTOR_OUTPUT_DIR does not become the
+    // output folder for good the next time anything at all is saved.
+    void override_for_this_run(const std::function<void(Settings&)>& change);
+
 private:
     void apply_env();
+
+    // Keyed as in config.json: what the file held, and what the override set.
+    struct RunOverride {
+        nlohmann::json saved;
+        nlohmann::json value;
+    };
+    std::map<std::string, RunOverride> run_overrides_;
 };
 
 }  // namespace transcriptor

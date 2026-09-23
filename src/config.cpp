@@ -211,7 +211,7 @@ Settings Settings::load() {
         auto j = nlohmann::json::parse(raw, nullptr, /*allow_exceptions=*/false);
         if (!j.is_discarded()) s.from_json(j);
     }
-    s.apply_env();
+    s.override_for_this_run([](Settings& x) { x.apply_env(); });
     // Everything downstream — decoders, downloads, the summarizer — reads the
     // language from here rather than being handed a Settings.
     lang::set(s.ui_language);
@@ -219,7 +219,25 @@ Settings Settings::load() {
 }
 
 bool Settings::save() const {
-    return paths::write_file(config_path(), to_json().dump(2));
+    nlohmann::json j = to_json();
+    for (const auto& [key, o] : run_overrides_) {
+        if (j.contains(key) && j[key] == o.value) j[key] = o.saved;
+    }
+    return paths::write_file(config_path(), j.dump(2));
+}
+
+void Settings::override_for_this_run(const std::function<void(Settings&)>& change) {
+    const nlohmann::json before = to_json();
+    change(*this);
+    const nlohmann::json after = to_json();
+    for (const auto& [key, value] : after.items()) {
+        if (!before.contains(key) || before[key] == value) continue;
+        // A key overridden twice still owes the file its original value.
+        const auto earlier = run_overrides_.find(key);
+        const nlohmann::json saved =
+            earlier != run_overrides_.end() ? earlier->second.saved : before[key];
+        run_overrides_[key] = RunOverride{saved, value};
+    }
 }
 
 void Settings::apply_env() {

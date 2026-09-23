@@ -51,13 +51,14 @@ transcriptor_test(test_attribute
 target_link_libraries(test_attribute PRIVATE nlohmann_json::nlohmann_json)
 add_test(NAME attribute COMMAND test_attribute)
 
-# -- adopting settings (V7) ----------------------------------------------------
+# -- adopting and keeping settings (V7, V11) -----------------------------------
 transcriptor_test(test_settings
     "${TESTS_SRC}/test_settings.cpp"
     "${APP_SRC}/config.cpp"
     "${APP_SRC}/util/paths.cpp")
 target_link_libraries(test_settings PRIVATE nlohmann_json::nlohmann_json)
-add_test(NAME settings COMMAND test_settings)
+add_test(NAME settings
+         COMMAND test_settings "${CMAKE_CURRENT_BINARY_DIR}/settings_scratch")
 
 # -- library versions ---------------------------------------------------------
 transcriptor_test(test_library

@@ -183,7 +183,9 @@ int run(const std::vector<std::string>& args) {
     if (opts.show_version) { std::printf("%s\n", TRANSCRIPTOR_VERSION); return 0; }
 
     Settings settings = Settings::load();
-    if (opts.port > 0) settings.port = opts.port;
+    if (opts.port > 0) {
+        settings.override_for_this_run([&](Settings& s) { s.port = opts.port; });
+    }
 
     if (opts.check) return run_check(settings);
 
