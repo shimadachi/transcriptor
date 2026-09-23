@@ -159,6 +159,24 @@ check('no leftover reference to the removed threshold input',
 check('the settings POST no longer sends a threshold',
       !read('web/app.js').includes('cluster_threshold:'));
 
+// -- V14: every label names a control ----------------------------------------
+// None of the settings labels was tied to its control, so clicking "Separate
+// speakers" did nothing and a screen reader announced every field unnamed. A
+// label has to wrap its control or point at one by id.
+{
+  const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(m => m[1]));
+  const loose = [];
+  for (const m of html.matchAll(/<label\b([^>]*)>([\s\S]*?)<\/label>/g)) {
+    const target = /\bfor="([^"]+)"/.exec(m[1]);
+    const wraps = /<(input|select|textarea)\b/.test(m[2]);
+    if (!wraps && !(target && ids.has(target[1]))) {
+      loose.push((/data-i18n="([^"]+)"/.exec(m[1]) || [])[1] || m[0].slice(0, 40));
+    }
+  }
+  check('V14 every <label> wraps its control or names it with for=',
+        loose.length === 0, loose.join(', '));
+}
+
 console.log(failures === 0 ? '\ntables: all checks passed'
                            : `\ntables: ${failures} check(s) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

@@ -332,36 +332,36 @@
            aria-labelledby="setTab_general">
       <div class="grp">
         <div class="t" data-i18n="set.generalGrp">General</div>
-        <div class="field"><label data-i18n="set.uiLang">Interface language</label>
+        <div class="field"><label for="s_uilang" data-i18n="set.uiLang">Interface language</label>
           <select id="s_uilang"><option value="en">English</option>
             <option value="tr">Türkçe</option></select></div>
-        <div class="field"><label data-i18n="set.theme">Appearance</label>
+        <div class="field"><label for="s_theme" data-i18n="set.theme">Appearance</label>
           <select id="s_theme">
             <option value="system" data-i18n="set.themeSystem">Follow the system</option>
             <option value="light" data-i18n="set.themeLight">Light</option>
             <option value="dark" data-i18n="set.themeDark">Dark</option>
           </select></div>
-        <div class="field"><label data-i18n="set.lang">Spoken language</label>
+        <div class="field"><label for="s_language" data-i18n="set.lang">Spoken language</label>
           <select id="s_language"><option value="en">English</option>
             <option value="tr">Türkçe</option>
             <option value="" data-i18n="set.autoDetect">Auto-detect</option></select></div>
-        <div class="field"><label data-i18n="set.sumLang">Summary language</label>
+        <div class="field"><label for="s_sumlang" data-i18n="set.sumLang">Summary language</label>
           <select id="s_sumlang"><option value="en">English</option>
             <option value="tr">Türkçe</option></select></div>
-        <div class="field"><label data-i18n="set.whisper">Speech model — pick one and download it</label>
+        <div class="field"><label for="s_model" data-i18n="set.whisper">Speech model — pick one and download it</label>
           <div class="row"><select id="s_model" class="grow"></select>
             <button id="dlWhisper" class="mini" type="button" data-i18n="set.whisperDlBtn">Download</button>
             <button id="cancelWhisperDl" class="mini danger" type="button"
                     data-i18n-title="set.dlCancelTitle" data-i18n="set.dlCancel"
                     style="display:none;">✕ Cancel</button></div>
           <div id="whisperDlNote" class="dlnote"></div></div>
-        <div class="field"><label data-i18n="set.device">Device</label>
+        <div class="field"><label for="s_device" data-i18n="set.device">Device</label>
           <select id="s_device"><option value="auto" data-i18n="set.auto">Automatic</option>
             <option value="cpu">CPU</option></select>
           <div data-i18n="set.deviceNote" style="font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.6;margin-top:6px;">Used for transcription and for the
             built-in summarizer. Automatic prefers a discrete card over an integrated one.</div></div>
-        <div class="field check"><input type="checkbox" id="s_diar"><label data-i18n="set.diarOn">Separate speakers</label></div>
-        <div class="field check"><input type="checkbox" id="s_updates"><label data-i18n="set.updates">Check GitHub for new releases (once a day; nothing else is sent)</label></div>
+        <div class="field check"><input type="checkbox" id="s_diar"><label for="s_diar" data-i18n="set.diarOn">Separate speakers</label></div>
+        <div class="field check"><input type="checkbox" id="s_updates"><label for="s_updates" data-i18n="set.updates">Check GitHub for new releases (once a day; nothing else is sent)</label></div>
         <div class="field" style="font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.6;">
           <span data-i18n="set.version">This build:</span> <code id="s_version">…</code></div>
       </div>
@@ -371,13 +371,13 @@
            aria-labelledby="setTab_output" hidden>
       <div class="grp">
         <div class="t" data-i18n="set.outGrp">Output &amp; Automation</div>
-        <div class="field"><label data-i18n="set.outDir">Output folder</label>
+        <div class="field"><label for="s_outdir" data-i18n="set.outDir">Output folder</label>
           <input type="text" id="s_outdir" placeholder="~/Transcriptor"></div>
-        <div class="field check"><input type="checkbox" id="s_saveaudio"><label data-i18n="set.saveAudio">Save the audio (audio.wav)</label></div>
-        <div class="field check"><input type="checkbox" id="s_savetx"><label data-i18n="set.saveTx">Save the transcript (transcript.txt/.json)</label></div>
-        <div class="field check"><input type="checkbox" id="s_savesum"><label data-i18n="set.saveSum">Save the summary (summary.txt)</label></div>
-        <div class="field check"><input type="checkbox" id="s_autotx"><label data-i18n="set.autoTx">Transcribe automatically when the recording stops</label></div>
-        <div class="field check"><input type="checkbox" id="s_autosum"><label data-i18n="set.autoSum">Summarize automatically when processing finishes</label></div>
+        <div class="field check"><input type="checkbox" id="s_saveaudio"><label for="s_saveaudio" data-i18n="set.saveAudio">Save the audio (audio.wav)</label></div>
+        <div class="field check"><input type="checkbox" id="s_savetx"><label for="s_savetx" data-i18n="set.saveTx">Save the transcript (transcript.txt/.json)</label></div>
+        <div class="field check"><input type="checkbox" id="s_savesum"><label for="s_savesum" data-i18n="set.saveSum">Save the summary (summary.txt)</label></div>
+        <div class="field check"><input type="checkbox" id="s_autotx"><label for="s_autotx" data-i18n="set.autoTx">Transcribe automatically when the recording stops</label></div>
+        <div class="field check"><input type="checkbox" id="s_autosum"><label for="s_autosum" data-i18n="set.autoSum">Summarize automatically when processing finishes</label></div>
         <div class="field" data-i18n="set.outNote" style="font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.6;">
           Every recording gets its own timestamped folder here. The Library tab reads
           this folder.</div>
@@ -388,29 +388,29 @@
            aria-labelledby="setTab_llm" hidden>
       <div class="grp">
         <div class="t" data-i18n="set.llmGrp">Summarizer · llama.cpp</div>
-        <div class="field"><label data-i18n="set.llmMode">Mode</label>
+        <div class="field"><label for="s_llmbackend" data-i18n="set.llmMode">Mode</label>
           <select id="s_llmbackend">
             <option value="embedded" data-i18n="set.llmEmbedded">Embedded (llama.cpp) — nothing to install</option>
             <option value="remote" data-i18n="set.llmRemote">Remote server (LM Studio / Ollama / llama-server)</option>
           </select></div>
 
         <div id="llmEmbedded">
-          <div class="field"><label data-i18n="set.llmDl">Download a ready-made model (optional, one time)</label>
+          <div class="field"><label for="s_llmdl" data-i18n="set.llmDl">Download a ready-made model (optional, one time)</label>
             <div class="row"><select id="s_llmdl" class="grow"></select>
               <button id="dlLlm" class="mini" type="button" data-i18n="set.llmDlBtn">Download</button>
               <button id="cancelLlmDl" class="mini danger" type="button"
                       data-i18n-title="set.llmDlCancelTitle" data-i18n="set.llmDlCancel"
                       style="display:none;">✕ Cancel</button></div>
             <div id="llmDlNote" class="dlnote"></div></div>
-          <div class="field"><label data-i18n="set.gguf">GGUF model</label>
+          <div class="field"><label for="s_ggufsel" data-i18n="set.gguf">GGUF model</label>
             <div class="row"><select id="s_ggufsel" class="grow"></select>
               <button id="rescanGguf" class="mini" type="button" data-i18n="set.scan">Scan</button></div></div>
         </div>
 
         <div id="llmRemote">
-          <div class="field"><label data-i18n="set.llmUrl">Server URL</label>
+          <div class="field"><label for="s_llmurl" data-i18n="set.llmUrl">Server URL</label>
             <input type="text" id="s_llmurl" placeholder="http://127.0.0.1:1234/v1"></div>
-          <div class="field"><label data-i18n="set.model">Model</label>
+          <div class="field"><label for="s_llmmodel" data-i18n="set.model">Model</label>
             <div class="row"><select id="s_llmmodel" class="grow"></select>
               <button id="fetchModels" class="mini" type="button" data-i18n="set.fetch">Fetch</button></div></div>
         </div>
@@ -421,13 +421,13 @@
            aria-labelledby="setTab_tpl" hidden>
       <div class="grp">
         <div class="t" data-i18n="set.tplGrp">Note templates · edit</div>
-        <div class="field"><label data-i18n="set.tplPick">Template to edit</label>
+        <div class="field"><label for="s_tplsel" data-i18n="set.tplPick">Template to edit</label>
           <select id="s_tplsel"></select></div>
-        <div class="field" id="s_tplnamefield"><label data-i18n="set.tplName">Template name</label>
+        <div class="field" id="s_tplnamefield"><label for="s_tplname" data-i18n="set.tplName">Template name</label>
           <input type="text" id="s_tplname" maxlength="60" data-i18n-ph="set.tplNamePh" placeholder="e.g. Customer Call"></div>
-        <div class="field"><label data-i18n="set.tplPrompt">Template instruction (the system prompt given to the summarizer)</label>
+        <div class="field"><label for="s_tplprompt" data-i18n="set.tplPrompt">Template instruction (the system prompt given to the summarizer)</label>
           <textarea id="s_tplprompt" rows="6"></textarea></div>
-        <div class="field"><label data-i18n="set.tplCtx">Persistent extra context (added to every summary from this template)</label>
+        <div class="field"><label for="s_tplctx" data-i18n="set.tplCtx">Persistent extra context (added to every summary from this template)</label>
           <textarea id="s_tplctx" rows="3" data-i18n-ph="set.tplCtxPh" placeholder="e.g. Our company is Acme; focus on decisions and action items."></textarea></div>
         <div class="field tpl-actions">
           <button id="s_tplnew" class="mini" type="button" data-i18n="set.tplNew">+ New template</button>
@@ -442,15 +442,15 @@
 
         <div class="grp">
           <div class="t" data-i18n="set.sttGrp">Transcription · STT</div>
-          <div class="field"><label data-i18n="set.modelFile">Model file (empty = download automatically)</label>
+          <div class="field"><label for="s_whisperpath" data-i18n="set.modelFile">Model file (empty = download automatically)</label>
             <input type="text" id="s_whisperpath" placeholder="…/ggml-large-v3.bin"></div>
         </div>
 
         <div class="grp">
           <div class="t" data-i18n="set.mixGrp">Audio mix · Microphone + System</div>
-          <div class="field"><label data-i18n="set.sysGain">System audio gain (0–4)</label>
+          <div class="field"><label for="s_sysgain" data-i18n="set.sysGain">System audio gain (0–4)</label>
             <input type="number" id="s_sysgain" min="0" max="4" step="0.1"></div>
-          <div class="field"><label data-i18n="set.micGain">Microphone gain (0–4)</label>
+          <div class="field"><label for="s_micgain" data-i18n="set.micGain">Microphone gain (0–4)</label>
             <input type="number" id="s_micgain" min="0" max="4" step="0.1"></div>
           <div class="field" data-i18n="set.mixNote" style="font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.6;">
             Picking a microphone in the source row mixes it into the system audio.
@@ -459,12 +459,12 @@
 
         <div class="grp">
           <div class="t" data-i18n="set.diarGrp">Speaker separation · sherpa-onnx</div>
-          <div class="field"><label data-i18n="set.nspk">Number of speakers (0 = detect automatically)</label>
+          <div class="field"><label for="s_nspk" data-i18n="set.nspk">Number of speakers (0 = detect automatically)</label>
             <input type="number" id="s_nspk" min="0" max="20" step="1"></div>
           <div class="field"><div id="clthrNote" class="dlnote"></div></div>
-          <div class="field"><label data-i18n="set.segModel">Segmentation model (empty = download automatically)</label>
+          <div class="field"><label for="s_segmodel" data-i18n="set.segModel">Segmentation model (empty = download automatically)</label>
             <input type="text" id="s_segmodel" placeholder="…/segmentation.onnx"></div>
-          <div class="field"><label data-i18n="set.embModel">Speaker-embedding model (empty = download automatically)</label>
+          <div class="field"><label for="s_embmodel" data-i18n="set.embModel">Speaker-embedding model (empty = download automatically)</label>
             <input type="text" id="s_embmodel" placeholder="…/speaker-embedding.onnx"></div>
           <div class="field" style="font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.6;">
             <span data-i18n="set.diarNote1">The ONNX build of pyannote segmentation-3.0 is used — no token
@@ -475,24 +475,24 @@
         <div class="grp">
           <div class="t" data-i18n="set.llmTuneGrp">Summarizer · fine-tuning</div>
           <div id="advLlmEmbedded">
-            <div class="field"><label data-i18n="set.llmPath">Model file path (type it if it is not in the list)</label>
+            <div class="field"><label for="s_llmpath" data-i18n="set.llmPath">Model file path (type it if it is not in the list)</label>
               <input type="text" id="s_llmpath" placeholder="…/qwen2.5-7b-instruct-q4_k_m.gguf"></div>
-            <div class="field"><label data-i18n="set.llmCtx">Context size (tokens) — 0 = automatic, from the model and the free memory</label>
+            <div class="field"><label for="s_llmctx" data-i18n="set.llmCtx">Context size (tokens) — 0 = automatic, from the model and the free memory</label>
               <input type="number" id="s_llmctx" min="0" max="131072" step="1024"></div>
-            <div class="field"><label data-i18n="set.llmGpu">Layers offloaded to the GPU (0 = CPU only, 999 = all of them)</label>
+            <div class="field"><label for="s_llmgpu" data-i18n="set.llmGpu">Layers offloaded to the GPU (0 = CPU only, 999 = all of them)</label>
               <input type="number" id="s_llmgpu" min="0" max="999" step="1"></div>
-            <div class="field"><label data-i18n="set.llmMaxTok">Maximum answer length (tokens)</label>
+            <div class="field"><label for="s_llmmaxtok" data-i18n="set.llmMaxTok">Maximum answer length (tokens)</label>
               <input type="number" id="s_llmmaxtok" min="64" max="16384" step="64"></div>
             <div class="field" style="font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.6;">
               <span data-i18n="set.llmNote1">Drop a </span><code>.gguf</code><span data-i18n="set.llmNote2"> into </span><code id="s_modelsdir2">…</code><span data-i18n="set.llmNote3"> — "Scan" picks it up. A recording too long for the context
               window is summarized in chunks and merged.</span></div>
           </div>
           <div id="advLlmRemote">
-            <div class="field"><label data-i18n="set.llmTimeout">Summary timeout (s) — raise it for long or CPU-bound models</label>
+            <div class="field"><label for="s_llmtimeout" data-i18n="set.llmTimeout">Summary timeout (s) — raise it for long or CPU-bound models</label>
               <input type="number" id="s_llmtimeout" min="10" max="3600" step="10"></div>
           </div>
-          <div class="field check"><input type="checkbox" id="s_llmthink"><label data-i18n="set.llmThink">Let the model think first: reasoning models may work through the final summary before writing it, on a budget of their own. Section notes are never written this way.</label></div>
-          <div class="field check"><input type="checkbox" id="s_vram"><label data-i18n="set.vram">Sequence VRAM: unload the LLM during transcription and the STT model during summarizing</label></div>
+          <div class="field check"><input type="checkbox" id="s_llmthink"><label for="s_llmthink" data-i18n="set.llmThink">Let the model think first: reasoning models may work through the final summary before writing it, on a budget of their own. Section notes are never written this way.</label></div>
+          <div class="field check"><input type="checkbox" id="s_vram"><label for="s_vram" data-i18n="set.vram">Sequence VRAM: unload the LLM during transcription and the STT model during summarizing</label></div>
         </div>
       </div>
 

@@ -312,6 +312,17 @@ function enhanceSelect(sel) {
     closeAllSelects();
     if (!wasOpen) wrap.classList.add('open');
   };
+  // The label in the markup names the native select, which is hidden. Hand
+  // it to the button that stands in for it, so clicking the label opens the
+  // list and a screen reader hears "Interface language, English".
+  if (sel.id) {
+    btn.id = sel.id + '_btn';
+    document.querySelectorAll('label[for="' + sel.id + '"]').forEach(l => {
+      l.htmlFor = btn.id;
+      if (!l.id) l.id = sel.id + '_lbl';
+      btn.setAttribute('aria-labelledby', l.id + ' ' + btn.id);
+    });
+  }
   render();
   sel._x = { render, wrap };
   return sel._x;
