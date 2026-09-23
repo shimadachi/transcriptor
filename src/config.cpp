@@ -33,6 +33,21 @@ void get(const nlohmann::json& j, const char* key, T* out) {
     }
 }
 
+// What neither engine reads. Everything else counts, so a setting added
+// later errs on the side of taking effect.
+nlohmann::json engine_view(const Settings& s) {
+    nlohmann::json j = s.to_json();
+    for (const char* key : {"ui_language", "ui_theme", "summary_language",
+                            "summary_template", "template_overrides",
+                            "custom_templates", "output_dir", "save_audio",
+                            "save_transcript", "save_summary", "auto_transcribe",
+                            "auto_summarize", "manage_vram", "check_updates",
+                            "host", "port", "source_id", "mic_gain", "system_gain"}) {
+        j.erase(key);
+    }
+    return j;
+}
+
 }  // namespace
 
 Settings::Settings() {
@@ -232,6 +247,10 @@ paths::fs::path Settings::whisper_model_file() const {
     // wrong reason and print that nonsense in the error.
     if (whisper_model.empty()) return {};
     return paths::models_dir() / ("ggml-" + whisper_model + ".bin");
+}
+
+bool Settings::same_engines(const Settings& other) const {
+    return engine_view(*this) == engine_view(other);
 }
 
 float Settings::cluster_threshold() const {

@@ -10,6 +10,9 @@
 // Two ways in, both from an ffmpeg error message: a 400-byte cut through the
 // middle of a character, and text that was never UTF-8 to begin with -- what a
 // localized Windows error comes back as.
+//
+// V7: the template menu saves one field, and the save checked the stored
+// device on its behalf -- rewriting a card that was only unplugged to "auto".
 
 #include <cstdio>
 #include <cstdlib>
@@ -140,6 +143,42 @@ void test_status_survives_text_that_is_not_utf8() {
                 r.message.find("engellendi") != std::string::npos, r.message);
 }
 
+// The page's own token, which every POST has to carry.
+std::string page_token(httplib::Client& client) {
+    const auto res = client.Get("/");
+    if (!res) return {};
+    const std::string key = "name=\"csrf-token\" content=\"";
+    const auto at = res->body.find(key);
+    if (at == std::string::npos) return {};
+    const auto from = at + key.size();
+    return res->body.substr(from, res->body.find('"', from) - from);
+}
+
+void test_a_one_field_save_keeps_a_missing_device() {
+    const paths::fs::path dir = fresh_dir();
+    Settings s = test_settings(dir / "out");
+    s.device = "Vulkan7";   // a card that is not in this machine right now
+    app::AppState state(s);
+    app::Server server(&state, "127.0.0.1", 0);
+    if (!server.start()) {
+        test::check("V7 the server starts", false);
+        return;
+    }
+    httplib::Client client("127.0.0.1", server.port());
+    const httplib::Headers headers = {{"X-Transcriptor-Token", page_token(client)}};
+    const auto res = client.Post("/api/settings", headers,
+                                 R"({"summary_template": "standup"})",
+                                 "application/json");
+    test::check("V7 the template menu's save is accepted", res && res->status == 200,
+                res ? res->body : "no answer");
+    test::check("V7 it leaves the stored device alone",
+                state.settings_copy().device == "Vulkan7",
+                "device is now \"" + state.settings_copy().device + "\"");
+    test::check("V7 and it saved the template it was sent",
+                state.settings_copy().summary_template == "standup");
+    server.stop();
+}
+
 void test_utf8_cuts() {
     const std::string s = "a\xC5\x9F" "b";   // "aşb"
     test::check("V3 a cut from the front backs off to a character boundary",
@@ -172,6 +211,7 @@ int main(int argc, char** argv) {
     test_utf8_cuts();
     test_status_survives_a_split_character();
     test_status_survives_text_that_is_not_utf8();
+    test_a_one_field_save_keeps_a_missing_device();
 
     return test::summary("api");
 }

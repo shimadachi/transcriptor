@@ -126,6 +126,11 @@ struct Settings {
     // The clustering threshold to hand sherpa, derived from `language`.
     float cluster_threshold() const;
 
+    // Whether the transcriber and the summarizer would come out the same when
+    // built from `other`. Most saves touch neither -- a theme, a template, an
+    // output folder -- and rebuilding them regardless threw away loaded models.
+    bool same_engines(const Settings& other) const;
+
     // Resolved model file locations (managed download path when unset).
     paths::fs::path whisper_model_file() const;
     paths::fs::path segmentation_model_file() const;

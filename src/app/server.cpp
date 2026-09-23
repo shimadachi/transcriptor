@@ -931,11 +931,17 @@ bool Server::start() {
         }
         str("whisper_model_path", &s.whisper_model_path);
         str("language", &s.language);
+        const bool device_sent = body.contains("device");
         str("device", &s.device);
         // Anything but "auto"/"cpu" has to name a device that is actually
         // here; a card that has gone away falls back to automatic rather than
         // silently landing on whichever device happens to hold that slot now.
-        if (s.device != "auto" && s.device != "cpu") {
+        //
+        // Only when the request says which device, though. The template menu
+        // and the theme save one field each, and checking the stored device
+        // on their behalf quietly rewrote a card that was merely unplugged --
+        // the one the settings panel goes out of its way to keep showing.
+        if (device_sent && s.device != "auto" && s.device != "cpu") {
             bool known = false;
             for (const ComputeDevice& d : list_devices()) {
                 if (d.id == s.device) { known = true; break; }

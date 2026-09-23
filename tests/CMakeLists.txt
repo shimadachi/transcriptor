@@ -43,6 +43,14 @@ transcriptor_test(test_diar_threshold
 target_link_libraries(test_diar_threshold PRIVATE nlohmann_json::nlohmann_json)
 add_test(NAME diar_threshold COMMAND test_diar_threshold)
 
+# -- adopting settings (V7) ----------------------------------------------------
+transcriptor_test(test_settings
+    "${TESTS_SRC}/test_settings.cpp"
+    "${APP_SRC}/config.cpp"
+    "${APP_SRC}/util/paths.cpp")
+target_link_libraries(test_settings PRIVATE nlohmann_json::nlohmann_json)
+add_test(NAME settings COMMAND test_settings)
+
 # -- library versions ---------------------------------------------------------
 transcriptor_test(test_library
     "${TESTS_SRC}/test_library.cpp"
@@ -106,7 +114,7 @@ add_test(NAME recording_lifecycle
                  "${CMAKE_CURRENT_BINARY_DIR}/recording_scratch")
 set_tests_properties(recording_lifecycle PROPERTIES TIMEOUT 120)
 
-# -- the HTTP API (V3) ---------------------------------------------------------
+# -- the HTTP API (V3, V7) -----------------------------------------------------
 # What the page is told, read through the real Server over a loopback socket.
 # Links the application the way the lifecycle test does. POSIX only: the config
 # directory can only be moved out of the machine's own through the environment

@@ -275,6 +275,12 @@ void AppState::replace_settings(const Settings& next) {
 
 void AppState::replace_settings_locked(const Settings& next) {
     const std::string old_lang = ui_language();
+    // Rebuilt only when something they read has changed. Replacing them
+    // freed the Whisper model and the GGUF they had loaded, and most saves are
+    // nothing to do with either: the studio's template menu saves on every
+    // pick, so summarizing a transcript twice with two templates read the
+    // summarizer back off disk in between.
+    const bool rebuild = !settings_.same_engines(next);
     settings_ = next;
     lang::set(next.ui_language);
     // An idle status line is a phase default, so re-render it in the new
@@ -283,6 +289,7 @@ void AppState::replace_settings_locked(const Settings& next) {
         message_ = phase_message(phase_, ui_language());
     }
     summary_template_ = next.summary_template;
+    if (!rebuild) return;
     device_ = resolve_device(next.device, next.compute_type);
     // Rebuild lazily: the new device/model only takes effect on the next run.
     processor_ = std::make_unique<pipeline::OfflineProcessor>(settings_, device_);
