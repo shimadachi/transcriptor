@@ -69,6 +69,12 @@ std::vector<std::string> split_transcript(const std::string& text,
     return chunks;
 }
 
+SummaryRequest merge_request(const SummaryRequest& original, const std::string& notes) {
+    SummaryRequest req = original;
+    req.transcript = notes;
+    return req;
+}
+
 std::vector<std::string> split_to_fit(const std::string& text,
                                       std::size_t budget_chars,
                                       const FitsFn& fits) {

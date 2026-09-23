@@ -20,6 +20,7 @@ endfunction()
 transcriptor_test(test_chunking
     "${TESTS_SRC}/test_chunking.cpp"
     "${APP_SRC}/llm/chunking.cpp")
+target_link_libraries(test_chunking PRIVATE nlohmann_json::nlohmann_json)
 add_test(NAME chunking COMMAND test_chunking)
 
 # -- reasoning budget ---------------------------------------------------------

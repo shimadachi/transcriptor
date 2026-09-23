@@ -1,4 +1,4 @@
-// Regression tests for the summary chunking (report findings R8, V8).
+// Regression tests for the summary chunking (report findings R8, V8, V9).
 //
 // The bug: sections were sliced by a fixed chars-per-token guess and never
 // measured, so token-dense text overflowed the context window on the very first
@@ -196,6 +196,29 @@ int main() {
                                   [&](const std::string& s) { return w.fits(s); });
         test::check("a transcript that already fits is not split",
                     parts.size() == 1 && parts[0] == "one small section");
+    }
+
+    // -- V9: the merge keeps what the user said about the recording -----------
+    // The final pass over the section notes dropped the context as "already in
+    // the notes" -- but the section passes only note topics, decisions and
+    // actions, so a long recording's summary came out without the meeting's
+    // title, without who was in it, and without the template's standing
+    // instructions.
+    {
+        SummaryRequest work;
+        work.template_id     = "standup";
+        work.language        = "tr";
+        work.system_override = "Summarize per person.";
+        work.context         = "Başlık: Q3 bütçe\nKatılımcılar: Ayşe, Can";
+        work.transcript      = "the whole long transcript";
+        const SummaryRequest merge = merge_request(work, "- notes from each section");
+        test::check("V9 the merge keeps the context", merge.context == work.context,
+                    merge.context);
+        test::check("V9 the notes stand in for the transcript",
+                    merge.transcript == "- notes from each section");
+        test::check("V9 the template, its prompt and the language carry over",
+                    merge.template_id == "standup" && merge.language == "tr" &&
+                        merge.system_override == work.system_override);
     }
 
     return test::summary("chunking");

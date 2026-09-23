@@ -13,6 +13,8 @@
 #include <string>
 #include <vector>
 
+#include "llm/summarizer.h"
+
 namespace transcriptor::llm {
 
 // A section smaller than this that still does not fit means the fixed part of
@@ -40,6 +42,15 @@ using FitsFn = std::function<bool(const std::string& section)>;
 std::vector<std::string> split_to_fit(const std::string& text,
                                       std::size_t budget_chars,
                                       const FitsFn& fits);
+
+// The request for the pass that merges section notes into the summary. The
+// notes stand in for the transcript; everything else carries over -- above all
+// the context, meaning the template's own and the title, participants and
+// notes typed for this run. The section passes are told only to note topics,
+// decisions and actions, so a merge that dropped the context as "already in
+// the notes" wrote a long recording's summary without the meeting's name or
+// who was in it, and without the template's standing instructions.
+SummaryRequest merge_request(const SummaryRequest& original, const std::string& notes);
 
 // Raised by split_to_fit when no amount of splitting can help. Translated into
 // a user-facing SummarizerError by the caller, which knows the language.

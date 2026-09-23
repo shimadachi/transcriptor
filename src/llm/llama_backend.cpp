@@ -226,11 +226,10 @@ public:
         // every section had already been paid for. Each pass is the same work
         // one level up, so the notes shrink geometrically; the cap is there
         // because a pass that cannot split is a pass that cannot shrink.
-        SummaryRequest final_req = work;
-        final_req.context.clear();   // already folded into the notes
+        SummaryRequest final_req = merge_request(work, notes);
         bool merged = false;
         for (int pass = 0; pass < kMaxReducePasses; ++pass) {
-            final_req.transcript = notes;
+            final_req = merge_request(work, notes);
             if (fits(system, build_user_message(final_req), think)) {
                 merged = true;
                 break;
@@ -251,7 +250,7 @@ public:
             // the same place.
             if (notes.size() >= before) break;
         }
-        final_req.transcript = notes;
+        final_req = merge_request(work, notes);
 
         // Every way out of that loop except a successful fit lands here with
         // notes that are still too big. Say so, rather than handing them to
