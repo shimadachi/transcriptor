@@ -106,13 +106,25 @@ bool save_text(const fs::path& path, const std::string& text) {
     return paths::write_file(path, text);
 }
 
+namespace {
+
+// A byte that is not UTF-8 becomes U+FFFD rather than an exception. Whisper
+// can end a segment halfway through a multi-byte character, and throwing here
+// lost the whole transcript over it: the .json could not be produced, so the
+// .txt beside it was never written either, and the job ended as an error.
+std::string dump_lenient(const nlohmann::json& obj) {
+    return obj.dump(2, ' ', false, nlohmann::json::error_handler_t::replace);
+}
+
+}  // namespace
+
 bool save_json(const fs::path& path, const nlohmann::json& obj) {
-    return paths::write_file(path, obj.dump(2));
+    return paths::write_file(path, dump_lenient(obj));
 }
 
 bool save_transcript(const fs::path& txt_path, const std::string& text,
                      const fs::path& json_path, const nlohmann::json& obj) {
-    return paths::write_files({{txt_path, text}, {json_path, obj.dump(2)}});
+    return paths::write_files({{txt_path, text}, {json_path, dump_lenient(obj)}});
 }
 
 bool open_in_file_manager(const fs::path& path) {

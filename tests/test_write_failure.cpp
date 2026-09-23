@@ -11,6 +11,8 @@
 // the failure honestly -- and left zero bytes where the old summary had been.
 //
 // RLIMIT_FSIZE=0 makes every write fail while leaving the filesystem alone.
+//
+// V4 lives here too: a transcript lost because its JSON could not be written.
 
 #include "util/export.h"
 #include "util/paths.h"
@@ -147,6 +149,29 @@ int main(int argc, char** argv) {
                 exporter::save_transcript(tx_txt, "second pass\n", tx_json, new_json) &&
                     contents(tx_txt) == "second pass\n" &&
                     contents(tx_json) == new_json.dump(2));
+
+    // -- V4: a transcript that is not quite UTF-8 ------------------------------
+    // Whisper can end a segment halfway through a multi-byte character. The
+    // strict serializer threw on it, so neither file was written and the whole
+    // transcript was lost over one byte.
+    const paths::fs::path bad_txt  = dir / "split.txt";
+    const paths::fs::path bad_json = dir / "split.json";
+    const std::string split = std::string("Toplant\xC4") + "\n";   // half of 'ı'
+    paths::fs::remove(bad_txt, ec);
+    paths::fs::remove(bad_json, ec);
+    bool split_ok = false;
+    std::string split_error;
+    try {
+        split_ok = exporter::save_transcript(bad_txt, split, bad_json,
+                                             nlohmann::json{{"text", split}});
+    } catch (const std::exception& e) {
+        split_error = e.what();
+    }
+    test::check("V4 a transcript with a split character is still saved",
+                split_ok && size_of(bad_txt) > 0 && size_of(bad_json) > 0,
+                split_error.empty() ? "" : "threw: " + split_error);
+    test::check("V4 its .json still parses",
+                !nlohmann::json::parse(contents(bad_json), nullptr, false).is_discarded());
 
     return test::summary("write failure");
 }
