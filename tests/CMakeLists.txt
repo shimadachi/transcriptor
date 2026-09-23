@@ -74,6 +74,18 @@ if(UNIX)
     set_tests_properties(process_runner PROPERTIES TIMEOUT 60)
 endif()
 
+# -- mixing a microphone into system audio (V2) --------------------------------
+# The real Recorder against the stand-in capture, which can make one source
+# silent the way WASAPI loopback is while nothing plays.
+transcriptor_test(test_mixing
+    "${TESTS_SRC}/test_mixing.cpp"
+    "${TESTS_SRC}/fake_capture.cpp"
+    "${APP_SRC}/audio/recorder.cpp")
+find_package(Threads REQUIRED)
+target_link_libraries(test_mixing PRIVATE Threads::Threads)
+add_test(NAME mixing COMMAND test_mixing)
+set_tests_properties(mixing PROPERTIES TIMEOUT 60)
+
 # -- recording lifecycle (R1, R4, G6, N6) -------------------------------------
 # The one test that links the application itself, because these bugs are in how
 # AppState, the Recorder and the worker thread fit together. Only the audio

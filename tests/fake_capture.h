@@ -30,6 +30,11 @@ void fail_start(const std::string& message);
 // instead of depending on how long the test happens to sleep.
 void set_total_samples(std::size_t n);
 
+// The same, for one source only; it wins over set_total_samples() for that id.
+// Zero is a system loopback with nothing playing: WASAPI delivers no frames at
+// all then, rather than frames of silence.
+void set_source_samples(const std::string& source_id, std::size_t n);
+
 // Reports a device failure, as an unplugged headset does. The audio captured
 // before it is still handed back.
 void set_error(const std::string& message);

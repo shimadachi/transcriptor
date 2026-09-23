@@ -7,6 +7,7 @@
 
 #include "audio/capture.h"
 
+#include <map>
 #include <mutex>
 #include <stdexcept>
 
@@ -22,6 +23,7 @@ struct Control {
     std::string           start_failure;
     std::string           error;
     std::size_t           total_samples = 0;
+    std::map<std::string, std::size_t> source_samples;
 
     int starts = 0;
     int stops  = 0;
@@ -45,6 +47,7 @@ void reset() {
     c.start_failure.clear();
     c.error.clear();
     c.total_samples = 0;
+    c.source_samples.clear();
     c.starts = c.stops = c.running = 0;
 }
 
@@ -70,6 +73,12 @@ void set_total_samples(std::size_t n) {
     Control& c = control();
     std::lock_guard<std::mutex> lock(c.mutex);
     c.total_samples = n;
+}
+
+void set_source_samples(const std::string& source_id, std::size_t n) {
+    Control& c = control();
+    std::lock_guard<std::mutex> lock(c.mutex);
+    c.source_samples[source_id] = n;
 }
 
 void set_error(const std::string& message) {
@@ -120,7 +129,9 @@ void AudioCapture::start() {
         std::lock_guard<std::mutex> lock(c.mutex);
         hook = c.start_hook;
         failure = c.start_failure;
-        impl_->remaining = c.total_samples;
+        const auto own = c.source_samples.find(source_.id);
+        impl_->remaining =
+            own != c.source_samples.end() ? own->second : c.total_samples;
     }
     // Outside the lock: a hook is there precisely so the test can drive this
     // AppState from another thread while the open is in progress.

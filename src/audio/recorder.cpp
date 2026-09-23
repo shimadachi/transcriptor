@@ -9,6 +9,12 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
+// How far one source may run ahead of the other before the one behind is taken
+// to have gone quiet. Devices deliver in periods of about a quarter second, so
+// a healthy pair is never more than a period or two apart; a second is well
+// past that, and short enough that the mix never trails the room by much.
+constexpr double kMaxSkewSeconds = 1.0;
+
 double seconds_since(Clock::time_point t) {
     return std::chrono::duration<double>(Clock::now() - t).count();
 }
@@ -112,7 +118,7 @@ void Recorder::run_mixed() {
     while (!stop_flag_.load()) {
         const bool got = pump_carry();
         std::vector<float> mixed;
-        if (!take_mixed(&mixed)) {
+        if (!take_mixed(&mixed, /*flush=*/false)) {
             if (!got) std::this_thread::sleep_for(std::chrono::milliseconds(20));
             continue;
         }
@@ -138,7 +144,7 @@ bool Recorder::pump_carry() {
     return got;
 }
 
-bool Recorder::take_mixed(std::vector<float>* out) {
+bool Recorder::take_mixed(std::vector<float>* out, bool flush) {
     const bool mic_dead = mic_capture_ && !mic_capture_->error().empty();
 
     if (mic_dead) {
@@ -150,6 +156,24 @@ bool Recorder::take_mixed(std::vector<float>* out) {
         carry_[0].clear();
         carry_[1].clear();
         return true;
+    }
+
+    // A source can go quiet without failing. WASAPI loopback delivers no
+    // frames at all while nothing is playing -- miniaudio waits on it rather
+    // than producing silence -- and mixing only as much as both sides had
+    // meant the microphone was held back for as long as the speakers stayed
+    // silent, then dropped at Stop: an in-person meeting recorded as "system +
+    // mic" came out empty. So a side that falls more than kMaxSkewSeconds
+    // behind is made up with silence, and at the end of a take the shorter
+    // side is, whatever the gap, so the last words are not left in the carry.
+    const std::size_t have_sys = carry_[0].size();
+    const std::size_t have_mic = carry_[1].size();
+    const std::size_t longer = std::max(have_sys, have_mic);
+    const std::size_t max_skew =
+        static_cast<std::size_t>(static_cast<double>(samplerate_) * kMaxSkewSeconds);
+    if (flush || longer - std::min(have_sys, have_mic) > max_skew) {
+        carry_[0].resize(longer, 0.0f);
+        carry_[1].resize(longer, 0.0f);
     }
 
     const std::size_t n = std::min(carry_[0].size(), carry_[1].size());
@@ -202,7 +226,7 @@ std::vector<float> Recorder::stop() {
         } else {
             pump_carry();
             std::vector<float> mixed;
-            while (take_mixed(&mixed)) append(mixed);
+            while (take_mixed(&mixed, /*flush=*/true)) append(mixed);
         }
     }
 

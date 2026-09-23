@@ -49,7 +49,8 @@ private:
     void run_single();
     void run_mixed();
     bool pump_carry();
-    bool take_mixed(std::vector<float>* out);
+    // `flush` evens the two sides up with silence first, for the end of a take.
+    bool take_mixed(std::vector<float>* out, bool flush);
     void append(const std::vector<float>& block);
 
     int   samplerate_;
