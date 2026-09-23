@@ -51,6 +51,9 @@ const STR = {
   'src.micNone':      {en: '+ No mic', tr: '+ Mik yok'},
   'saved.k':        {en: 'Saved →', tr: 'Kaydedildi →'},
   'saved.open':     {en: 'Open Folder', tr: 'Klasörü Aç'},
+  // The same row when something in the folder could not be written: it only
+  // says where the folder is, and "Not saved" above it says what is missing.
+  'saved.folder':   {en: 'Folder →', tr: 'Klasör →'},
   // Shown when saving was asked for and did not happen: the take is in memory
   // only, and closing the window ends it.
   'saved.failed':   {en: 'Not saved →', tr: 'Kaydedilemedi →'},

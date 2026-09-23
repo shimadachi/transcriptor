@@ -473,6 +473,10 @@ async function poll() {
   const saved = $('savedRow');
   if (s.output_dir) { saved.style.display = 'flex'; $('savedPath').textContent = s.output_dir; }
   else saved.style.display = 'none';
+  // A folder that exists is not a take that was saved. With a write failed,
+  // "Saved →" beside "Not saved →" contradicted itself about the same folder,
+  // so the row only says where the folder is.
+  $('savedK').textContent = t(s.save_error ? 'saved.folder' : 'saved.k');
 
   // …and what could not be written. Stays up until the next take: a recording
   // that only exists in memory is one the user loses by closing the window, so

@@ -13,6 +13,7 @@
 //   V6  numbered summary sections all rendered as "1.", their bullets flattened
 //   V12 a stopped library re-run was announced as done, and could not be
 //       stopped from the library at all
+//   V17 "Saved →" and "Not saved →" stood side by side for the same folder
 
 const path = require('path');
 const {createEnv} = require('./harness');
@@ -741,6 +742,22 @@ async function run() {
     check('V12 and asks the server to stop the job alone',
           env.server.cancels.length === 1 && env.server.cancels[0].body.job_only === true,
           JSON.stringify(env.server.cancels.map(c => c.body)));
+  }
+
+  // ---------------------------------------------------------------- V17 ----
+  {
+    const env = createEnv(ROOT);
+    Object.assign(env.server.state, {output_dir: '/out/2026-09-23_10-00-00',
+      save_error: 'The audio could not be written to /out/2026-09-23_10-00-00'});
+    await env.app.poll();
+    const label = () => (env.els.savedK || {}).textContent;
+    check('V17 a folder whose take failed to write is not called saved',
+          label() === 'saved.folder' && env.els.saveErr.style.display === 'flex',
+          String(label()));
+    env.server.state.save_error = null;
+    await env.app.poll();
+    check('a take that was written is still "Saved"',
+          label() === 'saved.k', String(label()));
   }
 
   console.log(failures ? `\nui: ${failures} check(s) FAILED`
