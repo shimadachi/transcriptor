@@ -68,8 +68,8 @@ transcriptor_test(test_library
 add_test(NAME library
          COMMAND test_library "${CMAKE_CURRENT_BINARY_DIR}/library_scratch")
 
-# -- downloads into folders the code page cannot spell (V13) -------------------
-# Runs everywhere, but only Windows ever converted the path to the code page.
+# -- names ASCII cannot spell: downloads (V13) and uploads (V15) ---------------
+# Runs everywhere; the download half can only fail the old way on Windows.
 transcriptor_test(test_unicode_paths
     "${TESTS_SRC}/test_unicode_paths.cpp"
     "${APP_SRC}/util/net.cpp"

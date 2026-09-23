@@ -1,9 +1,13 @@
 #include "util/paths.h"
 
+#include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
+
+#include "util/utf8.h"
 
 #ifdef _WIN32
 #  include <windows.h>
@@ -129,6 +133,70 @@ fs::path from_utf8(const std::string& s) {
 #else
     return fs::path(s);
 #endif
+}
+
+std::string safe_filename(const std::string& name) {
+    std::string base = name;
+    const auto slash = base.find_last_of("/\\");
+    if (slash != std::string::npos) base = base.substr(slash + 1);
+
+    // Letters outside ASCII are kept whole. Replacing every byte of them
+    // turned "Toplantı kaydı.wav" into "Toplant__ kayd__.wav" -- in an app
+    // whose users name their files in Turkish. A byte that is not part of a
+    // well-formed character still goes.
+    std::string out;
+    for (std::size_t i = 0; i < base.size();) {
+        const auto c = static_cast<unsigned char>(base[i]);
+        if (c >= 0x80) {
+            const std::size_t n = (c >> 5) == 0x6 ? 1 : (c >> 4) == 0xE ? 2
+                                : (c >> 3) == 0x1E ? 3 : 0;
+            bool whole = n > 0 && i + n < base.size();
+            for (std::size_t k = 1; whole && k <= n; ++k) {
+                whole = utf8::continuation_byte(base[i + k]);
+            }
+            if (whole) {
+                out.append(base, i, n + 1);
+                i += n + 1;
+            } else {
+                out += '_';
+                ++i;
+            }
+            continue;
+        }
+        const bool ok = std::isalnum(c) || c == '.' || c == '-' || c == '_' || c == ' ';
+        out += ok ? static_cast<char>(c) : '_';
+        ++i;
+    }
+
+    // Dots and spaces at either end: ".." names the parent folder, a leading
+    // dot hides the file, and Windows drops trailing ones on its own.
+    const auto first = out.find_first_not_of(". ");
+    if (first == std::string::npos) return "audio";
+    out = out.substr(first, out.find_last_not_of(". ") - first + 1);
+
+    // CON, NUL, COM1 and the rest are devices on Windows, extension or not.
+    std::string stem = out.substr(0, out.find('.'));
+    std::transform(stem.begin(), stem.end(), stem.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
+    static const char* kDevices[] = {"CON", "PRN", "AUX", "NUL"};
+    const bool numbered = stem.size() == 4 && (stem.rfind("COM", 0) == 0 ||
+                                               stem.rfind("LPT", 0) == 0) &&
+                          stem[3] >= '1' && stem[3] <= '9';
+    if (numbered || std::find(std::begin(kDevices), std::end(kDevices), stem) !=
+                        std::end(kDevices)) {
+        out = "_" + out;
+    }
+
+    // Most file systems stop at 255 bytes, and the upload's temp file puts a
+    // prefix in front of this. Keep the extension; shorten the rest.
+    constexpr std::size_t kMaxBytes = 150;
+    if (out.size() > kMaxBytes) {
+        const auto dot = out.rfind('.');
+        const std::string ext =
+            (dot != std::string::npos && out.size() - dot <= 16) ? out.substr(dot) : "";
+        out = utf8::head(out.substr(0, out.size() - ext.size()), kMaxBytes - ext.size()) + ext;
+    }
+    return out;
 }
 
 bool read_file(const fs::path& p, std::string* out) {

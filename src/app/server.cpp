@@ -161,22 +161,6 @@ json device_list_json() {
     return out;
 }
 
-// Strip directory components and anything hostile from an uploaded filename.
-std::string safe_filename(const std::string& name) {
-    std::string base = name;
-    const auto slash = base.find_last_of("/\\");
-    if (slash != std::string::npos) base = base.substr(slash + 1);
-
-    std::string out;
-    for (char c : base) {
-        const bool ok = std::isalnum(static_cast<unsigned char>(c)) || c == '.' ||
-                        c == '-' || c == '_' || c == ' ';
-        out += ok ? c : '_';
-    }
-    out = trim(out);
-    return out.empty() ? "audio" : out;
-}
-
 // Custom template ids are minted by the UI and land in config.json and in URLs
 // of nothing else, but keep them boring anyway: no separators, no surprises.
 bool valid_template_id(const std::string& id) {
@@ -448,7 +432,7 @@ bool Server::start() {
             return send_error(res, L("No file selected.", "Dosya seçilmedi."));
         }
 
-        const std::string name = safe_filename(file.filename);
+        const std::string name = paths::safe_filename(file.filename);
         // Named from the same CSPRNG as the session token. std::rand() is never
         // seeded anywhere in this program, so every run produced the identical
         // sequence: the first upload of every run landed on the same path in a

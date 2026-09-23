@@ -30,6 +30,12 @@ std::string to_utf8(const fs::path& p);
 
 fs::path from_utf8(const std::string& s);
 
+// A file name built from one someone else chose -- an upload's -- that can be
+// created on every platform: no directories, no separators or characters a
+// file system refuses, no Windows device name, and short enough to leave room
+// for a prefix. Letters outside ASCII are kept; they are the name.
+std::string safe_filename(const std::string& name);
+
 bool read_file(const fs::path& p, std::string* out);
 
 // Replace a file's contents. The destination is left untouched unless the whole
