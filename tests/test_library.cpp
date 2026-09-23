@@ -159,6 +159,28 @@ void test_a_session_of_only_named_versions_is_listed() {
           library::describe(dir).preview);
 }
 
+// V16: the upload accepts anything the browser calls audio or video, and the
+// library only knew sixteen extensions. A session holding just an uploaded
+// .aiff was transcribed and saved, then never listed.
+void test_an_upload_in_any_format_is_listed() {
+    const library::fs::path root = g_scratch / "formats";
+    std::error_code ec;
+    int n = 0;
+    for (const char* name : {"interview.aiff", "voice memo.amr", "call.3gp",
+                             "board meeting.caf", "lecture.mka", "phone.m4b"}) {
+        const library::fs::path dir = root / ("2026-09-22_09-00-0" + std::to_string(n++));
+        library::fs::create_directories(dir, ec);
+        touch(dir / name);
+        check((std::string("V16 a session holding only ") + name + " has audio").c_str(),
+              library::find_audio(dir) == name, library::find_audio(dir));
+    }
+    check("V16 and every one of them is listed",
+          library::list(paths::to_utf8(root)).size() == 6,
+          std::to_string(library::list(paths::to_utf8(root)).size()));
+    check("an extension the browser can play is served as what it is",
+          library::content_type_for("interview.aiff") == "audio/aiff");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -176,5 +198,6 @@ int main(int argc, char** argv) {
     test_scan_lists_originals_first();
     test_a_json_only_transcript_is_not_lost();
     test_a_session_of_only_named_versions_is_listed();
+    test_an_upload_in_any_format_is_listed();
     return test::summary("library");
 }

@@ -12,10 +12,19 @@ namespace {
 
 // Playable in an <audio> element, or at least worth offering back to the user:
 // recordings are audio.wav, but an uploaded file keeps whatever name it had.
+//
+// The upload takes anything the browser calls audio or video, and ffmpeg
+// decodes far more than the formats a browser plays. A session whose only
+// media had an extension missing from here was not a session at all as far
+// as the library could tell -- an uploaded .aiff was transcribed, saved, and
+// then never listed. So the list is of what arrives, not of what plays.
 const std::set<std::string>& media_extensions() {
     static const std::set<std::string> kExt = {
         ".wav", ".mp3", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".flac",
         ".webm", ".weba", ".mp4", ".m4v", ".mkv", ".mov", ".avi", ".wma",
+        ".aif", ".aiff", ".aifc", ".caf", ".amr", ".3gp", ".3g2", ".wv",
+        ".ape", ".ac3", ".mka", ".mpg", ".mpeg", ".mp2", ".mpga", ".m4b",
+        ".ts", ".mts", ".m2ts", ".wmv", ".flv", ".spx", ".au", ".snd",
     };
     return kExt;
 }
@@ -220,6 +229,15 @@ std::string content_type_for(const std::string& filename) {
         {".weba", "audio/webm"}, {".mp4", "video/mp4"},   {".m4v", "video/mp4"},
         {".mkv", "video/x-matroska"}, {".mov", "video/quicktime"},
         {".avi", "video/x-msvideo"},  {".wma", "audio/x-ms-wma"},
+        {".aif", "audio/aiff"},  {".aiff", "audio/aiff"}, {".aifc", "audio/aiff"},
+        {".caf", "audio/x-caf"}, {".amr", "audio/amr"},   {".3gp", "video/3gpp"},
+        {".3g2", "video/3gpp2"}, {".wv", "audio/x-wavpack"}, {".ape", "audio/x-ape"},
+        {".ac3", "audio/ac3"},   {".mka", "audio/x-matroska"},
+        {".mpg", "video/mpeg"},  {".mpeg", "video/mpeg"}, {".mp2", "audio/mpeg"},
+        {".mpga", "audio/mpeg"}, {".m4b", "audio/mp4"},   {".ts", "video/mp2t"},
+        {".mts", "video/mp2t"},  {".m2ts", "video/mp2t"}, {".wmv", "video/x-ms-wmv"},
+        {".flv", "video/x-flv"}, {".spx", "audio/ogg"},   {".au", "audio/basic"},
+        {".snd", "audio/basic"},
     };
     const auto dot = filename.find_last_of('.');
     if (dot == std::string::npos) return "application/octet-stream";
