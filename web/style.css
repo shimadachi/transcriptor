@@ -392,7 +392,7 @@ input[type=checkbox]:disabled, input[type=radio]:disabled {
 .lib-status-dot { flex: none; width: 8px; height: 8px; border-radius: 50%;
   background: var(--vu); box-shadow: 0 0 10px var(--vu);
   animation: pulse 2.4s infinite; }
-.lib-status-msg { flex: 1; min-width: 0; color: var(--ink-dim); }
+.lib-status-msg { flex: 1; min-width: 0; color: var(--ink-dim); overflow-wrap: anywhere; }
 .lib-status.err { border-left-color: var(--rec); }
 .lib-status.err .lib-status-msg { color: var(--rec); }
 .lib-status.err .lib-status-dot { background: var(--rec);
@@ -515,7 +515,10 @@ input[type=checkbox]:disabled, input[type=radio]:disabled {
 
 /* readout + meter */
 .readout { display: flex; align-items: center; gap: 14px; font-family: var(--mono); font-size: 13px; }
-#statusMsg { color: var(--ink-dim); }
+/* An error can carry a path or another program's output with no space in it
+   for a long way; min-width lets the flex item shrink, and the wrap lets it
+   break, rather than run off the edge of the panel. */
+#statusMsg { color: var(--ink-dim); min-width: 0; overflow-wrap: anywhere; }
 /* The percentage belongs to the phase it qualifies, not to the row: the row's
    14px gap would read it as a third, unrelated column. The leading space
    pctText() carries is no help here — a flex item's leading white space is
