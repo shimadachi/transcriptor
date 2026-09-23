@@ -249,6 +249,7 @@ $('askNo').onclick  = () => askClose(false);
 $('askBg').onclick = (e) => { if (e.target === $('askBg')) askClose(false); };
 document.addEventListener('keydown', (e) => {
   if (!askResolve) return;
+  const f = document.activeElement;
   if (e.key === 'Escape') { e.preventDefault(); askClose(false); }
   else if (e.key === 'Enter') {
     // Enter answers with the button that has focus. Treating every Enter as
@@ -256,9 +257,17 @@ document.addEventListener('keydown', (e) => {
     // declining. Anywhere else the key is swallowed: nothing behind the dialog
     // may be pressed while it is up.
     e.preventDefault();
-    const f = document.activeElement;
     if (f === $('askYes')) askClose(true);
     else if (f === $('askNo')) askClose(false);
+  } else if (e.key === 'Tab') {
+    // Focus goes round the two answers and nowhere else. Tab from the last
+    // one walked out into the page behind, where Space then pressed whatever
+    // it reached: three Tabs and a Space switched tabs under "Delete this
+    // recording?". With two buttons, either direction is the other one.
+    e.preventDefault();
+    (f === $('askYes') ? $('askNo') : $('askYes')).focus();
+  } else if (e.key === ' ' && f !== $('askYes') && f !== $('askNo')) {
+    e.preventDefault();   // the same rule as Enter, for the other key that presses
   }
 });
 document.addEventListener('click', closeAllSelects);

@@ -15,6 +15,7 @@
 //       stopped from the library at all
 //   V17 "Saved →" and "Not saved →" stood side by side for the same folder
 //   V23 a summary cut off at the maximum answer length was shown as finished
+//   V25 Tab walked out of the confirm dialog, and Space pressed what was behind it
 
 const path = require('path');
 const {createEnv} = require('./harness');
@@ -676,6 +677,32 @@ async function run() {
     env.fireDoc('keydown', {key: 'Enter', preventDefault() {}});
     check('V1 Enter on the button the dialog opens on still confirms',
           (await answer) === true);
+  }
+
+  // ---------------------------------------------------------------- V25 ----
+  // Focus stays on the dialog's two answers. Tab from the last one walked out
+  // into the page behind, and Space there pressed whatever it had reached.
+  {
+    const env = createEnv(ROOT);
+    const answer = env.app.ask({title: 'Delete this recording?'});
+    const press = (key, extra) => {
+      let prevented = false;
+      env.fireDoc('keydown', Object.assign({key, preventDefault() { prevented = true; }}, extra));
+      return prevented;
+    };
+    const focused = () => env.peek('document.activeElement');
+    const name = () => String(focused() && focused().id);
+
+    check('V25 Tab from the button the dialog opens on stays in the dialog',
+          press('Tab') && focused() === env.els.askNo, name());
+    check('V25 and Shift+Tab goes back round instead of out',
+          press('Tab', {shiftKey: true}) && focused() === env.els.askYes, name());
+    env.peek("$('tabStudio')").focus();       // behind the dialog, however it got there
+    check('V25 Space cannot press anything behind the dialog', press(' '));
+    env.els.askNo.focus();
+    check('V25 Space on an answer is left to press it', !press(' '));
+    env.els.askNo.onclick();
+    await answer;
   }
 
   // ----------------------------------------------------------------- V6 ----
