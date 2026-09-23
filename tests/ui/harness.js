@@ -113,11 +113,15 @@ function createEnv(root, opts) {
     // is whether the request was sent at all.
     cancels: [],
     cancelReply: {stopped: 'job'},
+    // What /api/library lists, and every URL the page asked for, in order.
+    library: {sessions: []},
+    requests: [],
   };
 
   const media = {stopped: 0, ctxClosed: 0, failAt: null, recorders: []};
 
   async function fetchMock(url, opts) {
+    server.requests.push(url);
     if (url === '/api/state') {
       return {json: async () => JSON.parse(JSON.stringify(server.state))};
     }
@@ -143,9 +147,11 @@ function createEnv(root, opts) {
       return {json: async () => ({ok: true})};
     }
     if (url === '/api/cancel') {
-      server.cancels.push({state: JSON.parse(JSON.stringify(server.state))});
+      server.cancels.push({state: JSON.parse(JSON.stringify(server.state)),
+                           body: JSON.parse((opts && opts.body) || '{}')});
       return {json: async () => server.cancelReply};
     }
+    if (url === '/api/library') return {json: async () => server.library};
     if (url === '/api/sources') return {json: async () => ({sources: []})};
     if (url === '/api/settings') return {json: async () => ({templates: [], llm_catalog: []})};
     return {json: async () => ({})};

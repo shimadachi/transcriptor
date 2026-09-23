@@ -2229,6 +2229,7 @@ function renderLibStatus(s) {
   if (box.hidden) return;
 
   box.classList.toggle('err', failed);
+  $('libStop').hidden = !s.processing;
   $('libStatusMsg').textContent = failed ? libRunError : (s.message || '');
   renderProgress('libStatusPct', 'libStatusTrack', 'libStatusFill', jobFraction(s));
 }
@@ -2294,17 +2295,38 @@ function watchLibRun(kind, name) {
     try { s = await api('/api/state'); } catch (e) { return; }
     if (s.processing) return;
     clearInterval(libRunTimer); libRunTimer = null;
-    // Recorded before the panel is rebuilt: the readout above outlives the
-    // toast, which is the whole point of it for a run that failed.
-    libRunError = s.phase === 'error' ? (s.message || t('lib.runFailed')) : '';
-    if (libRunError) toast(libRunError);
-    else toast(t('lib.runDone'));
-    if (!libCurrent) return;
-    await loadLibrary();
-    openLibraryItem(libCurrent, kind === 'transcribe' ? name : libTx,
-                    kind === 'summarize' ? name : libSum);
+    await libRunEnded(kind, name, s);
   }, 900);
 }
+
+// A stopped run ends on "idle", the same phase a finished one reaches once the
+// studio moves on, so job_cancelled is what tells them apart. Reading only
+// the error phase announced a stopped run as done and went to open a version
+// it never wrote.
+async function libRunEnded(kind, name, s) {
+  const stopped = !!s.job_cancelled && s.phase !== 'done' && s.phase !== 'error';
+  // Recorded before the panel is rebuilt: the readout above outlives the
+  // toast, which is the whole point of it for a run that failed.
+  libRunError = s.phase === 'error' ? (s.message || t('lib.runFailed')) : '';
+  if (libRunError) toast(libRunError);
+  else toast(t(stopped ? 'lib.runStopped' : 'lib.runDone'));
+  if (!libCurrent) return;
+  await loadLibrary();
+  // Whatever was on screen is still there after a stop; stay on it.
+  const landed = !libRunError && !stopped;
+  openLibraryItem(libCurrent, landed && kind === 'transcribe' ? name : libTx,
+                  landed && kind === 'summarize' ? name : libSum);
+}
+
+$('libStop').onclick = async () => {
+  const q = CANCEL_ASK.job;
+  const go = await ask({title: t(q.title), body: t(q.body), yes: t(q.yes), no: t(q.no)});
+  if (!go) return;
+  const r = await post('/api/cancel', {job_only: true});
+  if (r && r.error) { toast(r.error); return; }
+  toast(t(r && r.stopped === 'job' ? 'toast.jobStopped' : 'toast.jobAlreadyDone'));
+  poll();
+};
 
 $('libRetx').onclick  = () => openLibRun('transcribe');
 $('libResum').onclick = () => openLibRun('summarize');

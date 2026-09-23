@@ -13,10 +13,17 @@
 //
 // V7: the template menu saves one field, and the save checked the stored
 // device on its behalf -- rewriting a card that was only unplugged to "auto".
+//
+// V12: a stopped job ends on "idle" like any other, so the page could not tell
+// a stopped library re-run from a finished one; and the library's Stop must
+// never fall back to discarding the studio's take.
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <thread>
+#include <vector>
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -25,6 +32,7 @@
 #include "app/state.h"
 #include "check.h"
 #include "fake_capture.h"
+#include "util/export.h"
 #include "util/paths.h"
 #include "util/utf8.h"
 
@@ -67,24 +75,22 @@ bool valid_utf8(const std::string& s) {
     return true;
 }
 
-// ffmpeg that fails, printing `message`. The body is a printf format, so bytes
-// can be given in octal.
-struct FailingDecoder {
+// An ffmpeg on PATH that runs `script` instead of decoding anything.
+struct FakeDecoder {
     paths::fs::path bin;
     std::string     saved_path;
 
-    FailingDecoder(const paths::fs::path& dir, const std::string& printf_format)
+    FakeDecoder(const paths::fs::path& dir, const std::string& script)
         : bin(dir / "bin") {
         std::error_code ec;
         paths::fs::create_directories(bin, ec);
-        paths::write_file(bin / "ffmpeg",
-                          "#!/bin/sh\nprintf '" + printf_format + "'\nexit 1\n");
+        paths::write_file(bin / "ffmpeg", "#!/bin/sh\n" + script);
         paths::fs::permissions(bin / "ffmpeg", paths::fs::perms::owner_all, ec);
         const char* p = std::getenv("PATH");
         saved_path = p ? p : "";
         setenv("PATH", (paths::to_utf8(bin) + ":" + saved_path).c_str(), 1);
     }
-    ~FailingDecoder() { setenv("PATH", saved_path.c_str(), 1); }
+    ~FakeDecoder() { setenv("PATH", saved_path.c_str(), 1); }
 };
 
 // An upload the decoder chokes on, then what /api/state says about it.
@@ -96,7 +102,8 @@ struct StateAfterFailedDecode {
 StateAfterFailedDecode decode_failure(const std::string& ffmpeg_says) {
     const paths::fs::path dir = fresh_dir();
     fake_capture::reset();
-    const FailingDecoder decoder(dir, ffmpeg_says);
+    // The message is a printf format, so bytes can be given in octal.
+    const FakeDecoder decoder(dir, "printf '" + ffmpeg_says + "'\nexit 1\n");
     const paths::fs::path upload = dir / "broken.m4a";
     paths::write_file(upload, std::string(2048, '\x01'));   // not audio
 
@@ -179,6 +186,59 @@ void test_a_one_field_save_keeps_a_missing_device() {
     server.stop();
 }
 
+void test_a_stopped_job_says_so() {
+    const paths::fs::path dir = fresh_dir();
+    fake_capture::reset();
+    // A long decode. exec, so the process a cancel kills is the one holding
+    // the pipe; a shell left behind would keep a sleeping child on it.
+    const FakeDecoder decoder(dir, "exec sleep 10\n");
+    const paths::fs::path upload = dir / "long.m4a";
+    paths::write_file(upload, std::string(2048, '\x01'));
+
+    app::AppState state(test_settings(dir / "out"));
+    std::thread uploader([&] { state.process_file(upload, "long.m4a"); });
+    for (int i = 0; i < 250 && !state.processing(); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    const bool stopped = state.cancel_job();
+    uploader.join();
+    const auto st = state.state_json();
+    test::check("V12 a stopped job is reported as stopped",
+                stopped && st.value("job_cancelled", false) && st["phase"] == "idle",
+                "phase " + st.value("phase", std::string()) + ", job_cancelled " +
+                    (st.value("job_cancelled", false) ? "true" : "false/absent"));
+}
+
+void test_stopping_a_job_never_discards_the_take() {
+    const paths::fs::path dir = fresh_dir();
+    fake_capture::reset();
+    const paths::fs::path wav = dir / "take.wav";
+    exporter::save_audio_wav(wav, std::vector<float>(32000, 0.1f), 16000);
+
+    app::AppState state(test_settings(dir / "out"));
+    app::Server server(&state, "127.0.0.1", 0);
+    if (!server.start() || !state.process_file(wav, "take.wav")) {
+        test::check("V12 a take is waiting to be transcribed", false);
+        return;
+    }
+    httplib::Client client("127.0.0.1", server.port());
+    const httplib::Headers headers = {{"X-Transcriptor-Token", page_token(client)}};
+
+    // No job is running: the library's Stop arrives just after its run ended.
+    auto res = client.Post("/api/cancel", headers, R"({"job_only": true})",
+                           "application/json");
+    test::check("V12 stopping with no job running stops nothing",
+                res && res->body.find("\"none\"") != std::string::npos,
+                res ? res->body : "no answer");
+    test::check("V12 and the studio's take is still there",
+                state.state_json().value("has_audio", false));
+
+    res = client.Post("/api/cancel", headers, "{}", "application/json");
+    test::check("the studio's own Cancel still discards the take",
+                res && !state.state_json().value("has_audio", true));
+    server.stop();
+}
+
 void test_utf8_cuts() {
     const std::string s = "a\xC5\x9F" "b";   // "aşb"
     test::check("V3 a cut from the front backs off to a character boundary",
@@ -212,6 +272,8 @@ int main(int argc, char** argv) {
     test_status_survives_a_split_character();
     test_status_survives_text_that_is_not_utf8();
     test_a_one_field_save_keeps_a_missing_device();
+    test_a_stopped_job_says_so();
+    test_stopping_a_job_never_discards_the_take();
 
     return test::summary("api");
 }

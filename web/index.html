@@ -206,6 +206,11 @@
                 <!-- The percentage moves every tick and the box announces
                      itself; only the phase is worth reading out loud. -->
                 <span id="libStatusPct" class="job-pct" aria-hidden="true"></span>
+                <!-- The one job slot is stopped from wherever its progress is
+                     shown; a run started here used to be stoppable only from
+                     the other tab. -->
+                <button id="libStop" class="mini danger" type="button" hidden
+                        data-i18n-title="lib.stopTitle" data-i18n="lib.stop">■ Stop</button>
               </div>
               <div id="libStatusTrack" class="job-track" hidden aria-hidden="true">
                 <i id="libStatusFill"></i>

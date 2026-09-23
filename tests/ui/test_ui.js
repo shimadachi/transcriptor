@@ -11,6 +11,8 @@
 //   G5  overwriting a named version overwrote the session's original instead
 //   V1  Enter on a focused Cancel confirmed the dialog it was declining
 //   V6  numbered summary sections all rendered as "1.", their bullets flattened
+//   V12 a stopped library re-run was announced as done, and could not be
+//       stopped from the library at all
 
 const path = require('path');
 const {createEnv} = require('./harness');
@@ -695,6 +697,50 @@ async function run() {
     const flat = env.app.mdToHtml('- a\n- b\n\nAfter the list.');
     check('V6 a plain list still ends where the text after it begins',
           flat === '<ul><li>a</li><li>b</li></ul><p>After the list.</p>', flat);
+  }
+
+  // ---------------------------------------------------------------- V12 ----
+  // A stopped job ends on "idle", so the error phase alone cannot tell a stop
+  // from a finish; job_cancelled can.
+  const itemAsked = env =>
+    env.server.requests.filter(u => u.startsWith('/api/library/item')).pop() || '';
+  {
+    const env = createEnv(ROOT);
+    env.server.library = {sessions: [{id: 'S1'}]};
+    env.poke('libCurrent = "S1"; libTx = ""; libSum = "";');
+    await env.app.libRunEnded('summarize', 'second pass',
+      {processing: false, phase: 'idle', job_cancelled: true, message: 'Stopped.'});
+    check('V12 a stopped re-run is not announced as done',
+          env.els.toast.textContent === 'lib.runStopped', env.els.toast.textContent);
+    check('V12 and the version it never wrote is not asked for',
+          !itemAsked(env).includes('second%20pass'), itemAsked(env));
+  }
+  {
+    const env = createEnv(ROOT);
+    env.server.library = {sessions: [{id: 'S1'}]};
+    env.poke('libCurrent = "S1"; libTx = ""; libSum = "";');
+    await env.app.libRunEnded('summarize', 'second pass',
+      {processing: false, phase: 'done', job_cancelled: false, message: 'Done'});
+    check('a finished re-run is announced and its new version opened',
+          env.els.toast.textContent === 'lib.runDone' &&
+            itemAsked(env).includes('summary=second%20pass'),
+          env.els.toast.textContent + ' ' + itemAsked(env));
+  }
+  {
+    // Stopping from the library stops the job and nothing else: if the run
+    // has already finished, the studio's take must not be discarded instead.
+    const env = createEnv(ROOT);
+    env.server.state.processing = true;
+    env.server.state.phase = 'summarizing';
+    await env.app.poll();
+    check('V12 the library shows a way to stop the run', env.els.libStop.hidden === false);
+    const pending = env.els.libStop.onclick();
+    await env.settle();
+    env.els.askYes.onclick();
+    await pending;
+    check('V12 and asks the server to stop the job alone',
+          env.server.cancels.length === 1 && env.server.cancels[0].body.job_only === true,
+          JSON.stringify(env.server.cancels.map(c => c.body)));
   }
 
   console.log(failures ? `\nui: ${failures} check(s) FAILED`

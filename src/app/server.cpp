@@ -414,10 +414,20 @@ bool Server::start() {
     // the same intent: stop what is happening. With a run in flight that means
     // asking the models to give up, and nothing is thrown away. Otherwise it is
     // the take or the result on screen that goes.
-    svr.Post("/api/cancel", [state](const httplib::Request&,
+    //
+    // {"job_only": true} asks for the first half alone. The library's Stop
+    // button sends it: its run can finish while the question is on screen, and
+    // falling back to cancel() then would discard the studio's take -- which
+    // is not what stopping a re-run of some other recording agreed to.
+    svr.Post("/api/cancel", [state](const httplib::Request& req,
                                     httplib::Response& res) {
         if (state->cancel_job()) {
             return send_json(res, json{{"ok", true}, {"stopped", "job"}});
+        }
+        const json body = parse_body(req);
+        const auto job_only = body.find("job_only");
+        if (job_only != body.end() && job_only->is_boolean() && job_only->get<bool>()) {
+            return send_json(res, json{{"ok", true}, {"stopped", "none"}});
         }
         state->cancel();
         send_json(res, json{{"ok", true}, {"stopped", "take"}});

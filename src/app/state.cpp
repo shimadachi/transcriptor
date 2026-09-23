@@ -1373,6 +1373,11 @@ nlohmann::json AppState::state_json() const {
         {"recording", is_recording},
         {"paused", recorder_ ? recorder_->paused() : false},
         {"processing", processing_.load()},
+        // Whether the last job was stopped on request. A stopped job ends on
+        // "idle", like a job that never ran, so without this a page waiting
+        // on a library re-run could only report it as done -- and go looking
+        // for a version it never wrote.
+        {"job_cancelled", job_cancelled_.load()},
         {"phase", phase_},
         {"message", message_},
         {"progress", progress_ < 0 ? nlohmann::json(nullptr)
