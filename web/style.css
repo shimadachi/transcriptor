@@ -394,6 +394,9 @@ input[type=checkbox]:disabled, input[type=radio]:disabled {
   animation: pulse 2.4s infinite; }
 .lib-status-msg { flex: 1; min-width: 0; color: var(--ink-dim); overflow-wrap: anywhere; }
 .lib-status.err { border-left-color: var(--rec); }
+/* Finished, with something to say about it: a summary the answer limit cut. */
+.lib-status.warn .lib-status-msg { color: var(--vu); }
+.lib-status.warn .lib-status-dot { animation: none; }
 .lib-status.err .lib-status-msg { color: var(--rec); }
 .lib-status.err .lib-status-dot { background: var(--rec);
   box-shadow: 0 0 10px var(--rec); animation: none; }
@@ -640,6 +643,8 @@ button.mini.on { border-color: var(--rec); color: var(--rec); }
   font-family: var(--display); color: var(--ink); font-weight: 700; line-height: 1.3;
   margin: 16px 0 8px; font-size: 16px; }
 .sum-body ul, .sum-body ol { margin: 0 0 10px; padding-left: 22px; }
+.sum-cut { font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--vu);
+  margin-top: 10px; }
 .sum-body li { margin: 3px 0; }
 /* A list inside an item hangs off it, without the gap that ends a section. */
 .sum-body li > ul, .sum-body li > ol { margin: 3px 0 0; }

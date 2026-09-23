@@ -50,6 +50,21 @@ std::string trim(const std::string& s) {
     return s.substr(b, e - b + 1);
 }
 
+// How a summary ends when the answer limit stopped it. It is kept -- it is
+// what the model wrote -- but a plain "Done" over a summary that breaks off
+// mid-sentence left the user to find that out by reading to the end, if they
+// did, and the saved file looked finished either way.
+std::string cut_short_message(int max_tokens) {
+    const std::string n = std::to_string(max_tokens);
+    return lang::english()
+        ? "Done, but the summary reached the maximum answer length (" + n +
+              " tokens) and stops mid-sentence. Raise it in Settings → Advanced "
+              "and summarize again."
+        : "Bitti, ama özet azami yanıt uzunluğuna (" + n + " token) ulaştı ve "
+              "cümle ortasında kesildi. Ayarlar → Gelişmiş'ten artırıp yeniden "
+              "özetleyin.";
+}
+
 }  // namespace
 
 std::string phase_message(const std::string& phase, const std::string& lang) {
@@ -141,6 +156,7 @@ bool AppState::claim_job() {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         job_dir_.clear();
+        job_cut_short_ = false;
         if (processor_) processor_->reset_abort();
         if (llm_) llm_->reset_abort();
     }
@@ -368,6 +384,7 @@ void AppState::start_recording(const audio::AudioSource& source,
             settings_.mic_gain);
         result_.reset();
         summary_.reset();
+        summary_cut_short_ = false;
         // Bump both revisions on the way out. The page watches these to know
         // when to re-read /api/result; without a bump, clearing a result looks
         // exactly like nothing having happened, and the previous session's
@@ -443,6 +460,7 @@ void AppState::cancel() {
         }
         result_.reset();
         summary_.reset();
+        summary_cut_short_ = false;
         ++result_rev_;
         ++summary_rev_;
         pending_audio_.reset();
@@ -550,6 +568,7 @@ bool AppState::process_file(const paths::fs::path& tmp_path,
         std::lock_guard<std::mutex> lock(mutex_);
         result_.reset();
         summary_.reset();
+        summary_cut_short_ = false;
         ++result_rev_;   // see start_recording(): a cleared panel must clear
         ++summary_rev_;
         pending_audio_.reset();
@@ -815,6 +834,7 @@ void AppState::discard_summary() {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!summary_.has_value()) return;
         summary_.reset();
+        summary_cut_short_ = false;
         ++summary_rev_;
         dir = session_dir_;
     }
@@ -938,7 +958,7 @@ llm::SummaryRequest AppState::build_summary_request(const std::string& transcrip
 // Runs the summarizer and hands back finished text. Throws SummarizerError,
 // including when the backend is missing or unhealthy, so every caller reports
 // a failure the same way.
-std::string AppState::run_summarizer(const llm::SummaryRequest& req,
+llm::Summary AppState::run_summarizer(const llm::SummaryRequest& req,
                                      bool manage_vram) {
     // VRAM handoff the other way: free the STT models before the LLM loads.
     if (manage_vram) {
@@ -966,13 +986,16 @@ std::string AppState::run_summarizer(const llm::SummaryRequest& req,
     };
     // Strip here rather than in either backend: this is the one point the text
     // passes through on its way to both the UI and the file.
-    return llm::strip_reasoning(backend->summarize(req, progress));
+    llm::Summary summary = backend->summarize(req, progress);
+    summary.text = llm::strip_reasoning(summary.text);
+    return summary;
 }
 
 void AppState::do_summarize() {
     llm::SummaryRequest req;
     bool manage_vram = false;
     bool save_summary = false;
+    int  max_tokens = 0;
 
     {
         std::string transcript, template_id, context;
@@ -984,6 +1007,7 @@ void AppState::do_summarize() {
             context      = summary_context_;
             manage_vram  = settings_.manage_vram;
             save_summary = settings_.save_summary;
+            max_tokens   = settings_.llm_max_tokens;
         }
         req = build_summary_request(transcript, template_id, context);
     }
@@ -991,21 +1015,23 @@ void AppState::do_summarize() {
     set_phase("summarizing");
 
     try {
-        const std::string summary = run_summarizer(req, manage_vram);
+        const llm::Summary summary = run_summarizer(req, manage_vram);
 
         paths::fs::path dir;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            summary_ = summary;
+            summary_ = summary.text;
+            summary_cut_short_ = summary.cut_short;
+            job_cut_short_ = summary.cut_short;
             ++summary_rev_;
         }
         dir = ensure_session_dir();
         if (!dir.empty() && save_summary &&
-            !exporter::save_text(dir / "summary.txt", summary)) {
+            !exporter::save_text(dir / "summary.txt", summary.text)) {
             note_save_error(L("The summary could not be written to ",
                               "Özet şuraya yazılamadı: ") + paths::to_utf8(dir));
         }
-        set_phase("done", 1.0);
+        set_phase("done", 1.0, summary.cut_short ? cut_short_message(max_tokens) : "");
     } catch (const llm::SummarizerError& e) {
         set_phase("error", -1.0, e.what());
     }
@@ -1176,17 +1202,22 @@ void AppState::do_library_summarize(const paths::fs::path& dir,
                                     const std::string& template_id) {
     const llm::SummaryRequest req =
         build_summary_request(transcript, template_id, context);
-    const bool manage_vram = settings_copy().manage_vram;
+    const Settings settings = settings_copy();
 
     set_phase("summarizing");
     try {
-        const std::string summary = run_summarizer(req, manage_vram);
-        if (!exporter::save_text(library::summary_file(dir, name), summary)) {
+        const llm::Summary summary = run_summarizer(req, settings.manage_vram);
+        if (!exporter::save_text(library::summary_file(dir, name), summary.text)) {
             throw llm::SummarizerError(
                 L("The summary could not be written to ",
                   "Özet şuraya yazılamadı: ") + paths::to_utf8(dir));
         }
-        set_phase("done", 1.0);
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            job_cut_short_ = summary.cut_short;
+        }
+        set_phase("done", 1.0, summary.cut_short
+                                   ? cut_short_message(settings.llm_max_tokens) : "");
     } catch (const llm::SummarizerError& e) {
         set_phase("error", -1.0, e.what());
     }
@@ -1420,6 +1451,10 @@ nlohmann::json AppState::state_json() const {
         {"has_audio", pending_audio_ && !pending_audio_->empty()},
         {"has_result", result_.has_value()},
         {"has_summary", summary_.has_value()},
+        // The last job's summary stopped at the maximum answer length. The
+        // library reads it to say so about a re-run; the studio has the same
+        // fact beside its own summary in /api/result.
+        {"summary_cut_short", job_cut_short_},
         {"result_rev", result_rev_},
         {"summary_rev", summary_rev_},
         {"diarization_enabled", settings_.enable_diarization},
@@ -1448,6 +1483,7 @@ nlohmann::json AppState::result_json() const {
         {"result", result_.has_value()
                        ? result_->to_json(settings_.summary_language)
                        : nlohmann::json(nullptr)},
+        {"summary_cut_short", summary_.has_value() && summary_cut_short_},
         {"summary", summary_.has_value() ? nlohmann::json(*summary_)
                                          : nlohmann::json(nullptr)},
         {"output_dir", session_dir_.empty()

@@ -151,6 +151,8 @@ const STR = {
                      tr: 'Ad şunları içeremez: . / \\ : < > " | ? *'},
   'lib.runningTx':  {en: 'Transcribing…', tr: 'Metne dönüştürülüyor…'},
   'lib.runningSum': {en: 'Summarizing…', tr: 'Özetleniyor…'},
+  'sum.cutShort':   {en: 'Cut off at the maximum answer length — raise it in Settings → Advanced and summarize again.',
+                     tr: 'Azami yanıt uzunluğunda kesildi — Ayarlar → Gelişmiş\'ten artırıp yeniden özetleyin.'},
   'lib.runStopped': {en: 'Stopped — nothing was written, and nothing was lost.',
                      tr: 'Durduruldu — hiçbir şey yazılmadı, hiçbir şey kaybolmadı.'},
   'lib.stop':       {en: '■ Stop', tr: '■ Durdur'},

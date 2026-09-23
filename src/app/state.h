@@ -195,7 +195,7 @@ private:
     llm::SummaryRequest build_summary_request(const std::string& transcript,
                                               const std::string& template_id,
                                               const std::string& extra_context);
-    std::string run_summarizer(const llm::SummaryRequest& req, bool manage_vram);
+    llm::Summary run_summarizer(const llm::SummaryRequest& req, bool manage_vram);
 
     // Empty (with `error` filled) when the id names nothing in the library.
     paths::fs::path library_dir(const std::string& id, std::string* error);
@@ -309,6 +309,13 @@ private:
 
     std::optional<pipeline::ProcessResult> result_;
     std::optional<std::string>             summary_;
+    // summary_ ended on the maximum answer length rather than because the
+    // model was done. Travels with it, so the note under a cut summary stays
+    // exactly as long as that summary does.
+    bool                                   summary_cut_short_ = false;
+    // The same, for whatever the last job summarized -- a library re-run
+    // included, which never touches summary_. Cleared when a job is admitted.
+    bool                                   job_cut_short_ = false;
     // Bumped on every transcript written, so the page can tell a re-run from
     // the text already on screen: has_result never falls back to false in
     // between, which is all a transition-watcher can see.

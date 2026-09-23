@@ -578,6 +578,7 @@ async function loadResult() {
     txHasText = transcriptHasText(d.result);
     renderTranscript(d.result);
     renderSummary(d.summary);
+    $('sumCut').hidden = !(d.summary && d.summary_cut_short);
     return true;
   } finally {
     resultLoading = false;
@@ -1866,7 +1867,9 @@ async function openLibraryItem(id, tx, sum) {
   if (d.error) { toast(d.error); return; }
   // A failure belongs to the session it was asked for; carrying it onto the
   // next one someone opens would read as a fault of that recording.
-  if (libCurrent !== id) { $('libAudio').pause(); closeLibRun(); libRunError = ''; }
+  if (libCurrent !== id) {
+    $('libAudio').pause(); closeLibRun(); libRunError = ''; libRunNote = '';
+  }
   libCurrent = id; libItem = d;
   libTx  = d.transcript_name || '';
   libSum = d.summary_name || '';
@@ -2185,6 +2188,9 @@ let libJobBusy = false;        // the one worker, as of the last poll
 // than read off the phase so that a studio job that failed does not put a red
 // box over whatever recording the library happens to have open.
 let libRunError = '';
+// The same for a run that finished but has something to say about it: a
+// summary the answer limit stopped mid-sentence.
+let libRunNote = '';
 
 // Re-transcribing needs the audio and re-summarizing needs a transcript;
 // neither can start while a job holds the only worker. Both halves of that are
@@ -2238,14 +2244,16 @@ function renderLibStatus(s) {
   const box = $('libStatus');
   if (!box) return;
   const failed = !s.processing && !!libRunError;
-  box.hidden = !(s.processing || failed);
+  const noted = !s.processing && !failed && !!libRunNote;
+  box.hidden = !(s.processing || failed || noted);
   libJobBusy = !!s.processing;
   syncLibRunBtns();
   if (box.hidden) return;
 
   box.classList.toggle('err', failed);
+  box.classList.toggle('warn', noted);
   $('libStop').hidden = !s.processing;
-  $('libStatusMsg').textContent = failed ? libRunError : (s.message || '');
+  $('libStatusMsg').textContent = failed ? libRunError : noted ? libRunNote : (s.message || '');
   renderProgress('libStatusPct', 'libStatusTrack', 'libStatusFill', jobFraction(s));
 }
 
@@ -2290,8 +2298,8 @@ async function startLibRun(kind, name) {
     body.notes = $('ctxNotes').value;
   }
   const r = await post('/api/library/' + kind, body);
-  if (r.error) { libRunError = r.error; toast(r.error); poll(); return; }
-  libRunError = '';
+  if (r.error) { libRunError = r.error; libRunNote = ''; toast(r.error); poll(); return; }
+  libRunError = ''; libRunNote = '';
   closeLibRun();
   toast(t(kind === 'transcribe' ? 'lib.runningTx' : 'lib.runningSum'));
   // The readout above carries the progress; this only needs to know when it is
@@ -2323,7 +2331,12 @@ async function libRunEnded(kind, name, s) {
   // Recorded before the panel is rebuilt: the readout above outlives the
   // toast, which is the whole point of it for a run that failed.
   libRunError = s.phase === 'error' ? (s.message || t('lib.runFailed')) : '';
+  // A summary that reached the answer limit is kept, and said to be cut short
+  // where the readout will still show it after the toast has gone.
+  libRunNote = !libRunError && !stopped && s.summary_cut_short
+    ? (s.message || t('sum.cutShort')) : '';
   if (libRunError) toast(libRunError);
+  else if (libRunNote) toast(libRunNote);
   else toast(t(stopped ? 'lib.runStopped' : 'lib.runDone'));
   if (!libCurrent) return;
   await loadLibrary();

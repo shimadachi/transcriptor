@@ -41,6 +41,16 @@ struct SummaryRequest {
     std::string language = "tr";
 };
 
+// What a backend hands back: the answer as the model wrote it, and why it
+// ended.
+struct Summary {
+    std::string text;
+    // It stopped because it reached the maximum answer length, not because the
+    // model was done. The text is still kept -- it is what was written -- but
+    // it ends mid-thought, and saying only "Done" over it hid that entirely.
+    bool cut_short = false;
+};
+
 class Backend {
 public:
     virtual ~Backend() = default;
@@ -53,8 +63,8 @@ public:
     virtual std::vector<std::string> list_models() = 0;
 
     // Throws SummarizerError on failure.
-    virtual std::string summarize(const SummaryRequest& req,
-                                  const ProgressFn& progress) = 0;
+    virtual Summary summarize(const SummaryRequest& req,
+                              const ProgressFn& progress) = 0;
 
     // Release GPU/host memory. No-op for the remote backend.
     virtual void unload() {}

@@ -133,8 +133,8 @@ public:
                           (model_.empty() ? models[0] : model_)};
     }
 
-    std::string summarize(const SummaryRequest& req,
-                          const ProgressFn& progress) override {
+    Summary summarize(const SummaryRequest& req,
+                      const ProgressFn& progress) override {
         // Not abort_.store(false): the flag is cleared when the job is admitted
         // (see reset_abort). Clearing it here threw away a shutdown raised
         // between the health check above and this call, and the request below
@@ -282,7 +282,13 @@ public:
             throw SummarizerError(L("The LLM returned an empty answer.",
                                     "LLM boş yanıt döndürdü."));
         }
-        return content;
+        // "length" is how every OpenAI-compatible server says it stopped on
+        // max_tokens rather than because the model was finished.
+        const auto& choice = j["choices"][0];
+        const bool cut = choice.contains("finish_reason") &&
+                         choice["finish_reason"].is_string() &&
+                         choice["finish_reason"].get<std::string>() == "length";
+        return Summary{content, cut};
     }
 
 private:

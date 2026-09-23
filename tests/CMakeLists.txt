@@ -140,7 +140,7 @@ add_test(NAME recording_lifecycle
                  "${CMAKE_CURRENT_BINARY_DIR}/recording_scratch")
 set_tests_properties(recording_lifecycle PROPERTIES TIMEOUT 120)
 
-# -- the HTTP API (V3, V7, V12, V18) -------------------------------------------
+# -- the HTTP API (V3, V7, V12, V18, V23) --------------------------------------
 # What the page is told, read through the real Server over a loopback socket.
 # Links the application the way the lifecycle test does. POSIX only: the config
 # directory can only be moved out of the machine's own through the environment

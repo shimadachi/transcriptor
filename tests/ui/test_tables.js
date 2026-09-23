@@ -177,6 +177,22 @@ check('the settings POST no longer sends a threshold',
         loose.length === 0, loose.join(', '));
 }
 
+// -- V23: the answer limit can be raised whichever backend is in use ----------
+// The warning for a summary cut short says to raise the maximum answer length,
+// and a remote server is sent it too -- but the field sat inside the embedded
+// backend's own section, hidden the moment "Remote server" was picked.
+{
+  const at = html.indexOf('id="s_llmmaxtok"');
+  const open = [];
+  for (const m of html.slice(0, at).matchAll(/<(\/?)div\b([^>]*)>/g)) {
+    if (m[1]) open.pop();
+    else open.push((/\bid="([^"]+)"/.exec(m[2]) || [])[1] || '');
+  }
+  const inside = open.filter(id => id === 'advLlmEmbedded' || id === 'advLlmRemote');
+  check('V23 the maximum answer length is not hidden with either backend',
+        at > 0 && inside.length === 0, inside.join(', ') || (at > 0 ? '' : 'field not found'));
+}
+
 console.log(failures === 0 ? '\ntables: all checks passed'
                            : `\ntables: ${failures} check(s) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

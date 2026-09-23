@@ -135,6 +135,9 @@
         <textarea id="ctxNotes" rows="2" data-i18n-ph="sum.phNotes" placeholder="Extra context / agenda / special instructions — included in the summary"></textarea>
       </div>
       <div id="summary" class="sum-body"><span class="empty">—</span></div>
+      <!-- Under a summary the answer limit stopped mid-sentence, for as long as
+           that summary is the one on screen. -->
+      <div id="sumCut" class="sum-cut" hidden data-i18n="sum.cutShort">Cut off at the maximum answer length — raise it in Settings → Advanced and summarize again.</div>
     </section>
     </div>
     </div>
@@ -481,8 +484,6 @@
               <input type="number" id="s_llmctx" min="0" max="131072" step="1024"></div>
             <div class="field"><label for="s_llmgpu" data-i18n="set.llmGpu">Layers offloaded to the GPU (0 = CPU only, 999 = all of them)</label>
               <input type="number" id="s_llmgpu" min="0" max="999" step="1"></div>
-            <div class="field"><label for="s_llmmaxtok" data-i18n="set.llmMaxTok">Maximum answer length (tokens)</label>
-              <input type="number" id="s_llmmaxtok" min="64" max="16384" step="64"></div>
             <div class="field" style="font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.6;">
               <span data-i18n="set.llmNote1">Drop a </span><code>.gguf</code><span data-i18n="set.llmNote2"> into </span><code id="s_modelsdir2">…</code><span data-i18n="set.llmNote3"> — "Scan" picks it up. A recording too long for the context
               window is summarized in chunks and merged.</span></div>
@@ -491,6 +492,10 @@
             <div class="field"><label for="s_llmtimeout" data-i18n="set.llmTimeout">Summary timeout (s) — raise it for long or CPU-bound models</label>
               <input type="number" id="s_llmtimeout" min="10" max="3600" step="10"></div>
           </div>
+          <!-- Both backends: a remote server is sent it as max_tokens, and the
+               warning for a summary cut short points here whichever is used. -->
+          <div class="field"><label for="s_llmmaxtok" data-i18n="set.llmMaxTok">Maximum answer length (tokens)</label>
+            <input type="number" id="s_llmmaxtok" min="64" max="16384" step="64"></div>
           <div class="field check"><input type="checkbox" id="s_llmthink"><label for="s_llmthink" data-i18n="set.llmThink">Let the model think first: reasoning models may work through the final summary before writing it, on a budget of their own. Section notes are never written this way.</label></div>
           <div class="field check"><input type="checkbox" id="s_vram"><label for="s_vram" data-i18n="set.vram">Sequence VRAM: unload the LLM during transcription and the STT model during summarizing</label></div>
         </div>

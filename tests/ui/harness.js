@@ -102,6 +102,7 @@ function createEnv(root, opts) {
     // what every test that does not care about the panels wants.
     result: null,
     summary: null,
+    summaryCutShort: false,
     // When set, /api/result waits on this promise before answering.
     resultGate: null,
     uploads: [],           // one entry per POST /api/process_file
@@ -129,7 +130,8 @@ function createEnv(root, opts) {
       server.loadResultCalls++;
       if (server.resultGate) await server.resultGate;
       if (server.resultFails) throw new Error('network down');
-      return {json: async () => ({result: server.result, summary: server.summary})};
+      return {json: async () => ({result: server.result, summary: server.summary,
+                                  summary_cut_short: server.summaryCutShort})};
     }
     if (url === '/api/process_file') {
       const entry = {body: opts && opts.body, done: false};

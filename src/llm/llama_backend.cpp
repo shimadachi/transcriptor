@@ -154,8 +154,8 @@ public:
     void request_abort() override { abort_.store(true); }
     void reset_abort() override { abort_.store(false); }
 
-    std::string summarize(const SummaryRequest& req,
-                          const ProgressFn& progress) override {
+    Summary summarize(const SummaryRequest& req,
+                      const ProgressFn& progress) override {
         // Not abort_.store(false): see reset_abort(). Loading a GGUF takes long
         // enough that a shutdown landing just before this line, and then being
         // erased by it, held the window open for the whole load.
@@ -206,8 +206,11 @@ public:
         // prompt could push the real prompt past the window, and left nothing
         // set aside for the reply.
         const bool think = thinking_allowed();
+        Summary out;
         if (fits(system, build_user_message(work), think)) {
-            return generate(system, build_user_message(work), think, progress);
+            out.text = generate(system, build_user_message(work), think, progress,
+                                &out.cut_short);
+            return out;
         }
 
         // Too long for one pass: summarize section by section, then summarize
@@ -274,7 +277,9 @@ public:
             progress(L("Merging the section notes…",
                        "Bölüm notları birleştiriliyor…"), -1.0);
         }
-        return generate(system, build_user_message(final_req), think, progress);
+        out.text = generate(system, build_user_message(final_req), think, progress,
+                            &out.cut_short);
+        return out;
     }
 
 private:
@@ -625,8 +630,11 @@ private:
         return std::string(buf, static_cast<std::size_t>(n));
     }
 
+    // `cut_short`, when given, says whether the answer ended on its budget
+    // rather than on the model's own end-of-turn.
     std::string generate(const std::string& system, const std::string& user,
-                         bool allow_thinking, const ProgressFn& progress) {
+                         bool allow_thinking, const ProgressFn& progress,
+                         bool* cut_short = nullptr) {
         const std::string prompt = render(system, user, allow_thinking);
         std::vector<llama_token> tokens = tokenize(prompt, /*add_special=*/true);
 
@@ -701,6 +709,7 @@ private:
         std::string out;
         int n_past = static_cast<int>(tokens.size());
         bool hit_window = false;
+        bool budget_spent = false;
 
         // Reasoning spends think_budget, the answer spends max_answer, and
         // neither can eat the other's. An overrun inside <think> is closed for
@@ -722,6 +731,7 @@ private:
             const std::string piece = token_to_text(id);
             out += piece;
             const ReasoningStep step = budget.feed(piece);
+            if (step == ReasoningStep::Stop) budget_spent = true;
 
             if (progress && (produced++ % 16 == 0)) {
                 const double done = budget.think_used() + budget.answer_used();
@@ -771,6 +781,7 @@ private:
 
         // The weights are the biggest thing on the GPU; drop the KV cache now.
         free_context();
+        if (cut_short) *cut_short = budget_spent;
 
         // The window ran out mid-answer. Callers now budget so this cannot
         // happen, which makes it a last line of defence -- but it used to be

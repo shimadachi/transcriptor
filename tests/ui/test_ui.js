@@ -14,6 +14,7 @@
 //   V12 a stopped library re-run was announced as done, and could not be
 //       stopped from the library at all
 //   V17 "Saved →" and "Not saved →" stood side by side for the same folder
+//   V23 a summary cut off at the maximum answer length was shown as finished
 
 const path = require('path');
 const {createEnv} = require('./harness');
@@ -758,6 +759,39 @@ async function run() {
     await env.app.poll();
     check('a take that was written is still "Saved"',
           label() === 'saved.k', String(label()));
+  }
+
+  // ---------------------------------------------------------------- V23 ----
+  {
+    const env = createEnv(ROOT);
+    env.server.summary = '## Summary\n- The beta ships on';
+    env.server.summaryCutShort = true;
+    await env.app.loadResult();
+    const note = () => env.els.sumCut || {};
+    check('V23 a summary cut at the answer limit carries a note saying so',
+          note().hidden === false);
+    env.server.summaryCutShort = false;
+    await env.app.loadResult();
+    check('a finished summary carries no note', note().hidden !== false);
+  }
+  {
+    const env = createEnv(ROOT);
+    env.server.library = {sessions: [{id: 'S1'}]};
+    env.poke('libCurrent = "S1"; libTx = ""; libSum = "";');
+    const msg = 'Done, but the summary reached the maximum answer length (256 tokens)';
+    await env.app.libRunEnded('summarize', 'short',
+      {processing: false, phase: 'done', job_cancelled: false, summary_cut_short: true,
+       message: msg});
+    check('V23 a library summary cut at the limit is announced as cut',
+          env.els.toast.textContent === msg, env.els.toast.textContent);
+    env.app.renderLibStatus({processing: false, phase: 'done', message: msg});
+    const readout = () => (env.els.libStatusMsg || {}).textContent;
+    check('V23 and the readout keeps saying so after the toast',
+          env.els.libStatus.hidden === false && env.els.libStatus._cls.has('warn') &&
+            readout() === msg,
+          String(readout()));
+    check('V23 while the new version is still opened',
+          itemAsked(env).includes('summary=short'), itemAsked(env));
   }
 
   console.log(failures ? `\nui: ${failures} check(s) FAILED`

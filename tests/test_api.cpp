@@ -17,6 +17,9 @@
 // V18: /api/state's download report was a hand-kept copy of /api/model/download
 // that had lost the "cancelled" field.
 //
+// V23: a summary that reached the maximum answer length was saved and shown
+// under a plain "Done", ending mid-sentence with nothing to say it had been cut.
+//
 // V12: a stopped job ends on "idle" like any other, so the page could not tell
 // a stopped library re-run from a finished one; and the library's Stop must
 // never fall back to discarding the studio's take.
@@ -255,6 +258,89 @@ void test_both_download_reports_agree() {
                 keys.empty(), "missing: " + keys);
 }
 
+// A stand-in for LM Studio or llama-server that ends every answer with the
+// given finish_reason.
+struct FakeLlm {
+    httplib::Server svr;
+    std::thread     thread;
+    int             port = 0;
+
+    explicit FakeLlm(const std::string& finish_reason) {
+        svr.Get("/v1/models", [](const httplib::Request&, httplib::Response& res) {
+            res.set_content(R"({"data": [{"id": "m"}]})", "application/json");
+        });
+        svr.Post("/v1/chat/completions",
+                 [finish_reason](const httplib::Request&, httplib::Response& res) {
+            nlohmann::json choice = {{"finish_reason", finish_reason}};
+            choice["message"] = {{"role", "assistant"},
+                                 {"content", "## Summary\n- The beta ships on"}};
+            nlohmann::json body;
+            body["choices"] = nlohmann::json::array({choice});
+            res.set_content(body.dump(), "application/json");
+        });
+        port = svr.bind_to_any_port("127.0.0.1");
+        thread = std::thread([this] { svr.listen_after_bind(); });
+        for (int i = 0; i < 100 && !svr.is_running(); ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+    ~FakeLlm() {
+        svr.stop();
+        thread.join();
+    }
+};
+
+struct SummaryRun {
+    bool        admitted = false;
+    bool        cut_short = false;
+    bool        saved = false;
+    std::string message;
+};
+
+// A library re-summarize through the remote backend, answered with `finish`.
+SummaryRun summarize_ending_with(const std::string& finish) {
+    const paths::fs::path dir = fresh_dir();
+    FakeLlm llm(finish);
+    Settings s = test_settings(dir / "out");
+    s.llm_backend    = "remote";
+    s.llm_base_url   = "http://127.0.0.1:" + std::to_string(llm.port) + "/v1";
+    s.llm_model      = "m";
+    s.llm_max_tokens = 256;
+    s.manage_vram    = false;
+    const std::string id = "2026-09-23_10-00-00";
+    const paths::fs::path session = dir / "out" / id;
+    std::error_code ec;
+    paths::fs::create_directories(session, ec);
+    paths::write_file(session / "transcript.txt", "We ship the beta on Friday.\n");
+
+    app::AppState state(s);
+    SummaryRun r;
+    std::string error;
+    r.admitted = state.start_library_summarize(id, "", "", "", "meeting", &error);
+    for (int i = 0; i < 500 && state.processing(); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    const auto st = state.state_json();
+    r.cut_short = st.value("summary_cut_short", false);
+    r.message   = st.value("message", std::string());
+    r.saved     = paths::fs::exists(session / "summary.txt", ec);
+    return r;
+}
+
+void test_a_summary_cut_at_the_limit_says_so() {
+    const SummaryRun cut = summarize_ending_with("length");
+    test::check("V23 a summary the answer limit cut is still saved",
+                cut.admitted && cut.saved, cut.message);
+    test::check("V23 and is reported as cut short", cut.cut_short);
+    test::check("V23 and the status line says why, and what to change",
+                cut.message.find("maximum answer length (256 tokens)") != std::string::npos,
+                cut.message);
+
+    const SummaryRun whole = summarize_ending_with("stop");
+    test::check("a summary the model finished is just done",
+                whole.saved && !whole.cut_short && whole.message == "Done", whole.message);
+}
+
 void test_utf8_cuts() {
     const std::string s = "a\xC5\x9F" "b";   // "aşb"
     test::check("V3 a cut from the front backs off to a character boundary",
@@ -291,6 +377,7 @@ int main(int argc, char** argv) {
     test_a_stopped_job_says_so();
     test_stopping_a_job_never_discards_the_take();
     test_both_download_reports_agree();
+    test_a_summary_cut_at_the_limit_says_so();
 
     return test::summary("api");
 }
