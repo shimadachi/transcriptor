@@ -131,8 +131,13 @@ int run_check(const Settings& settings) {
     const char* will_get  = L("will be downloaded", "indirilecek");
 
     std::printf(L("\nModels:\n", "\nModeller:\n"));
-    std::printf("  Whisper (%s): %s\n", settings.whisper_model.c_str(),
-                models::whisper_ready(settings) ? ready : will_get);
+    // The speech model is never fetched on its own any more -- it is chosen and
+    // downloaded in Settings -- so "will be downloaded" was wrong, and printed
+    // beside an empty name when none had been chosen. Say what the app says.
+    const std::string speech_missing = models::whisper_missing_reason(settings);
+    std::printf("  Whisper (%s): %s\n",
+                settings.whisper_model.empty() ? "-" : settings.whisper_model.c_str(),
+                speech_missing.empty() ? ready : speech_missing.c_str());
     std::printf(L("  Voice detector     : %s\n", "  Konuşma algılayıcı : %s\n"),
                 models::vad_ready() ? ready : will_get);
     if (diarize::Diarizer::supported()) {

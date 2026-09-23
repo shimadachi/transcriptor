@@ -336,8 +336,8 @@ const STR = {
                          'Otomatik, tümleşik yerine ayrık ekran kartını seçer.'},
   'set.integrated': {en: 'integrated', tr: 'tümleşik'},
   'set.deviceGone': {en: 'not found now', tr: 'şu an yok'},
-  'set.modelFile':  {en: 'Model file (empty = download automatically)',
-                     tr: 'Model dosyası (boş = otomatik indir)'},
+  'set.modelFile':  {en: 'Model file (empty = the model chosen under General)',
+                     tr: 'Model dosyası (boş = Genel\'de seçilen model)'},
 
   'set.mixGrp':     {en: 'Audio mix · Microphone + System',
                      tr: 'Ses karışımı · Mikrofon + Sistem'},
