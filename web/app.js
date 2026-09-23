@@ -99,10 +99,30 @@ function mdTable(header, sep, rows){
     pad(r).forEach((c, i) => { h += cell('td', c, i); }); h += '</tr>'; }
   return h + '</tbody></table>';
 }
+// A list item, or null: how deep it sits, which kind of list it belongs to,
+// the number the model gave it, and its text. Takes the line already escaped,
+// which leaves the markers and the indentation as they were.
+function mdListItem(e){
+  const m = /^(\s*)(?:([-*•–])|(\d+)[.)])\s+(.*)$/.exec(e);
+  if (!m) return null;
+  return {indent: m[1].replace(/\t/g, '    ').length, tag: m[2] ? 'ul' : 'ol',
+          num: m[3] ? parseInt(m[3], 10) : 1, text: m[4]};
+}
 function mdToHtml(text){
   const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
-  let html = '', list = null, quote = [];
-  const closeList = () => { if (list) { html += `</${list}>`; list = null; } };
+  let html = '', quote = [];
+  // Open lists, outermost first, each with its last <li> still open so that a
+  // deeper list can go inside it. A numbered section with its bullets indented
+  // under it is the shape models write most, and a flat renderer closed the
+  // <ol> at the first indented bullet: every section restarted at "1." and its
+  // bullets fell out of it.
+  const lists = [];
+  const closeTo = (indent) => {
+    while (lists.length && lists[lists.length - 1].indent > indent) {
+      html += `</li></${lists.pop().tag}>`;
+    }
+  };
+  const closeList = () => closeTo(-1);
   const flushQuote = () => { if (quote.length){
     html += `<blockquote>${mdToHtml(quote.join('\n'))}</blockquote>`; quote = []; } };
   for (let i = 0; i < lines.length; i++){
@@ -132,7 +152,15 @@ function mdToHtml(text){
       }
       html += mdTable(header, sep, rows); i = j - 1; continue;
     }
-    if (!line.trim()){ closeList(); flushQuote(); continue; }
+    if (!line.trim()){
+      // A blank line between items is a loose list, not the end of one: keep
+      // it open when what follows still belongs to it.
+      let j = i + 1;
+      while (j < lines.length && !lines[j].trim()) j++;
+      const next = j < lines.length ? lines[j] : '';
+      if (!(lists.length && (mdListItem(esc(next)) || /^\s+\S/.test(next)))) closeList();
+      flushQuote(); continue;
+    }
     // Blockquote: buffer consecutive `>` lines, render recursively.
     let m = /^\s*>\s?(.*)$/.exec(line);
     if (m){ closeList(); quote.push(m[1]); continue; }
@@ -143,21 +171,37 @@ function mdToHtml(text){
     m = /^(#{1,4})\s+(.*)$/.exec(e);
     if (m){ closeList(); const lvl = Math.min(m[1].length + 2, 6);
       html += `<h${lvl}>${mdInline(m[2])}</h${lvl}>`; continue; }
-    m = /^\s*[-*•–]\s+(.*)$/.exec(e);
-    if (m){ if (list !== 'ul'){ closeList(); html += '<ul>'; list = 'ul'; }
+    const item = mdListItem(e);
+    if (item){
+      closeTo(item.indent);
+      const top = lists[lists.length - 1];
+      if (top && top.indent === item.indent && top.tag !== item.tag){
+        html += `</li></${lists.pop().tag}>`;    // same depth, other kind of list
+      }
+      const cur = lists[lists.length - 1];
+      if (cur && cur.indent === item.indent){
+        html += '</li>';
+      } else {
+        // `start` keeps the model's own number, so a list a paragraph broke
+        // into carries on counting instead of beginning again at 1.
+        const start = item.tag === 'ol' && item.num !== 1 ? ` start="${item.num}"` : '';
+        html += `<${item.tag}${start}>`;
+        lists.push({tag: item.tag, indent: item.indent});
+      }
       // GFM task list. The models reach for these constantly for action items,
       // and without this the box renders as a literal "[ ]" in front of the text.
-      const task = /^\[([ xX])\]\s+(.*)$/.exec(m[1]);
-      if (task){
-        html += `<li class="task${task[1] === ' ' ? '' : ' done'}">`
-              + `${mdInline(task[2])}</li>`;
-      } else {
-        html += `<li>${mdInline(m[1])}</li>`;
-      }
-      continue; }
-    m = /^\s*\d+[.)]\s+(.*)$/.exec(e);
-    if (m){ if (list !== 'ol'){ closeList(); html += '<ol>'; list = 'ol'; }
-      html += `<li>${mdInline(m[1])}</li>`; continue; }
+      const task = /^\[([ xX])\]\s+(.*)$/.exec(item.text);
+      html += task ? `<li class="task${task[1] === ' ' ? '' : ' done'}">${mdInline(task[2])}`
+                   : `<li>${mdInline(item.text)}`;
+      continue;
+    }
+    // Text indented under an item belongs to it -- the explanation models put
+    // beneath a numbered heading -- rather than ending the list.
+    if (lists.length && line.match(/^\s*/)[0].replace(/\t/g, '    ').length >
+                        lists[lists.length - 1].indent){
+      html += `<br>${mdInline(e.trim())}`;
+      continue;
+    }
     closeList();
     html += `<p>${mdInline(e)}</p>`;
   }

@@ -10,6 +10,7 @@
 //   G4  an errored take's fallback timer terminated the take after it
 //   G5  overwriting a named version overwrote the session's original instead
 //   V1  Enter on a focused Cancel confirmed the dialog it was declining
+//   V6  numbered summary sections all rendered as "1.", their bullets flattened
 
 const path = require('path');
 const {createEnv} = require('./harness');
@@ -671,6 +672,29 @@ async function run() {
     env.fireDoc('keydown', {key: 'Enter', preventDefault() {}});
     check('V1 Enter on the button the dialog opens on still confirms',
           (await answer) === true);
+  }
+
+  // ----------------------------------------------------------------- V6 ----
+  // The shape summaries come back in: numbered sections, bullets under each.
+  {
+    const env = createEnv(ROOT);
+    const html = env.app.mdToHtml(
+      '1. **Roadmap**\n   - Beta ships Friday\n   - Notes by Ayşe\n' +
+      '2. **Risks**\n   - QA is thin\n3. **Next steps**');
+    check('V6 numbered sections with bullets under them stay one list',
+          (html.match(/<ol/g) || []).length === 1, html);
+    check('V6 the bullets nest inside their section',
+          html.includes('<li><strong>Roadmap</strong><ul><li>Beta ships Friday</li>'),
+          html);
+    const loose = env.app.mdToHtml('1. First\n\n2. Second');
+    check('V6 a blank line between items does not start the count again',
+          (loose.match(/<ol/g) || []).length === 1, loose);
+    const broken = env.app.mdToHtml('1. First\n\nA paragraph.\n\n2. Second');
+    check('V6 a list a paragraph broke into carries on counting',
+          broken.includes('<ol start="2">'), broken);
+    const flat = env.app.mdToHtml('- a\n- b\n\nAfter the list.');
+    check('V6 a plain list still ends where the text after it begins',
+          flat === '<ul><li>a</li><li>b</li></ul><p>After the list.</p>', flat);
   }
 
   console.log(failures ? `\nui: ${failures} check(s) FAILED`
