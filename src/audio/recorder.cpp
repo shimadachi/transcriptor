@@ -15,6 +15,10 @@ using Clock = std::chrono::steady_clock;
 // past that, and short enough that the mix never trails the room by much.
 constexpr double kMaxSkewSeconds = 1.0;
 
+// How long a source has to deliver nothing before it counts as having stopped,
+// rather than as sitting between two of those quarter-second periods.
+constexpr double kIdleSeconds = 0.5;
+
 double seconds_since(Clock::time_point t) {
     return std::chrono::duration<double>(Clock::now() - t).count();
 }
@@ -85,6 +89,9 @@ void Recorder::start() {
             mic_capture_.reset();
         }
     }
+    // From here, not from started_at_: opening a device can take a while, and
+    // that is not a source going quiet.
+    last_got_[0] = last_got_[1] = Clock::now();
     drain_ = std::thread(&Recorder::run, this);
 }
 
@@ -132,13 +139,34 @@ void Recorder::run_mixed() {
 }
 
 bool Recorder::pump_carry() {
-    bool got = false;
     AudioCapture* caps[2] = {capture_.get(), mic_capture_.get()};
+    std::vector<float> block[2];
+    std::size_t end[2];
     for (int i = 0; i < 2; ++i) {
-        if (!caps[i]) continue;
-        std::vector<float> block = caps[i]->drain();
-        if (block.empty()) continue;
-        carry_[i].insert(carry_[i].end(), block.begin(), block.end());
+        if (caps[i]) block[i] = caps[i]->drain();
+        end[i] = carry_[i].size() + block[i].size();
+    }
+
+    const Clock::time_point now = Clock::now();
+    bool got = false;
+    for (int i = 0; i < 2; ++i) {
+        if (block[i].empty()) continue;
+        // A source that stopped delivering -- a loopback with nothing playing
+        // sends no frames at all -- starts again with what it heard just now,
+        // and the other source's newest frames are from just now as well, so
+        // the two are lined up at their ends. Carrying on from wherever this
+        // side's carry happened to stop matched the speakers' first new frames
+        // against whatever the microphone had queued meanwhile: the silence
+        // take_mixed() makes up only ever covers whole seconds, and the rest
+        // put the speakers up to a second ahead of the room for the remainder
+        // of the take.
+        const std::size_t other = end[1 - i];
+        if (std::chrono::duration<double>(now - last_got_[i]).count() > kIdleSeconds &&
+            other > end[i]) {
+            carry_[i].resize(carry_[i].size() + (other - end[i]), 0.0f);
+        }
+        carry_[i].insert(carry_[i].end(), block[i].begin(), block[i].end());
+        last_got_[i] = now;
         got = true;
     }
     return got;
@@ -166,6 +194,7 @@ bool Recorder::take_mixed(std::vector<float>* out, bool flush) {
     // mic" came out empty. So a side that falls more than kMaxSkewSeconds
     // behind is made up with silence, and at the end of a take the shorter
     // side is, whatever the gap, so the last words are not left in the carry.
+    // Where that side picks up again is pump_carry()'s to decide.
     const std::size_t have_sys = carry_[0].size();
     const std::size_t have_mic = carry_[1].size();
     const std::size_t longer = std::max(have_sys, have_mic);

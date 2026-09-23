@@ -35,6 +35,15 @@ void set_total_samples(std::size_t n);
 // all then, rather than frames of silence.
 void set_source_samples(const std::string& source_id, std::size_t n);
 
+// Makes one source deliver in real time instead: each drain() hands over what
+// the wall clock says has arrived since start(). For its first `silent_for`
+// seconds it delivers nothing, as a loopback with nothing playing does, and
+// then carries on from that moment rather than catching up. The audio is
+// silence except for a short burst of `marker` at `mark_at` seconds, so a test
+// can put the same instant on two sources and see where each lands in the mix.
+void set_source_stream(const std::string& source_id, double silent_for,
+                       double mark_at, float marker);
+
 // Reports a device failure, as an unplugged headset does. The audio captured
 // before it is still handed back.
 void set_error(const std::string& message);

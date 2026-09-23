@@ -68,6 +68,8 @@ private:
     mutable std::mutex   mutex_;
     std::vector<float>   samples_;          // guarded by mutex_
     std::vector<float>   carry_[2];         // drain thread only
+    // When each source last delivered anything; drain thread only.
+    std::chrono::steady_clock::time_point last_got_[2]{};
 
     std::chrono::steady_clock::time_point started_at_{};
     std::chrono::steady_clock::time_point paused_at_{};

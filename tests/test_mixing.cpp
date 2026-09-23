@@ -6,10 +6,16 @@
 // and dropped at Stop -- an in-person meeting recorded as "system + mic" came
 // out empty, and the level meter never moved.
 //
+// And its sequel (V24): once the speakers did start playing, they were mixed
+// in against whatever the microphone had queued meanwhile, and stayed up to a
+// second ahead of it for the rest of the take.
+//
 // Links the real Recorder against the stand-in capture, which can make one
 // source silent in exactly the way that loopback is.
 
 #include <chrono>
+#include <cstdlib>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -81,11 +87,44 @@ void two_live_sources_still_mix() {
                     (take.empty() ? "-" : std::to_string(take.front())));
 }
 
+void speakers_that_start_playing_line_up_with_the_mic() {
+    // V24. Nothing plays for the first 1.5 s, so the loopback sends nothing;
+    // the mic runs throughout. At 2 s both hear the same moment -- the
+    // speakers mark it 0.5, the mic 0.25. The mix of that moment should hold
+    // both, 0.75, in one place. It held them apart: the speakers resumed
+    // against whatever the mic had queued since the last second's worth of
+    // silence was made up, and stayed that far ahead for the rest of the take.
+    fake_capture::reset();
+    fake_capture::set_source_stream(kSpeakers.id, 1.5, 2.0, 0.5f);
+    fake_capture::set_source_stream(kHeadset.id, 0.0, 2.0, 0.25f);
+
+    Recorder rec(kSpeakers, kRate, kHeadset);
+    rec.start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+    const std::vector<float> take = rec.stop();
+
+    auto first = [&take](float lo, float hi) {
+        for (std::size_t i = 0; i < take.size(); ++i) {
+            if (take[i] > lo && take[i] < hi) return static_cast<long>(i);
+        }
+        return -1L;
+    };
+    const long both = first(0.74f, 0.76f);
+    const long speakers = both >= 0 ? both : first(0.49f, 0.51f);
+    const long mic = both >= 0 ? both : first(0.24f, 0.26f);
+    const double apart = std::abs(speakers - mic) / static_cast<double>(kRate);
+    test::check("V24 speakers that start playing mid-take line up with the mic",
+                speakers >= 0 && mic >= 0 && apart < 0.05,
+                "speakers at " + std::to_string(speakers) + ", mic at " +
+                    std::to_string(mic) + " (" + std::to_string(apart) + " s apart)");
+}
+
 }  // namespace
 
 int main() {
     mic_is_kept_while_the_speakers_are_silent();
     the_last_words_are_not_left_behind();
     two_live_sources_still_mix();
+    speakers_that_start_playing_line_up_with_the_mic();
     return test::summary("mixing");
 }
