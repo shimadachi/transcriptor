@@ -1,0 +1,177 @@
+// Regression tests for what the HTTP API tells the page (V3).
+//
+// These run the real AppState behind the real Server, over a real loopback
+// socket, and read the answers the way the page does. Only the audio device
+// (tests/fake_capture.cpp) and ffmpeg (a shell script on PATH) are stand-ins.
+//
+// V3: one byte that was not UTF-8 in the status line made every /api/state
+// answer 500 until something else changed the phase. The page cannot read a
+// 500, so it froze on the previous take's status and never showed the error.
+// Two ways in, both from an ffmpeg error message: a 400-byte cut through the
+// middle of a character, and text that was never UTF-8 to begin with -- what a
+// localized Windows error comes back as.
+
+#include <cstdio>
+#include <cstdlib>
+#include <string>
+
+#include <httplib.h>
+#include <nlohmann/json.hpp>
+
+#include "app/server.h"
+#include "app/state.h"
+#include "check.h"
+#include "fake_capture.h"
+#include "util/paths.h"
+#include "util/utf8.h"
+
+using namespace transcriptor;
+
+namespace {
+
+paths::fs::path g_scratch;
+int             g_case = 0;
+
+paths::fs::path fresh_dir() {
+    const paths::fs::path dir = g_scratch / ("case" + std::to_string(++g_case));
+    std::error_code ec;
+    paths::fs::create_directories(dir, ec);
+    return dir;
+}
+
+Settings test_settings(const paths::fs::path& output_dir) {
+    Settings s;
+    s.output_dir      = paths::to_utf8(output_dir);
+    s.samplerate      = 16000;
+    s.auto_transcribe = false;   // nothing here should reach a model
+    s.auto_summarize  = false;
+    s.enable_diarization = false;
+    s.device          = "cpu";
+    return s;
+}
+
+bool valid_utf8(const std::string& s) {
+    for (std::size_t i = 0; i < s.size();) {
+        const auto c = static_cast<unsigned char>(s[i]);
+        const int n = c < 0x80 ? 0 : (c >> 5) == 0x6 ? 1 : (c >> 4) == 0xE ? 2
+                    : (c >> 3) == 0x1E ? 3 : -1;
+        if (n < 0 || i + n >= s.size()) return false;
+        for (int k = 1; k <= n; ++k) {
+            if (!utf8::continuation_byte(s[i + k])) return false;
+        }
+        i += n + 1;
+    }
+    return true;
+}
+
+// ffmpeg that fails, printing `message`. The body is a printf format, so bytes
+// can be given in octal.
+struct FailingDecoder {
+    paths::fs::path bin;
+    std::string     saved_path;
+
+    FailingDecoder(const paths::fs::path& dir, const std::string& printf_format)
+        : bin(dir / "bin") {
+        std::error_code ec;
+        paths::fs::create_directories(bin, ec);
+        paths::write_file(bin / "ffmpeg",
+                          "#!/bin/sh\nprintf '" + printf_format + "'\nexit 1\n");
+        paths::fs::permissions(bin / "ffmpeg", paths::fs::perms::owner_all, ec);
+        const char* p = std::getenv("PATH");
+        saved_path = p ? p : "";
+        setenv("PATH", (paths::to_utf8(bin) + ":" + saved_path).c_str(), 1);
+    }
+    ~FailingDecoder() { setenv("PATH", saved_path.c_str(), 1); }
+};
+
+// An upload the decoder chokes on, then what /api/state says about it.
+struct StateAfterFailedDecode {
+    int         status = 0;
+    std::string message;
+};
+
+StateAfterFailedDecode decode_failure(const std::string& ffmpeg_says) {
+    const paths::fs::path dir = fresh_dir();
+    fake_capture::reset();
+    const FailingDecoder decoder(dir, ffmpeg_says);
+    const paths::fs::path upload = dir / "broken.m4a";
+    paths::write_file(upload, std::string(2048, '\x01'));   // not audio
+
+    app::AppState state(test_settings(dir / "out"));
+    app::Server server(&state, "127.0.0.1", 0);
+    StateAfterFailedDecode out;
+    if (!server.start()) return out;
+
+    state.process_file(upload, "broken.m4a");
+
+    httplib::Client client("127.0.0.1", server.port());
+    if (auto res = client.Get("/api/state")) {
+        out.status = res->status;
+        const auto j = nlohmann::json::parse(res->body, nullptr, false);
+        if (j.is_object() && j.contains("message") && j["message"].is_string()) {
+            out.message = j["message"].get<std::string>();
+        }
+    }
+    server.stop();
+    return out;
+}
+
+void test_status_survives_a_split_character() {
+    // One ASCII byte, 300 two-byte letters and a newline: 602 bytes, so the
+    // last 400 start on the second half of a character.
+    std::string format = "E";
+    for (int i = 0; i < 300; ++i) format += "ş";
+    format += "\\n";
+    const StateAfterFailedDecode r = decode_failure(format);
+    test::check("V3 /api/state still answers after a message cut mid-character",
+                r.status == 200, "HTTP " + std::to_string(r.status));
+    test::check("V3 the message is cut on a character boundary",
+                valid_utf8(r.message) && r.message.find("ş") != std::string::npos,
+                r.message.substr(0, 60));
+}
+
+void test_status_survives_text_that_is_not_utf8() {
+    // "Erişim engellendi" in Windows-1254, the way a Turkish Windows reports
+    // "access denied": 0xFE is the ş, and it is not UTF-8.
+    const StateAfterFailedDecode r = decode_failure("Eri\\376im engellendi");
+    test::check("V3 /api/state still answers when a message is not UTF-8",
+                r.status == 200, "HTTP " + std::to_string(r.status));
+    test::check("V3 and the error still reaches the page",
+                r.message.find("engellendi") != std::string::npos, r.message);
+}
+
+void test_utf8_cuts() {
+    const std::string s = "a\xC5\x9F" "b";   // "aşb"
+    test::check("V3 a cut from the front backs off to a character boundary",
+                utf8::head(s, 2) == "a");
+    test::check("V3 a cut from the back moves on to a character boundary",
+                utf8::tail(s, 2) == "b");
+    test::check("V3 text within the limit is left alone",
+                utf8::head(s, 10) == s && utf8::tail(s, 10) == s);
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    if (argc < 2) {
+        std::printf("usage: test_api <scratch-dir>\n");
+        return 2;
+    }
+    g_scratch = paths::from_utf8(argv[1]);
+    std::error_code ec;
+    paths::fs::remove_all(g_scratch, ec);
+    paths::fs::create_directories(g_scratch, ec);
+
+    // Nothing here may read or write the machine's own settings or models.
+    const paths::fs::path home = g_scratch / "home";
+    paths::fs::create_directories(home, ec);
+    setenv("HOME", paths::to_utf8(home).c_str(), 1);
+    setenv("XDG_CONFIG_HOME", paths::to_utf8(home / ".config").c_str(), 1);
+    setenv("TRANSCRIPTOR_MODELS_DIR", paths::to_utf8(home / "models").c_str(), 1);
+
+    test_utf8_cuts();
+    test_status_survives_a_split_character();
+    test_status_survives_text_that_is_not_utf8();
+
+    return test::summary("api");
+}

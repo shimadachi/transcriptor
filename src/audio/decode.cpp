@@ -7,6 +7,7 @@
 
 #include "util/lang.h"
 #include "util/net.h"
+#include "util/utf8.h"
 
 namespace transcriptor::audio {
 
@@ -94,9 +95,7 @@ std::vector<float> decode_with_ffmpeg(const paths::fs::path& path, int samplerat
               "deneyin ya da ffmpeg kurun."));
     }
     if (r.exit_code != 0) {
-        std::string tail = r.output.size() > 400
-                               ? r.output.substr(r.output.size() - 400)
-                               : r.output;
+        const std::string tail = utf8::tail(r.output, 400);
         throw std::runtime_error(L("ffmpeg decoding error: ",
                                    "ffmpeg çözme hatası: ") + tail);
     }

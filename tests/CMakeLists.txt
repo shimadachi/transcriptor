@@ -106,6 +106,20 @@ add_test(NAME recording_lifecycle
                  "${CMAKE_CURRENT_BINARY_DIR}/recording_scratch")
 set_tests_properties(recording_lifecycle PROPERTIES TIMEOUT 120)
 
+# -- the HTTP API (V3) ---------------------------------------------------------
+# What the page is told, read through the real Server over a loopback socket.
+# Links the application the way the lifecycle test does. POSIX only: the config
+# directory can only be moved out of the machine's own through the environment
+# there, and the stand-in ffmpeg on PATH is a shell script.
+if(UNIX)
+    transcriptor_test(test_api
+        "${TESTS_SRC}/test_api.cpp"
+        "${TESTS_SRC}/fake_capture.cpp")
+    target_link_libraries(test_api PRIVATE transcriptor_core)
+    add_test(NAME api COMMAND test_api "${CMAKE_CURRENT_BINARY_DIR}/api_scratch")
+    set_tests_properties(api PROPERTIES TIMEOUT 120)
+endif()
+
 # -- browser recording UI (R3, R10, R13, G1, G2, G3) --------------------------
 # Runs the real web/app.js under a mocked DOM. Skipped where node is absent
 # rather than failing: node is not a build dependency of the application.

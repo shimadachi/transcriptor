@@ -47,7 +47,14 @@ constexpr const char* kReleasesUrl =
 
 void send_json(httplib::Response& res, const json& body, int status = 200) {
     res.status = status;
-    res.set_content(body.dump(), "application/json; charset=utf-8");
+    // Replace, don't throw. Text reaches these bodies from whisper, from the
+    // summarizer, from other programs' error output and from file names on
+    // disk, and none of it is guaranteed to be UTF-8. The strict default threw
+    // on the first bad byte, so a single one in the status line answered every
+    // /api/state with a 500 until something else changed the phase -- and the
+    // page, unable to read the state, froze on whatever it last showed.
+    res.set_content(body.dump(-1, ' ', false, json::error_handler_t::replace),
+                    "application/json; charset=utf-8");
 }
 
 void send_error(httplib::Response& res, const std::string& message,

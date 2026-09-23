@@ -1,5 +1,6 @@
 #include "llm/openai_backend.h"
 #include "util/lang.h"
+#include "util/utf8.h"
 
 #include <algorithm>
 #include <atomic>
@@ -40,6 +41,13 @@ Endpoint split_base_url(std::string url) {
         ep.prefix = url.substr(path_start);
     }
     return ep;
+}
+
+// The transcript travels inside this body, and whisper output is not always
+// valid UTF-8; the strict default would throw over one stray byte and fail the
+// summary with a json exception instead of sending it.
+std::string request_body(const nlohmann::json& payload) {
+    return payload.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 }
 
 class OpenAIBackend : public Backend {
@@ -196,14 +204,14 @@ public:
         throw_if_aborted();
 
         auto res = client->Post(endpoint_.prefix + "/chat/completions", headers(),
-                                payload.dump(), "application/json");
+                                request_body(payload), "application/json");
         if (res && res->status == 400 && payload.contains("chat_template_kwargs")) {
             // The server does not know the kwarg. Ask again without it and let
             // strip_reasoning() clean up after whatever it sends back.
             throw_if_aborted();
             payload.erase("chat_template_kwargs");
             res = client->Post(endpoint_.prefix + "/chat/completions", headers(),
-                               payload.dump(), "application/json");
+                               request_body(payload), "application/json");
         }
         // The abort is authoritative even when the answer beat it: nothing
         // downstream wants a summary for an operation the user stopped.
@@ -223,7 +231,7 @@ public:
             throw SummarizerError(L("The summary request failed (HTTP ",
                                     "Özetleme isteği başarısız (HTTP ") +
                                   std::to_string(res->status) + "): " +
-                                  res->body.substr(0, 400));
+                                  utf8::head(res->body, 400));
         }
 
         auto j = nlohmann::json::parse(res->body, nullptr, false);
@@ -231,13 +239,13 @@ public:
             j["choices"].empty()) {
             throw SummarizerError(L("Unexpected response format: ",
                                     "Beklenmeyen yanıt biçimi: ") +
-                                  res->body.substr(0, 400));
+                                  utf8::head(res->body, 400));
         }
         const auto& msg = j["choices"][0]["message"];
         if (!msg.is_object()) {
             throw SummarizerError(L("Unexpected response format: ",
                                     "Beklenmeyen yanıt biçimi: ") +
-                                  res->body.substr(0, 400));
+                                  utf8::head(res->body, 400));
         }
 
         // A server that separates the two sends the answer in content and the
@@ -250,7 +258,7 @@ public:
         } else if (!msg.contains("reasoning_content")) {
             throw SummarizerError(L("Unexpected response format: ",
                                     "Beklenmeyen yanıt biçimi: ") +
-                                  res->body.substr(0, 400));
+                                  utf8::head(res->body, 400));
         }
 
         // Reasoning comes off here, where the model's text arrives: a served
