@@ -245,6 +245,11 @@ private:
     // The rebuild itself, with mutex_ already held.
     void replace_settings_locked(const Settings& next);
 
+    // model_download_json()'s body, with mutex_ already held, so state_json()
+    // can report the download under its own lock -- from the same code, so
+    // the two answers cannot drift apart.
+    nlohmann::json model_download_locked() const;
+
     // Bracket a worker that will hold processor_/llm_ raw pointers. claim_
     // adopts any settings change parked while the last job ran and marks the
     // backends in use; release_ clears that and adopts anything parked since.

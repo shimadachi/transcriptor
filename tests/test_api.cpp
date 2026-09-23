@@ -14,6 +14,9 @@
 // V7: the template menu saves one field, and the save checked the stored
 // device on its behalf -- rewriting a card that was only unplugged to "auto".
 //
+// V18: /api/state's download report was a hand-kept copy of /api/model/download
+// that had lost the "cancelled" field.
+//
 // V12: a stopped job ends on "idle" like any other, so the page could not tell
 // a stopped library re-run from a finished one; and the library's Stop must
 // never fall back to discarding the studio's take.
@@ -239,6 +242,19 @@ void test_stopping_a_job_never_discards_the_take() {
     server.stop();
 }
 
+void test_both_download_reports_agree() {
+    const paths::fs::path dir = fresh_dir();
+    app::AppState state(test_settings(dir / "out"));
+    const auto in_state = state.state_json()["model_download"];
+    const auto own = state.model_download_json();
+    std::string keys;
+    for (const auto& [k, v] : own.items()) {
+        if (!in_state.contains(k)) keys += k + " ";
+    }
+    test::check("V18 /api/state reports the download with every field of its own",
+                keys.empty(), "missing: " + keys);
+}
+
 void test_utf8_cuts() {
     const std::string s = "a\xC5\x9F" "b";   // "aşb"
     test::check("V3 a cut from the front backs off to a character boundary",
@@ -274,6 +290,7 @@ int main(int argc, char** argv) {
     test_a_one_field_save_keeps_a_missing_device();
     test_a_stopped_job_says_so();
     test_stopping_a_job_never_discards_the_take();
+    test_both_download_reports_agree();
 
     return test::summary("api");
 }

@@ -501,7 +501,7 @@ async function poll() {
       const pct = dl.progress == null ? '' : pctText(dl.progress);
       notes.push('<span class="caution busy">' +
                  esc(dl.message || t('llm.downloading')) + pct + '</span>');
-    } else if (dl.kind === 'diarize' && dl.error) {
+    } else if (dl.kind === 'diarize' && dl.error && !dl.cancelled) {
       notes.push('<a class="caution err" data-go="diar">' + esc(dl.error) +
                  t('note.diarRetry') + '</a>');
     } else {

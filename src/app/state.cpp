@@ -1351,6 +1351,10 @@ bool AppState::cancel_model_download() {
 
 nlohmann::json AppState::model_download_json() const {
     std::lock_guard<std::mutex> lock(mutex_);
+    return model_download_locked();
+}
+
+nlohmann::json AppState::model_download_locked() const {
     return {
         {"active", downloading_.load()},
         {"kind", dl_kind_},
@@ -1412,18 +1416,10 @@ nlohmann::json AppState::state_json() const {
         {"auto_summarize", settings_.auto_summarize},
         {"summary_template", summary_template_},
         {"llm_backend", settings_.llm_backend},
-        // Same fields as model_download_json(), built here to keep one lock.
-        {"model_download",
-         {{"active", downloading_.load()},
-          {"kind", dl_kind_},
-          {"model", dl_model_.empty() ? nlohmann::json(nullptr)
-                                      : nlohmann::json(dl_model_)},
-          {"label", dl_label_},
-          {"message", dl_message_},
-          {"progress", dl_progress_ < 0 ? nlohmann::json(nullptr)
-                                        : nlohmann::json(dl_progress_)},
-          {"error", dl_error_.empty() ? nlohmann::json(nullptr)
-                                      : nlohmann::json(dl_error_)}}},
+        // The same object /api/model/download answers with. It used to be a
+        // hand-kept copy, and the copy had lost "cancelled": the studio saw a
+        // stopped download only as an error.
+        {"model_download", model_download_locked()},
     };
 }
 
