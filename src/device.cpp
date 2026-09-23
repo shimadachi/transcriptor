@@ -76,21 +76,7 @@ DeviceInfo resolve_device(const std::string& prefer,
     info.gpu_available = !devices.empty();
     info.gpu_count     = static_cast<int>(devices.size());
 
-    const ComputeDevice* chosen = nullptr;
-    if (prefer != "cpu" && !devices.empty()) {
-        for (const ComputeDevice& d : devices) {
-            if (d.id == prefer) { chosen = &d; break; }
-        }
-        // "auto" (and the older "cuda") pick for themselves: a discrete card
-        // ahead of an integrated one, since the integrated chip shares system
-        // memory and is the slower of the two whenever both exist.
-        if (!chosen && (prefer == "auto" || prefer == "cuda" || prefer.empty())) {
-            for (const ComputeDevice& d : devices) {
-                if (!d.integrated) { chosen = &d; break; }
-            }
-            if (!chosen) chosen = &devices.front();
-        }
-    }
+    const ComputeDevice* chosen = choose_device(devices, prefer);
 
     if (chosen) {
         info.device         = "gpu";

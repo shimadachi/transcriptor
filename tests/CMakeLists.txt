@@ -51,6 +51,11 @@ transcriptor_test(test_attribute
 target_link_libraries(test_attribute PRIVATE nlohmann_json::nlohmann_json)
 add_test(NAME attribute COMMAND test_attribute)
 
+# -- choosing the compute device (V22) -----------------------------------------
+# The rule is header-only and ggml-free, so this needs no GPU and no libraries.
+transcriptor_test(test_device_choice "${TESTS_SRC}/test_device_choice.cpp")
+add_test(NAME device_choice COMMAND test_device_choice)
+
 # -- adopting and keeping settings (V7, V11) -----------------------------------
 transcriptor_test(test_settings
     "${TESTS_SRC}/test_settings.cpp"

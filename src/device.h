@@ -50,6 +50,28 @@ struct DeviceInfo {
     std::string badge() const;
 };
 
+// Which of `devices` to run on for the setting `prefer`, or nullptr for the
+// CPU. Kept free of ggml, so the rule can be tested without a GPU.
+//
+// "auto" -- and "cuda", its old spelling -- takes a discrete card ahead of an
+// integrated one, since the integrated chip shares system memory and is the
+// slower of the two whenever both exist. So does an id that is no longer here,
+// which is what the settings save does with one as well: landing on the CPU
+// instead left a GPU machine transcribing at a fraction of its speed because
+// an id had changed -- "CUDA0" in the CUDA package is "Vulkan0" in the Vulkan
+// one, and config.json goes from one to the other.
+inline const ComputeDevice* choose_device(const std::vector<ComputeDevice>& devices,
+                                          const std::string& prefer) {
+    if (prefer == "cpu" || devices.empty()) return nullptr;
+    for (const ComputeDevice& d : devices) {
+        if (d.id == prefer) return &d;
+    }
+    for (const ComputeDevice& d : devices) {
+        if (!d.integrated) return &d;
+    }
+    return &devices.front();
+}
+
 // prefer: "auto" | "cpu" | a ComputeDevice::id. "cuda" is accepted as the old
 // spelling of "auto". An id that is no longer present falls back to "auto", so
 // moving a drive between machines never leaves the app unable to start.
