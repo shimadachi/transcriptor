@@ -48,6 +48,12 @@ void test_names_stay_in_their_own_segment() {
     check("a slash is refused", !library::valid_variant("../escape"));
     check("a backslash is refused", !library::valid_variant("a\\b"));
     check("a colon is refused", !library::valid_variant("c:name"));
+    // V20: Windows refuses these in a file name, and the refusal only came
+    // after the re-run had finished transcribing.
+    for (const char* bad : {"v2?", "a|b", "x*", "<draft>", "\"quoted\""}) {
+        check((std::string("V20 \"") + bad + "\" is refused").c_str(),
+              !library::valid_variant(bad));
+    }
     check("an empty name is not a name", !library::valid_variant(""));
     check("surrounding spaces are refused", !library::valid_variant(" pad "));
     check("control characters are refused", !library::valid_variant(std::string("a\nb")));

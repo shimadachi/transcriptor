@@ -2358,9 +2358,10 @@ $('libRunStart').onclick = () => {
   const shown = libRunKind === 'transcribe' ? libTx : libSum;
   const name = wantNew ? $('libRunName').value.trim() : shown;
   if (wantNew && !name) { toast(t('lib.runNameNeeded')); return; }
-  // Dots and separators would let a name reach past its own file; the server
-  // refuses them too, but saying so here costs nothing and reads better.
-  if (wantNew && /[./\\:]/.test(name)) { toast(t('lib.runNameBad')); return; }
+  // Dots and separators would let a name reach past its own file, and Windows
+  // refuses the rest in a file name; the server refuses them too, but saying
+  // so here costs nothing and comes before a run, not after it.
+  if (wantNew && /[./\\:<>"|?*]/.test(name)) { toast(t('lib.runNameBad')); return; }
   startLibRun(libRunKind, name);
 };
 

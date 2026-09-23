@@ -92,9 +92,14 @@ bool valid_variant(const std::string& name) {
         const unsigned char u = static_cast<unsigned char>(c);
         if (u < 0x20) return false;
         // A dot would let a name reach past its own segment ("x.json"), and a
-        // separator out of the folder entirely. Everything else printable and
-        // non-exotic is the user's to choose.
+        // separator out of the folder entirely. The rest are what Windows will
+        // not put in a file name; allowed here, a re-run named "v2?" ran the
+        // whole transcription and then failed to save it. Everything else
+        // printable is the user's to choose.
         if (c == '.' || c == '/' || c == '\\' || c == ':') return false;
+        if (c == '<' || c == '>' || c == '"' || c == '|' || c == '?' || c == '*') {
+            return false;
+        }
     }
     return true;
 }

@@ -41,7 +41,8 @@ struct Variant {
 
 // True for a name that may sit in the middle of a file name: letters, digits,
 // spaces, dashes, underscores. No dots, separators or leading/trailing space,
-// so a name can never climb out of the session folder or shadow another file.
+// so a name can never climb out of the session folder or shadow another file,
+// and none of the characters Windows refuses in a file name.
 bool valid_variant(const std::string& name);
 
 // Where a variant's files live. `name` empty gives the originals.
