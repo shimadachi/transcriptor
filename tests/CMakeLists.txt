@@ -44,6 +44,13 @@ transcriptor_test(test_diar_threshold
 target_link_libraries(test_diar_threshold PRIVATE nlohmann_json::nlohmann_json)
 add_test(NAME diar_threshold COMMAND test_diar_threshold)
 
+# -- speaker attribution (V10) -------------------------------------------------
+transcriptor_test(test_attribute
+    "${TESTS_SRC}/test_attribute.cpp"
+    "${APP_SRC}/pipeline/attribute.cpp")
+target_link_libraries(test_attribute PRIVATE nlohmann_json::nlohmann_json)
+add_test(NAME attribute COMMAND test_attribute)
+
 # -- adopting settings (V7) ----------------------------------------------------
 transcriptor_test(test_settings
     "${TESTS_SRC}/test_settings.cpp"

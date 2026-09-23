@@ -93,61 +93,6 @@ nlohmann::json ProcessResult::to_json(const std::string& lang) const {
     };
 }
 
-std::vector<Line> attribute(const std::vector<stt::TranscriptSegment>& segments,
-                            const std::vector<diarize::Turn>& turns,
-                            int* num_speakers) {
-    // Speaker index of the turn that overlaps [s, e] most; -1 if none does.
-    auto speaker_at = [&turns](double s, double e) -> int {
-        int    best = -1;
-        double best_overlap = 0.0;
-        for (const diarize::Turn& t : turns) {
-            const double overlap = std::min(e, t.end) - std::max(s, t.start);
-            if (overlap > best_overlap) {
-                best_overlap = overlap;
-                best = t.speaker;
-            }
-        }
-        return best;
-    };
-
-    // Renumber by first appearance so speaker 0 is whoever talks first.
-    std::map<int, int> order;
-    auto dense = [&order](int speaker) -> int {
-        if (speaker < 0) return -1;
-        auto it = order.find(speaker);
-        if (it != order.end()) return it->second;
-        const int idx = static_cast<int>(order.size());
-        order[speaker] = idx;
-        return idx;
-    };
-
-    std::vector<Line> lines;
-    for (const stt::TranscriptSegment& seg : segments) {
-        if (!seg.words.empty()) {
-            for (const stt::Word& w : seg.words) {
-                const int spk = dense(speaker_at(w.start, w.end));
-                if (!lines.empty() && lines.back().speaker == spk) {
-                    lines.back().text += w.text;
-                    lines.back().end = w.end;
-                } else {
-                    lines.push_back({spk, w.text, w.start, w.end});
-                }
-            }
-        } else {
-            const int spk = dense(speaker_at(seg.start, seg.end));
-            if (!lines.empty() && lines.back().speaker == spk) {
-                lines.back().text += " " + seg.text;
-                lines.back().end = seg.end;
-            } else {
-                lines.push_back({spk, " " + seg.text, seg.start, seg.end});
-            }
-        }
-    }
-
-    if (num_speakers) *num_speakers = static_cast<int>(order.size());
-    return lines;
-}
-
 OfflineProcessor::OfflineProcessor(Settings settings, DeviceInfo device)
     : settings_(std::move(settings)), device_(std::move(device)) {}
 

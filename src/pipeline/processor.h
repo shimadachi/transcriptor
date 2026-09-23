@@ -113,7 +113,8 @@ private:
 };
 
 // Assign each word (or whole segment, when word timestamps are missing) to the
-// speaker turn it overlaps most, then merge consecutive same-speaker tokens.
+// speaker turn it overlaps most -- or, overlapping none, to the nearest turn
+// close by -- then merge consecutive same-speaker tokens. In attribute.cpp.
 std::vector<Line> attribute(const std::vector<stt::TranscriptSegment>& segments,
                             const std::vector<diarize::Turn>& turns,
                             int* num_speakers);
