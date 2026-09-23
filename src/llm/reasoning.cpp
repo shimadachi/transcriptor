@@ -67,6 +67,19 @@ std::string strip_reasoning(const std::string& text) {
             if (end == std::string::npos) { out.erase(at); break; }
             out.erase(at, (end + close.size()) - at);
         }
+
+        // A closing tag with no opening one. Chat templates for DeepSeek-R1,
+        // QwQ and their kind open the block themselves, in the prompt, so a
+        // server that renders the template sends back only "...</think>" and
+        // then the answer. Everything before the last such tag is reasoning.
+        for (std::size_t at = ifind(out, close, 0), last = std::string::npos;;
+             at = ifind(out, close, at + close.size())) {
+            if (at == std::string::npos) {
+                if (last != std::string::npos) out.erase(0, last + close.size());
+                break;
+            }
+            last = at;
+        }
     }
 
     return trim(out);

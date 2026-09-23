@@ -153,6 +153,24 @@ void whole_blocks_come_off_the_answer() {
           strip_reasoning("the thinker said so") == "the thinker said so");
 }
 
+// V5: a server that renders the chat template -- LM Studio, llama-server with
+// --jinja, vLLM -- sends DeepSeek-R1 and QwQ output without the opening tag,
+// because the template put it in the prompt. The reasoning reached the summary
+// pane and summary.txt, closing tag and all.
+void a_closing_tag_alone_still_ends_the_reasoning() {
+    check("V5 reasoning before an orphan </think> is removed",
+          strip_reasoning("Let me weigh the decisions first...\n</think>\n\n"
+                          "## Summary\nBeta ships Friday.") ==
+              "## Summary\nBeta ships Friday.");
+    check("V5 the same for </thinking>",
+          strip_reasoning("weighing\n</thinking>\nThe notes") == "The notes");
+    check("V5 the tag is matched without regard to case",
+          strip_reasoning("weighing</THINK>The notes") == "The notes");
+    check("V5 a well-formed block after the answer's reasoning is removed too",
+          strip_reasoning("weighing</think>The notes<think>again</think>") ==
+              "The notes");
+}
+
 }  // namespace
 
 int main() {
@@ -163,5 +181,6 @@ int main() {
     thinking_off_charges_everything_to_the_answer();
     a_finished_answer_owes_nothing();
     whole_blocks_come_off_the_answer();
+    a_closing_tag_alone_still_ends_the_reasoning();
     return test::summary("reasoning");
 }
