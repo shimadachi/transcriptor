@@ -392,7 +392,11 @@ DownloadResult download(const std::string& url, const paths::fs::path& dest,
     std::error_code ec;
     if (dest.has_parent_path()) paths::fs::create_directories(dest.parent_path(), ec);
 
-    const paths::fs::path tmp = dest.string() + ".part";
+    // Appended to the native path, not through string(): on Windows that
+    // converts to the ANSI code page and throws on any letter outside it --
+    // and the models folder sits under the user's profile, named after them.
+    paths::fs::path tmp = dest;
+    tmp += ".part";
     paths::fs::remove(tmp, ec);
 
     // Poll the growing temp file so the UI can show a percentage.

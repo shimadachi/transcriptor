@@ -70,7 +70,9 @@ std::vector<float> decode_with_ffmpeg(const paths::fs::path& path, int samplerat
                                       net::Canceller* cancel) {
     // ffmpeg writes raw f32le to a temp file; reading a pipe would mean
     // reimplementing the streaming reader for a rare path.
-    const paths::fs::path raw = path.string() + ".f32";
+    // Appended natively; see net::download() for why not through string().
+    paths::fs::path raw = path;
+    raw += ".f32";
 
     // run() kills the child on a cancel, which is the only way to interrupt it:
     // this thread is blocked in the wait until ffmpeg is done with the file.

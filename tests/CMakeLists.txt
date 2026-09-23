@@ -68,6 +68,18 @@ transcriptor_test(test_library
 add_test(NAME library
          COMMAND test_library "${CMAKE_CURRENT_BINARY_DIR}/library_scratch")
 
+# -- downloads into folders the code page cannot spell (V13) -------------------
+# Runs everywhere, but only Windows ever converted the path to the code page.
+transcriptor_test(test_unicode_paths
+    "${TESTS_SRC}/test_unicode_paths.cpp"
+    "${APP_SRC}/util/net.cpp"
+    "${APP_SRC}/util/paths.cpp")
+find_package(Threads REQUIRED)
+target_link_libraries(test_unicode_paths PRIVATE Threads::Threads)
+add_test(NAME unicode_paths
+         COMMAND test_unicode_paths "${CMAKE_CURRENT_BINARY_DIR}/unicode_paths_scratch")
+set_tests_properties(unicode_paths PROPERTIES TIMEOUT 60)
+
 # -- output writing (R2) ------------------------------------------------------
 # RLIMIT_FSIZE is how the failure is provoked, so POSIX only.
 if(UNIX)

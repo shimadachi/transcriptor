@@ -1274,17 +1274,25 @@ bool AppState::start_model_download(const std::string& kind,
 
         std::string      err;
         paths::fs::path  file;
-        if (diarize) {
-            // Managed paths, so there is nothing to point the settings at
-            // afterwards -- the pipeline finds these by name.
-            err = models::ensure_diarization_models(settings_copy(), progress,
-                                                    &dl_cancel_);
-        } else if (is_llm) {
-            err  = models::ensure_llm_model(llm_copy, progress, &dl_cancel_);
-            file = models::llm_model_file(llm_copy);
-        } else {
-            file = models::whisper_model_file(stt_copy);
-            err  = models::ensure_whisper_model_file(stt_copy, progress, &dl_cancel_);
+        // Nothing here may escape the thread: an exception leaving it is
+        // std::terminate, and the app would vanish mid-download with the
+        // cause nowhere on screen. It becomes the download's error instead.
+        try {
+            if (diarize) {
+                // Managed paths, so there is nothing to point the settings at
+                // afterwards -- the pipeline finds these by name.
+                err = models::ensure_diarization_models(settings_copy(), progress,
+                                                        &dl_cancel_);
+            } else if (is_llm) {
+                err  = models::ensure_llm_model(llm_copy, progress, &dl_cancel_);
+                file = models::llm_model_file(llm_copy);
+            } else {
+                file = models::whisper_model_file(stt_copy);
+                err  = models::ensure_whisper_model_file(stt_copy, progress, &dl_cancel_);
+            }
+        } catch (const std::exception& e) {
+            err = L("The download failed: ", "İndirme başarısız: ") +
+                  std::string(e.what());
         }
         // The error string is the same shape either way; the flag is what tells
         // the UI to say "cancelled" instead of colouring it as a failure.

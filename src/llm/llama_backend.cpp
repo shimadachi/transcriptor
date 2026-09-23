@@ -844,7 +844,7 @@ std::vector<std::string> discover_gguf_models() {
          it.increment(ec)) {
         if (ec) break;
         if (!it->is_regular_file(ec)) continue;
-        std::string ext = it->path().extension().string();
+        std::string ext = paths::to_utf8(it->path().extension());
         std::transform(ext.begin(), ext.end(), ext.begin(),
                        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         if (ext == ".gguf") out.push_back(paths::to_utf8(it->path()));
