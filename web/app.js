@@ -732,11 +732,15 @@ $('cancelBtn').onclick = async () => {
   }
 
   if (browserRec) cancelBrowserCapture();   // stop + skip upload
-  const r = await post('/api/cancel');
+  // A job is asked to stop and nothing else. The check above still leaves the
+  // moment between its answer and this request, and a run that finished in it
+  // turned the press into a discard of the result it had just written.
+  const r = await post('/api/cancel', kind === 'job' ? {job_only: true} : null);
   if (r && r.error) { toast(r.error); return; }
   // Stopping a run throws nothing away, so the panels stay as they are — the
   // transcript a cancelled summary was reading is still the transcript.
   if (r && r.stopped === 'job') { toast(t('toast.jobStopped')); return; }
+  if (r && r.stopped === 'none') { toast(t('toast.jobAlreadyDone')); poll(); return; }
   // A cancelled take or a discarded result does clear them. The revision is
   // left alone: it only ever climbs, so the next run's transcript still reads
   // as new.

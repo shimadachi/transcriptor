@@ -16,6 +16,7 @@
 //   V17 "Saved →" and "Not saved →" stood side by side for the same folder
 //   V23 a summary cut off at the maximum answer length was shown as finished
 //   V25 Tab walked out of the confirm dialog, and Space pressed what was behind it
+//   V26 the studio's Stop discarded a run that finished as it was being stopped
 
 const path = require('path');
 const {createEnv} = require('./harness');
@@ -659,6 +660,33 @@ async function run() {
     check('a run that finished while the question was up is left alone',
           env.server.cancels.length === 0,
           JSON.stringify(env.server.cancels.length));
+  }
+
+  // ---------------------------------------------------------------- V26 ----
+  // That check cannot close the gap between its answer and the request after
+  // it. A run finishing in that gap made the request a discard, and the
+  // transcript it had just written went with it.
+  {
+    const env = createEnv(ROOT);
+    env.server.state.processing = true;
+    env.server.state.phase = 'transcribe';
+    await env.app.poll();
+    await env.settle();                     // let that poll's result load land first
+    const transcript = env.peek("$('transcript')");
+    transcript.innerHTML = 'the finished transcript';
+    env.server.cancelReply = {ok: true, stopped: 'none'};   // it ended just after the check
+
+    const pending = env.els.cancelBtn.onclick();
+    await env.settle();
+    env.els.askYes.onclick();
+    await pending;
+    check('V26 stopping a run asks the server to stop the job alone',
+          env.server.cancels.length === 1 && env.server.cancels[0].body.job_only === true,
+          JSON.stringify(env.server.cancels.map(c => c.body)));
+    check('V26 and a run that finished first keeps its transcript on screen',
+          transcript.innerHTML === 'the finished transcript' &&
+            env.els.toast.textContent === 'toast.jobAlreadyDone',
+          env.els.toast.textContent + ' / ' + transcript.innerHTML);
   }
 
   // ----------------------------------------------------------------- V1 ----
