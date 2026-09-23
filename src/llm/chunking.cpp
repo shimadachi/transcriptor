@@ -14,6 +14,16 @@ std::string trim(const std::string& s) {
     return s.substr(b, e - b + 1);
 }
 
+// Where to end a piece of at most `max_chars` bytes taken from the front of
+// `line`, which is longer than that.
+std::size_t cut_point(const std::string& line, std::size_t max_chars) {
+    const std::size_t space = line.find_last_of(" \t", max_chars - 1);
+    if (space != std::string::npos && space >= max_chars / 2) return space + 1;
+    std::size_t cut = max_chars;
+    while (cut > 0 && (static_cast<unsigned char>(line[cut]) & 0xC0) == 0x80) --cut;
+    return cut > 0 ? cut : max_chars;
+}
+
 }  // namespace
 
 std::vector<std::string> split_transcript(const std::string& text,
@@ -34,14 +44,20 @@ std::vector<std::string> split_transcript(const std::string& text,
                                : text.substr(pos, nl - pos + 1);
         pos = (nl == std::string::npos) ? text.size() : nl + 1;
 
-        // A single line longer than the budget has to be cut mid-sentence.
+        // A single line longer than the budget has to be cut mid-sentence --
+        // and without speaker separation the whole transcript is one line, so
+        // this is the ordinary case, not the odd one. Cut after the last space
+        // in the second half of the budget; failing that, at a character
+        // boundary. A cut at the raw byte offset split words, and Turkish
+        // letters, at every section boundary.
         while (line.size() > max_chars) {
             if (!current.empty()) {
                 chunks.push_back(current);
                 current.clear();
             }
-            chunks.push_back(line.substr(0, max_chars));
-            line = line.substr(max_chars);
+            const std::size_t cut = cut_point(line, max_chars);
+            chunks.push_back(line.substr(0, cut));
+            line = line.substr(cut);
         }
         if (current.size() + line.size() > max_chars && !current.empty()) {
             chunks.push_back(current);

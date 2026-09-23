@@ -1,4 +1,4 @@
-// Regression tests for the summary chunking (report finding R8).
+// Regression tests for the summary chunking (report findings R8, V8).
 //
 // The bug: sections were sliced by a fixed chars-per-token guess and never
 // measured, so token-dense text overflowed the context window on the very first
@@ -42,6 +42,20 @@ struct Window {
         return budget_tokens > 0 ? static_cast<std::size_t>(budget_tokens) * 5 / 2 : 0;
     }
 };
+
+bool valid_utf8(const std::string& s) {
+    for (std::size_t i = 0; i < s.size();) {
+        const auto c = static_cast<unsigned char>(s[i]);
+        const int n = c < 0x80 ? 0 : (c >> 5) == 0x6 ? 1 : (c >> 4) == 0xE ? 2
+                    : (c >> 3) == 0x1E ? 3 : -1;
+        if (n < 0 || i + n >= s.size()) return false;
+        for (int k = 1; k <= n; ++k) {
+            if ((static_cast<unsigned char>(s[i + k]) & 0xC0) != 0x80) return false;
+        }
+        i += n + 1;
+    }
+    return true;
+}
 
 std::string make_text(std::size_t bytes, std::size_t line_len) {
     std::string out;
@@ -102,6 +116,38 @@ int main() {
 
         test::check("a zero budget yields nothing rather than looping",
                     split_transcript("anything", 0).empty());
+    }
+
+    // -- V8: a transcript that is one long line --------------------------------
+    // Without speaker separation the transcript is joined into a single line,
+    // so "prefer line boundaries" never applied and every section ended at a
+    // raw byte offset: through a word, and often through a Turkish letter.
+    {
+        std::string line;
+        for (int i = 0; i < 60; ++i) {
+            line += "Bugün toplantıda bütçe, müşteri şikâyetleri ve üçüncü çeyrek "
+                    "hedefleri görüşüldü. ";
+        }
+        int split_chars = 0, split_words = 0, broken = 0;
+        for (std::size_t budget = 900; budget < 1300; ++budget) {
+            const auto parts = split_transcript(line, budget);
+            std::string joined;
+            for (std::size_t k = 0; k < parts.size(); ++k) {
+                if (!valid_utf8(parts[k])) ++split_chars;
+                if (k > 0 && parts[k - 1].back() != ' ' && parts[k].front() != ' ') {
+                    ++split_words;
+                }
+                if (parts[k].size() > budget) ++broken;
+                joined += parts[k];
+            }
+            if (joined != line) ++broken;
+        }
+        test::check("V8 no section boundary splits a character", split_chars == 0,
+                    std::to_string(split_chars) + " sections over 400 budgets");
+        test::check("V8 no section boundary splits a word", split_words == 0,
+                    std::to_string(split_words) + " boundaries over 400 budgets");
+        test::check("V8 sections stay within the budget and lose nothing",
+                    broken == 0, std::to_string(broken) + " budgets went wrong");
     }
 
     // -- split_to_fit -------------------------------------------------------
