@@ -48,7 +48,11 @@
 
   --rec:     #e4491f;
   --rec-2:   #e8712a;
-  --vu:      #c58a00;
+  /* Deep enough to read as text on paper. The brighter #c58a00 this used to be
+     reached 2.5:1 against a button and 2.8:1 against a panel, and it is the
+     text colour of the timestamps, the player clock, the recording timer and
+     more than a dozen other things. */
+  --vu:      #7d5a0b;
   --ok:      #1f9e77;
   --ok-dim:  #83ccb2;
 

@@ -243,6 +243,19 @@ const THEMES = [['dark', darkTokens], ['light', lightTokens]];
   }
 }
 
+// -- V28: the light theme's amber can be read as text --------------------------
+// --vu is the text colour of the timestamps, the player clock, the recording
+// timer, the Live switch and more. In the light theme it was #c58a00, which
+// reached 2.5:1 on a button and 2.8:1 on a panel, so all of it was hard to
+// read. 4.5:1 is what WCAG asks of text this size.
+for (const [name, t] of THEMES) {
+  for (const surface of ['--bg', '--bg-2', '--panel', '--panel-2', '--hover']) {
+    const r = t['--vu'] && t[surface] ? contrast(t['--vu'], t[surface]) : 0;
+    check(`V28 ${name} amber text reads on ${surface}`, r >= 4.5,
+          `${t['--vu']} on ${t[surface]}: ${r.toFixed(2)}:1`);
+  }
+}
+
 console.log(failures === 0 ? '\ntables: all checks passed'
                            : `\ntables: ${failures} check(s) FAILED`);
 process.exit(failures === 0 ? 0 : 1);
