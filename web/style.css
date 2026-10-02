@@ -6,6 +6,8 @@
   --bg-2:    #100e0b;
   --panel:   #16130e;
   --panel-2: #1c1811;
+  /* A button's fill under the pointer: one step up from --panel-2. */
+  --hover:   #241f16;
   --line:    #2a241a;
   --line-2:  #3a3121;
   --ink:     #f4efe4;
@@ -36,6 +38,7 @@
   --bg-2:    #efe7d9;
   --panel:   #fbf8f1;
   --panel-2: #f2ebdc;
+  --hover:   #e8ddc8;
   --line:    #e4d9c6;
   --line-2:  #d1c2a6;
   --ink:     #241f18;
@@ -131,7 +134,10 @@ select, input[type=text], input[type=password], input[type=number] {
 button { font-family: var(--mono); font-size: 13px; cursor: pointer; color: var(--ink);
   background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 10px;
   padding: 10px 18px; letter-spacing: .04em; transition: all .18s var(--ease); }
-button:hover:not(:disabled){ border-color: var(--faint); background: #241f16; transform: translateY(-1px); }
+/* The fill is a token, not a literal. It was the dark theme's colour written
+   in directly, which the light theme never overrode: every plain button went
+   near-black under the pointer there, with a near-black label on top of it. */
+button:hover:not(:disabled){ border-color: var(--faint); background: var(--hover); transform: translateY(-1px); }
 button:active:not(:disabled){ transform: translateY(0); }
 button:disabled { opacity: .4; cursor: not-allowed; }
 button.ghost { background: transparent; }

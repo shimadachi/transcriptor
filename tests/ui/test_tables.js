@@ -193,6 +193,56 @@ check('the settings POST no longer sends a threshold',
         at > 0 && inside.length === 0, inside.join(', ') || (at > 0 ? '' : 'field not found'));
 }
 
+// -- the stylesheet's colour tokens -------------------------------------------
+// The dark palette is the bare :root block; the light block redefines some of
+// it and inherits the rest. Both checks below read colours the way the page
+// resolves them, rather than trusting a literal that looks right in one theme.
+
+function tokenBlock(re) {
+  const m = css.match(re);
+  const out = {};
+  for (const t of ((m && m[1]) || '').matchAll(/(--[\w-]+)\s*:\s*(#[0-9a-fA-F]{6})\b/g)) {
+    out[t[1]] = t[2].toLowerCase();
+  }
+  return out;
+}
+const darkTokens  = tokenBlock(/:root\s*\{([^}]*)\}/);
+const lightTokens = Object.assign({}, darkTokens,
+                                  tokenBlock(/:root\[data-theme="light"\]\s*\{([^}]*)\}/));
+
+// WCAG relative luminance and contrast ratio.
+function luminance(hex) {
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255)
+    .map(v => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+function contrast(a, b) {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+const THEMES = [['dark', darkTokens], ['light', lightTokens]];
+
+// -- V27: a hovered button keeps its label ------------------------------------
+// The hover fill was the dark theme's colour written in as a literal, which the
+// light theme never overrode. There every plain button went near-black under
+// the pointer, behind a label of almost exactly that colour: 1.0:1, so the
+// label vanished.
+{
+  const rule = css.match(/(?:^|\n)button:hover:not\(:disabled\)\s*\{([^}]*)\}/);
+  const fill = rule && /background\s*:\s*([^;]+);/.exec(rule[1]);
+  const token = fill && /^var\((--[\w-]+)\)$/.exec(fill[1].trim());
+  check('V27 the button hover fill comes from a theme token', Boolean(token),
+        fill ? fill[1].trim() : 'rule not found');
+  if (token) {
+    for (const [name, t] of THEMES) {
+      const bg = t[token[1]], ink = t['--ink'];
+      const r = bg && ink ? contrast(bg, ink) : 0;
+      check(`V27 a hovered button's label reads in the ${name} theme`, r >= 4.5,
+            `${ink} on ${bg}: ${r.toFixed(2)}:1`);
+    }
+  }
+}
+
 console.log(failures === 0 ? '\ntables: all checks passed'
                            : `\ntables: ${failures} check(s) FAILED`);
 process.exit(failures === 0 ? 0 : 1);
