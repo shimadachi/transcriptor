@@ -73,6 +73,7 @@ set(TRANSCRIPTOR_CORE_SOURCES
     src/llm/llama_backend.cpp
     src/pipeline/processor.cpp
     src/pipeline/attribute.cpp
+    src/pipeline/live.cpp
     src/app/state.cpp
     src/app/server.cpp
     src/app/shell.cpp)

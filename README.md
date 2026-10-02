@@ -18,6 +18,10 @@ directly runnable executable for Windows and macOS.
   gain control and a peak limiter. It can also process an audio/video file you
   already have.
 - **Transcribes** — whisper.cpp, with word-level timestamps.
+- **Live transcript** — optional, switched on from the studio: the text appears
+  while you record, from a lighter speech model chosen separately in
+  Settings → General. The full transcript replaces it once the recording is
+  transcribed.
 - **Separates speakers** — sherpa-onnx, labelling them "Speaker 1/2/3".
 - **Summarizes** — embedded llama.cpp, following the note template you pick.
   Recordings too long for the context window are summarized in chunks and merged.

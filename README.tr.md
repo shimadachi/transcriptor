@@ -18,6 +18,9 @@ macOS için doğrudan çalıştırılabilir dosya üretir.
   (gerçek zamanlı kazanç + tepe sınırlayıcı). Elinizdeki bir ses/video dosyasını
   da işleyebilir.
 - **Metne döker** — whisper.cpp, kelime bazlı zaman damgalarıyla.
+- **Canlı metin** — isteğe bağlı, stüdyodan açılır: siz kaydederken metin
+  belirir; bunun için Ayarlar → Genel'de ayrıca seçilen daha hafif bir konuşma
+  modeli kullanılır. Kayıt metne dönüştürülünce yerini tam metin alır.
 - **Konuşmacıları ayırır** — sherpa-onnx; "Konuşmacı 1/2/3" olarak etiketler.
 - **Özetler** — gömülü llama.cpp ile, seçtiğiniz not şablonuna göre. Uzun
   kayıtlar parça parça özetlenip birleştirilir.

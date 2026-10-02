@@ -615,6 +615,49 @@ input[type=checkbox]:disabled, input[type=radio]:disabled {
 /* active-toggle buttons (pause, context) */
 button.mini.on { border-color: var(--rec); color: var(--rec); }
 
+/* ---------- live transcript ---------- */
+/* The switch. Off is struck through and on is not -- the slash and the gap cut
+   around it come and go together -- so the two states differ in shape, and
+   colour only confirms it. `button.` matches the specificity of button.mini.on
+   above, which would otherwise paint "on" in the record colour. */
+button.live-btn { display: inline-flex; align-items: center; gap: 7px; }
+.live-btn svg { flex: none; }
+.live-btn .live-slash, .live-btn .live-cut { display: none; }
+button.live-btn.off { color: var(--muted); }
+.live-btn.off .live-slash, .live-btn.off .live-cut { display: inline; }
+button.live-btn.on { color: var(--vu);
+  border-color: color-mix(in srgb, var(--vu) 45%, var(--line-2)); }
+/* While a take is being heard, the waves ripple out from the dot. */
+.live-btn.hearing .live-dot { animation: pulse 1.6s infinite; }
+.live-btn.hearing .live-wave { animation: live-wave 1.6s var(--ease) infinite; }
+.live-btn.hearing .live-wave.w2 { animation-delay: .3s; }
+@keyframes live-wave { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+
+/* The preview, in the transcript panel. Its head says what it is, so it is
+   never mistaken for the finished transcript. */
+.live-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px;
+  margin: -4px 0 12px; font-family: var(--mono); font-size: 11px;
+  color: var(--muted); letter-spacing: .04em; }
+.live-pill { display: inline-flex; align-items: center; gap: 7px; color: var(--vu);
+  font-weight: 700; letter-spacing: .2em; text-transform: uppercase; }
+.live-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--rec); box-shadow: 0 0 8px var(--rec); animation: pulse 1.6s infinite; }
+.live-head.done .live-pill { color: var(--muted); }
+.live-head.done .live-pill::before { background: var(--faint); box-shadow: none;
+  animation: none; }
+/* The line still being spoken: dimmer, and with a caret, because it can still
+   change under the reader. */
+.tx-body .line.partial .txt { color: var(--ink-dim); font-style: italic; }
+.tx-body .line.partial .txt::after { content: "▍"; margin-left: 2px; color: var(--vu);
+  font-style: normal; animation: blink 1s steps(1) infinite; }
+.live-msg { font-family: var(--mono); font-size: 12px; color: var(--muted);
+  line-height: 1.6; padding: 4px 0 4px 14px; border-left: 2px solid var(--vu); }
+.live-msg.err { color: var(--rec-2); border-left-color: var(--rec); }
+@media (prefers-reduced-motion: reduce) {
+  .live-btn.hearing .live-dot, .live-btn.hearing .live-wave,
+  .live-pill::before, .tx-body .line.partial .txt::after { animation: none; }
+}
+
 /* "+ mic" mixer dropdown — keep it compact in the source row */
 .xsel:has(#micSource) { max-width: 190px; }
 .xsel:has(#micSource) .xsel-btn { overflow: hidden; white-space: nowrap; }

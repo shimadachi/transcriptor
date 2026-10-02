@@ -45,6 +45,15 @@ struct Settings {
     std::string compute_type  = "auto";       // kept for UI parity (quantization)
     int         stt_threads   = 0;            // 0 = hardware_concurrency
 
+    // -- live transcript ---------------------------------------------------
+    // Text on screen while the take is still going, from a speech model of its
+    // own. It has to keep up with someone talking, which the model the finished
+    // transcript is made with rarely can on the same machine -- so the two are
+    // chosen separately, and neither has a default for the reason above.
+    // Switched from the studio, not from the settings panel.
+    bool        live_transcript = false;
+    std::string live_whisper_model;           // a models::whisper_catalog() id
+
     // -- diarization (sherpa-onnx) ---------------------------------------
     bool        enable_diarization = false;
     std::string diar_segmentation_model;      // empty = managed download
@@ -134,6 +143,7 @@ struct Settings {
 
     // Resolved model file locations (managed download path when unset).
     paths::fs::path whisper_model_file() const;
+    paths::fs::path live_whisper_model_file() const;   // empty when none chosen
     paths::fs::path segmentation_model_file() const;
     paths::fs::path embedding_model_file() const;
 

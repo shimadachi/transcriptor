@@ -1,13 +1,17 @@
 // Record a whole session into one in-memory buffer.
 //
-// Offline-first: nothing is transcribed live. A drain thread pulls from the
-// capture queue(s), tracks a level for the meter, and appends to the session
-// buffer. An optional second source (a microphone) is mixed into the primary
-// (system loopback) in real time with per-source gain and a peak limiter.
+// Offline-first: the transcript is made from this buffer once the take ends.
+// A drain thread pulls from the capture queue(s), tracks a level for the meter,
+// and appends to the session buffer -- and hands each block to a tap as well,
+// when one is attached, which is how the live transcript hears the take. An
+// optional second source (a microphone) is mixed into the primary (system
+// loopback) in real time with per-source gain and a peak limiter.
 #pragma once
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -44,6 +48,16 @@ public:
     // system-only instead of failing the recording.
     std::string error() const;
 
+    // Every block the take keeps, as it is kept -- gain applied, mixed, and
+    // nothing from while it was paused: exactly what stop() will return. The
+    // offset is where the block starts in the take, in samples, so a listener
+    // attached mid-take knows where it came in. Called on the drain thread, and
+    // on whichever thread calls stop() for the tail; keep it short. nullptr
+    // detaches.
+    using Tap = std::function<void(const std::vector<float>& block,
+                                   std::size_t offset)>;
+    void set_tap(Tap tap);
+
 private:
     void run();
     void run_single();
@@ -67,6 +81,7 @@ private:
 
     mutable std::mutex   mutex_;
     std::vector<float>   samples_;          // guarded by mutex_
+    Tap                  tap_;              // guarded by mutex_
     std::vector<float>   carry_[2];         // drain thread only
     // When each source last delivered anything; drain thread only.
     std::chrono::steady_clock::time_point last_got_[2]{};

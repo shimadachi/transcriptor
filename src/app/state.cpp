@@ -81,12 +81,16 @@ AppState::AppState(Settings settings)
     lang::set(settings_.ui_language);
     processor_ = std::make_unique<pipeline::OfflineProcessor>(settings_, device_);
     llm_ = llm::make_backend(settings_, device_);
+    live_stt_ = std::make_unique<stt::LiveWhisper>();
+    live_ = std::make_unique<pipeline::LiveTranscriber>();
 }
 
 AppState::~AppState() { shutdown(); }
 
 void AppState::shutdown() {
     shutting_down_.store(true);
+    // The preview has nothing worth waiting for on the way out.
+    live_->stop();
 
     std::unique_ptr<audio::Recorder> recorder;
     {
@@ -115,6 +119,7 @@ void AppState::shutdown() {
     }
 
     join_worker();
+    live_->join();
     // Kill the download rather than wait it out. This used to join and hope:
     // curl has no transfer timeout, so quitting during a stalled fetch hung
     // the app until it was force-killed. The child dies, the .part file is
@@ -377,6 +382,7 @@ void AppState::start_recording(const audio::AudioSource& source,
     join_worker();
 
     std::unique_ptr<audio::Recorder> recorder;
+    bool live = false;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         recorder = std::make_unique<audio::Recorder>(
@@ -401,13 +407,19 @@ void AppState::start_recording(const audio::AudioSource& source,
         summary_context_.clear();
         session_dir_.clear();
         save_error_.clear();   // a new take, and a new chance to write it
+        live = settings_.live_transcript;
     }
+
+    // A new take, and a new preview: the last one's text goes with its take.
+    live_->clear();
+    if (live) attach_live(recorder.get());
 
     try {
         recorder->start();
     } catch (...) {
         // Hand the claim back before the message reaches the user, or a device
         // that failed to open would leave the app permanently "recording".
+        live_->clear();
         recording_.store(false);
         throw;
     }
@@ -418,6 +430,7 @@ void AppState::start_recording(const audio::AudioSource& source,
     if (shutting_down_.load()) {
         recorder->stop();
         recorder.reset();
+        live_->stop();
         recording_.store(false);
         throw BusyError(L("The app is closing.", "Uygulama kapanıyor."));
     }
@@ -440,6 +453,105 @@ void AppState::resume_recording() {
     if (recorder_ && recording_.load()) recorder_->resume();
 }
 
+// ---------------------------------------------------------------------------
+// Live transcript
+// ---------------------------------------------------------------------------
+
+pipeline::LiveEngine AppState::live_engine_locked() {
+    pipeline::LiveEngine engine;
+    // No model, no preview -- and no error from here either: the studio
+    // already says which model is missing and where to get it, and a take
+    // must never fail for want of its preview.
+    if (!models::live_whisper_ready(settings_)) return engine;
+
+    stt::LiveWhisper* stt  = live_stt_.get();
+    const paths::fs::path model = settings_.live_whisper_model_file();
+    const paths::fs::path vad   = models::vad_model_if_present();
+    const DeviceInfo device     = device_;
+    const std::string language  = settings_.language;
+    const int threads           = settings_.stt_threads;
+
+    engine.prepare = [stt, model, device] {
+        stt->load(model, device);
+        stt->begin_take();
+    };
+    engine.decode = [stt, vad, language, threads](const std::vector<float>& audio,
+                                                  const std::atomic<bool>* abort) {
+        return stt->transcribe(audio, language, vad, threads, abort);
+    };
+    return engine;
+}
+
+void AppState::attach_live(audio::Recorder* recorder) {
+    pipeline::LiveEngine engine;
+    int samplerate = 16000;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        engine = live_engine_locked();
+        samplerate = settings_.samplerate;
+        // The same handoff a transcription makes: the summarizer's weights go
+        // before speech weights come in. Nothing is using them -- no job runs
+        // while a take does.
+        if (engine.decode && settings_.manage_vram && llm_) llm_->unload();
+    }
+    if (!engine.decode) return;
+    // A session to feed before there is anything feeding it, so the first
+    // block the tap hands over has somewhere to go.
+    live_->begin(std::move(engine), samplerate);
+    pipeline::LiveTranscriber* live = live_.get();
+    recorder->set_tap([live](const std::vector<float>& block, std::size_t offset) {
+        live->feed(block, offset);
+    });
+}
+
+void AppState::release_live_model() {
+    live_->stop();
+    live_->join();
+    live_stt_->unload();
+}
+
+bool AppState::set_live(bool on, std::string* error) {
+    // Behind the take's own lock, so the recorder cannot be stopped or replaced
+    // between being found here and being tapped.
+    std::lock_guard<std::mutex> lifecycle(record_mutex_);
+    if (shutting_down_.load()) {
+        if (error) *error = L("The app is closing.", "Uygulama kapanıyor.");
+        return false;
+    }
+
+    bool config_failed = false;
+    audio::Recorder* recorder = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (settings_.live_transcript != on) {
+            settings_.live_transcript = on;
+            config_failed = !settings_.save();
+        }
+        // Null once Stop has taken the recorder, which is then finishing the
+        // take -- and the preview with it -- on its own.
+        if (recording_.load()) recorder = recorder_.get();
+    }
+    if (config_failed) {
+        note_save_error(L("The settings could not be saved to ",
+                          "Ayarlar şuraya kaydedilemedi: ") +
+                        paths::to_utf8(Settings::config_path()));
+    }
+
+    if (recorder) {
+        if (on) {
+            attach_live(recorder);
+        } else {
+            recorder->set_tap(nullptr);
+            live_->finish();
+        }
+    }
+    return true;
+}
+
+nlohmann::json AppState::live_text_json(std::size_t from) const {
+    return live_->text_json(from);
+}
+
 void AppState::cancel() {
     // Behind the same lock as start_recording(), so a take that is still
     // opening its device is finished and published before this looks for it.
@@ -458,6 +570,8 @@ void AppState::cancel() {
             recorder_->stop();   // discard the audio — do NOT process
             recorder_.reset();
         }
+        // Its preview goes too: what the take said goes with the take.
+        live_->clear();
         result_.reset();
         summary_.reset();
         summary_cut_short_ = false;
@@ -533,6 +647,10 @@ void AppState::stop_and_process() {
     std::vector<float> audio = recorder->stop();
     const std::string err = recorder->error();
     recorder.reset();
+    // stop() has handed the tail to the preview through its tap; let it finish
+    // the last few seconds on its own thread. A cancel that ran underneath us
+    // has already cleared it, and this then finds nothing to finish.
+    live_->finish();
 
     {
         // Closing a device is slow, and Cancel can run the whole way through
@@ -576,6 +694,7 @@ bool AppState::process_file(const paths::fs::path& tmp_path,
         session_dir_.clear();
         save_error_.clear();
     }
+    live_->clear();   // the last take's preview is not this file's
     set_phase("transcribe", -1.0, L("Decoding the file…", "Dosya çözülüyor…"));
 
     std::vector<float> audio;
@@ -727,6 +846,7 @@ pipeline::ProcessResult AppState::run_pipeline(const std::vector<float>& audio,
     // VRAM handoff: drop the summarizer's weights before the STT models load.
     if (settings.manage_vram) {
         set_phase("transcribe", -1.0, L("Freeing VRAM (LLM)…", "VRAM boşaltılıyor (LLM)…"));
+        release_live_model();
         std::lock_guard<std::mutex> lock(mutex_);
         if (llm_) llm_->unload();
     }
@@ -964,6 +1084,7 @@ llm::Summary AppState::run_summarizer(const llm::SummaryRequest& req,
     if (manage_vram) {
         set_phase("summarizing", -1.0,
                   L("Handing VRAM over (STT→LLM)…", "VRAM devrediliyor (STT→LLM)…"));
+        release_live_model();
         std::lock_guard<std::mutex> lock(mutex_);
         if (processor_) processor_->unload();
     }
@@ -1259,9 +1380,13 @@ bool AppState::start_model_download(const std::string& kind,
     // The two speaker models are one thing to the person waiting for them, so
     // they are one download here — and they carry no catalog id.
     const bool diarize = (kind == "diarize");
+    // The live transcript's model comes out of the same catalog as the
+    // transcript's, and lands in the same place; only the setting it is
+    // chosen for differs.
+    const bool live = (kind == "live");
     if (kind == "llm") {
         llm = models::llm_spec(model_id);
-    } else if (kind == "whisper") {
+    } else if (kind == "whisper" || live) {
         stt = models::whisper_catalog_entry(model_id);
     } else if (!diarize) {
         if (error) *error = L("Unknown model kind: ", "Bilinmeyen model türü: ") + kind;
@@ -1315,7 +1440,8 @@ bool AppState::start_model_download(const std::string& kind,
     const models::LlmModelSpec     llm_copy = llm ? *llm : models::LlmModelSpec{};
     const models::WhisperModelSpec stt_copy = stt ? *stt : models::WhisperModelSpec{};
 
-    download_thread_ = std::thread([this, is_llm, diarize, llm_copy, stt_copy, ready] {
+    download_thread_ = std::thread([this, is_llm, diarize, live, llm_copy, stt_copy,
+                                    ready] {
         auto progress = [this](const std::string& msg, double fraction) {
             std::lock_guard<std::mutex> lock(mutex_);
             dl_message_  = msg;
@@ -1368,6 +1494,8 @@ bool AppState::start_model_download(const std::string& kind,
             // have to pick it again afterwards.
             if (is_llm) {
                 next.llm_model_path = paths::to_utf8(file);
+            } else if (live) {
+                next.live_whisper_model = stt_copy.id;
             } else {
                 next.whisper_model = stt_copy.id;
                 // A stale hand-typed path would win over the model just chosen.
@@ -1431,6 +1559,13 @@ nlohmann::json AppState::state_json() const {
     const double elapsed = recorder_ ? recorder_->elapsed() : 0.0;
     const double level   = recorder_ ? recorder_->level() : 0.0;
 
+    // The preview's own state, and what the studio needs to draw the switch:
+    // whether it is on, and whether there is a model for it to run.
+    nlohmann::json live = live_->status_json();
+    live["on"]    = settings_.live_transcript;
+    live["model"] = settings_.live_whisper_model;
+    live["ready"] = models::live_whisper_ready(settings_);
+
     return {
         {"recording", is_recording},
         {"paused", recorder_ ? recorder_->paused() : false},
@@ -1474,6 +1609,7 @@ nlohmann::json AppState::state_json() const {
         // hand-kept copy, and the copy had lost "cancelled": the studio saw a
         // stopped download only as an error.
         {"model_download", model_download_locked()},
+        {"live", live},
     };
 }
 

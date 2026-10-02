@@ -20,6 +20,7 @@
 #include "config.h"
 #include "device.h"
 #include "llm/summarizer.h"
+#include "pipeline/live.h"
 #include "pipeline/processor.h"
 #include "util/lang.h"
 #include "util/net.h"
@@ -59,6 +60,18 @@ public:
     // reading, are still there to try again with. Returns false when no job is
     // running, which is the caller's cue to fall back to cancel() above.
     bool cancel_job();
+
+    // -- live transcript --------------------------------------------------
+    // The studio's Live switch. Saved like any setting, and allowed mid-take,
+    // when it is the whole point: switched on, the text starts from that
+    // moment; switched off, what has been heard is finished and kept. Returns
+    // false with `error` filled when the app is closing; a failed save is
+    // reported through the save-error row instead, since the switch itself
+    // still took effect for this run.
+    bool set_live(bool on, std::string* error);
+
+    // For /api/live.
+    nlohmann::json live_text_json(std::size_t from) const;
 
     // -- file upload ------------------------------------------------------
     // Decodes then runs the same offline pipeline. Sets the error phase and
@@ -146,7 +159,8 @@ public:
     // -- model downloads ---------------------------------------------------
     // Downloads a catalog model into the models dir in the background and,
     // once it lands, points the settings at it. `kind` is "llm" (a GGUF for
-    // the summarizer) or "whisper" (speech weights). Returns false and fills
+    // the summarizer), "whisper" (speech weights) or "live" (speech weights
+    // for the live transcript, out of the same catalog). Returns false and fills
     // `error` when the kind or id is unknown, or a download is already
     // running — there is one slot, deliberately: two multi-gigabyte fetches
     // over one connection finish later than the same two in sequence.
@@ -180,6 +194,21 @@ private:
     bool begin(std::vector<float> audio, const paths::fs::path& original_file,
                const std::string& original_name, const std::string& device_error,
                bool claimed);
+
+    // Builds the live session for the settings in force, or an engine with no
+    // decode when the live model is not on disk -- the caution in the studio
+    // says why, and the take goes ahead without it. Caller holds mutex_.
+    pipeline::LiveEngine live_engine_locked();
+
+    // Starts the live transcript on `recorder`. Caller holds record_mutex_,
+    // which keeps the recorder where it is, and not mutex_.
+    void attach_live(audio::Recorder* recorder);
+
+    // The VRAM handoff's share of the live model. A take that has just ended
+    // may still be finishing its preview; the job about to run is what
+    // replaces that preview, so it is stopped where it stands rather than
+    // waited for, and the model freed.
+    void release_live_model();
 
     // Write out a take that is being torn down rather than stopped: closing the
     // window during a recording. Honours save_audio, and is the only saving
@@ -298,6 +327,14 @@ private:
     std::unique_ptr<llm::Backend>               llm_;         // guarded by mutex_
     std::unique_ptr<audio::Recorder>            recorder_;    // guarded by mutex_
 
+    // The live transcript's model and the session that runs it. Built once and
+    // never replaced, so neither needs mutex_ to be reached: the session reads
+    // the settings afresh each time it begins, and the model reloads itself
+    // when they point it somewhere else. The model is only ever used from the
+    // session's thread, or once that thread has been joined.
+    std::unique_ptr<stt::LiveWhisper>           live_stt_;
+    std::unique_ptr<pipeline::LiveTranscriber>  live_;
+
     std::string phase_ = "idle";
     std::string message_;
     double      progress_ = -1.0;
@@ -338,7 +375,7 @@ private:
     std::string save_error_;   // guarded by mutex_
 
     // Summarizer model download, guarded by mutex_ except for the flag.
-    std::string dl_kind_;          // "llm" | "whisper", "" when never started
+    std::string dl_kind_;          // "llm" | "whisper" | "live" | "diarize", "" = never
     std::string dl_model_;         // catalog id, "" when never started
     std::string dl_label_;
     std::string dl_message_;

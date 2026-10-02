@@ -220,7 +220,16 @@ bool Recorder::take_mixed(std::vector<float>* out, bool flush) {
 
 void Recorder::append(const std::vector<float>& block) {
     std::lock_guard<std::mutex> lock(mutex_);
+    const std::size_t offset = samples_.size();
     samples_.insert(samples_.end(), block.begin(), block.end());
+    // Under the buffer's own lock, so set_tap() lands between two blocks: a
+    // listener never sees half of one, or an offset the buffer has moved past.
+    if (tap_ && !block.empty()) tap_(block, offset);
+}
+
+void Recorder::set_tap(Tap tap) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    tap_ = std::move(tap);
 }
 
 void Recorder::pause() {

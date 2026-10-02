@@ -394,6 +394,36 @@ bool Server::start() {
         send_json(res, json{{"ok", true}, {"paused", false}});
     });
 
+    // -- live transcript ---------------------------------------------------
+    // The studio's switch. Allowed mid-take, which is when it matters most,
+    // and so not behind the settings route's "not while recording" rule.
+    svr.Post("/api/live", [state](const httplib::Request& req,
+                                  httplib::Response& res) {
+        const json body = parse_body(req);
+        const auto on = body.find("on");
+        if (on == body.end() || !on->is_boolean()) {
+            return send_error(res, L("Say whether Live is on or off.",
+                                     "Canlı metnin açık mı kapalı mı olduğunu belirtin."));
+        }
+        std::string error;
+        if (!state->set_live(on->get<bool>(), &error)) return send_error(res, error);
+        send_json(res, json{{"ok", true}, {"on", on->get<bool>()}});
+    });
+
+    // The preview's text, from line `from` on: the page keeps what it has and
+    // asks only for what came after, so an hour-long take is not sent again
+    // every second.
+    svr.Get("/api/live", [state](const httplib::Request& req, httplib::Response& res) {
+        std::size_t from = 0;
+        const std::string raw = req.get_param_value("from");
+        if (!raw.empty()) {
+            char* end = nullptr;
+            const unsigned long long v = std::strtoull(raw.c_str(), &end, 10);
+            if (end != raw.c_str() && raw[0] != '-') from = static_cast<std::size_t>(v);
+        }
+        send_json(res, state->live_text_json(from));
+    });
+
     // Two jobs under one button, because to the person pressing it they are
     // the same intent: stop what is happening. With a run in flight that means
     // asking the models to give up, and nothing is thrown away. Otherwise it is
@@ -825,6 +855,10 @@ bool Server::start() {
             {"whisper_model_path", s.whisper_model_path},
             {"whisper_catalog", whisper},
             {"whisper_ready", models::whisper_ready(s)},
+            // Picked from whisper_catalog above; the switch is in the studio.
+            {"live_whisper_model", s.live_whisper_model},
+            {"live_whisper_ready", models::live_whisper_ready(s)},
+            {"live_transcript", s.live_transcript},
             {"language", s.language},
             {"device", s.device},
             {"compute_type", s.compute_type},
@@ -924,6 +958,14 @@ bool Server::start() {
             s.whisper_model.clear();
         }
         str("whisper_model_path", &s.whisper_model_path);
+        // Catalog ids only, for the same reason as whisper_model -- and unlike
+        // it, never a legacy name: the live model has no hand-typed path
+        // either, so there is no older config it could have come from.
+        str("live_whisper_model", &s.live_whisper_model);
+        if (!s.live_whisper_model.empty() &&
+            !models::whisper_catalog_entry(s.live_whisper_model)) {
+            s.live_whisper_model.clear();
+        }
         str("language", &s.language);
         const bool device_sent = body.contains("device");
         str("device", &s.device);
@@ -966,6 +1008,7 @@ bool Server::start() {
         flag("manage_vram", &s.manage_vram);
         flag("check_updates", &s.check_updates);
         flag("llm_thinking", &s.llm_thinking);
+        flag("live_transcript", &s.live_transcript);
 
         clamped_float("mic_gain", &s.mic_gain, 0.0f, 4.0f);
         clamped_float("system_gain", &s.system_gain, 0.0f, 4.0f);

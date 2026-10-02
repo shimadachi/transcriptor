@@ -58,6 +58,10 @@ paths::fs::path whisper_model_file(const WhisperModelSpec& spec);
 // saying what is missing and what to do about it.
 std::string whisper_missing_reason(const Settings& s);
 
+// The same pair for the live transcript's model, which is chosen separately.
+bool        live_whisper_ready(const Settings& s);
+std::string live_missing_reason(const Settings& s);
+
 ModelSpec segmentation_spec();
 ModelSpec embedding_spec();
 

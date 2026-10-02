@@ -180,6 +180,26 @@ std::string whisper_missing_reason(const Settings& s) {
              "\" konuşma modeli indirilmemiş. Ayarlar → Genel'den indirin.");
 }
 
+bool live_whisper_ready(const Settings& s) {
+    return has_file(s.live_whisper_model_file());
+}
+
+std::string live_missing_reason(const Settings& s) {
+    if (live_whisper_ready(s)) return {};
+    if (s.live_whisper_model.empty()) {
+        return L("No live transcript model is selected. Open Settings → General "
+                 "and choose one, then download it.",
+                 "Canlı metin modeli seçilmedi. Ayarlar → Genel'den birini seçip "
+                 "indirin.");
+    }
+    const WhisperModelSpec* m = whisper_catalog_entry(s.live_whisper_model);
+    const std::string label = m ? m->label : s.live_whisper_model;
+    return L("The live transcript model \"", "\"") + label +
+           L("\" has not been downloaded. Open Settings → General and download "
+             "it.",
+             "\" canlı metin modeli indirilmemiş. Ayarlar → Genel'den indirin.");
+}
+
 ModelSpec segmentation_spec() {
     // pyannote's segmentation-3.0 exported to ONNX — the same model the Python
     // build used through pyannote.audio, minus the PyTorch runtime.

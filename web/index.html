@@ -116,7 +116,39 @@
     <section class="panel">
       <div class="tx-head">
         <span class="label" data-i18n="tx.label">Transcript</span>
+        <!-- The live transcript's switch. On and off differ in the icon, not
+             only in colour: the broadcast waves are struck through while it is
+             off, the way the player's mute is. The title is written by app.js,
+             because it says which of the two this press will do. -->
+        <button id="liveBtn" class="mini live-btn off" type="button" aria-pressed="false">
+          <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+            <defs>
+              <!-- Cuts a gap around the slash, so it reads as struck through on
+                   any background rather than as one more line among the waves. -->
+              <mask id="liveCut" maskUnits="userSpaceOnUse" x="0" y="0" width="20" height="20">
+                <rect width="20" height="20" fill="#fff"/>
+                <path class="live-cut" d="M3.2 3.2l13.6 13.6" stroke="#000"
+                      stroke-width="4.4" stroke-linecap="round"/>
+              </mask>
+            </defs>
+            <g mask="url(#liveCut)">
+              <circle class="live-dot" cx="10" cy="10" r="2.1" fill="currentColor"/>
+              <path class="live-wave" d="M7.1 6.9a4.4 4.4 0 0 0 0 6.2M12.9 6.9a4.4 4.4 0 0 1 0 6.2"
+                    fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <path class="live-wave w2" d="M4.6 4.4a7.9 7.9 0 0 0 0 11.2M15.4 4.4a7.9 7.9 0 0 1 0 11.2"
+                    fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            </g>
+            <path class="live-slash" d="M3.2 3.2l13.6 13.6" fill="none" stroke="currentColor"
+                  stroke-width="1.7" stroke-linecap="round"/>
+          </svg>
+          <span data-i18n="live.btn">Live</span>
+        </button>
         <button id="txBtn" class="ok" data-i18n-title="tx.goTitle" data-i18n="tx.go" disabled>✦ Transcribe</button>
+      </div>
+      <!-- Says the panel holds the live preview, not the finished transcript.
+           Outside the scroller, so it never scrolls away under the lines. -->
+      <div id="liveHead" class="live-head" hidden>
+        <span id="livePill" class="live-pill"></span><span id="liveState"></span>
       </div>
       <div id="transcript" class="tx-body"><span class="empty" data-i18n="tx.empty">Start and stop a recording — the transcript appears here.</span></div>
     </section>
@@ -358,6 +390,16 @@
                     data-i18n-title="set.dlCancelTitle" data-i18n="set.dlCancel"
                     style="display:none;">✕ Cancel</button></div>
           <div id="whisperDlNote" class="dlnote"></div></div>
+        <!-- Chosen apart from the model above: the live transcript has to keep
+             up with someone talking, and the model the finished transcript is
+             made with rarely can. The switch itself is in the studio. -->
+        <div class="field"><label for="s_livemodel" data-i18n="set.liveModel">Live transcript model — used while recording, when Live is on in the studio</label>
+          <div class="row"><select id="s_livemodel" class="grow"></select>
+            <button id="dlLive" class="mini" type="button" data-i18n="set.whisperDlBtn">Download</button>
+            <button id="cancelLiveDl" class="mini danger" type="button"
+                    data-i18n-title="set.dlCancelTitle" data-i18n="set.dlCancel"
+                    style="display:none;">✕ Cancel</button></div>
+          <div id="liveDlNote" class="dlnote"></div></div>
         <div class="field"><label for="s_device" data-i18n="set.device">Device</label>
           <select id="s_device"><option value="auto" data-i18n="set.auto">Automatic</option>
             <option value="cpu">CPU</option></select>

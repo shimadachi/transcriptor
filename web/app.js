@@ -455,6 +455,9 @@ async function poll() {
   // for permission, which has nothing to stop yet, or one whose take is still
   // on its way to the server.
   $('recBtn').disabled = s.processing || browserStarting || browserUploading;
+  // Left alone while a press of its own is on its way, or a poll that set off
+  // before the press would put the old state back for a tick.
+  if (!liveBusy) syncLiveBtn(s.live || {}, rec);
   $('pauseBtn').disabled = !rec;
   $('pauseBtn').textContent = paused ? t('src.resume') : t('src.pause');
   $('pauseBtn').classList.toggle('on', paused);
@@ -505,6 +508,12 @@ async function poll() {
     notes.push('<a href="#settings" class="caution" data-go="stt">' +
                t('note.sttMissing') + '</a>');
   }
+  // Only while Live is on: a model nobody asked to use is not missing.
+  const lv = s.live || {};
+  if (lv.on && !lv.ready) {
+    notes.push('<a href="#settings" class="caution" data-go="live">' +
+               t('note.liveMissing') + '</a>');
+  }
   if (s.diarization_enabled && s.diar_supported && !s.diar_cached) {
     if (dl.active && dl.kind === 'diarize') {
       const pct = dl.progress == null ? '' : pctText(dl.progress);
@@ -553,10 +562,13 @@ async function poll() {
     } catch (e) { /* leave the revisions be; the next poll retries */ }
   }
 
+  // The live preview, where there is no finished transcript to show instead.
+  await syncLive(s, rec);
+
   // Nothing transcribed yet: say what the panel is waiting for. Runs after the
   // reload above, so a panel cleared on this same tick gets the right line
   // instead of the library's "no transcript found".
-  if (!s.has_result && !s.processing) {
+  if (!s.has_result && !s.processing && !txShowsLive) {
     const empty = $('transcript').querySelector('.empty');
     if (empty) empty.textContent = s.has_audio ? t('tx.waiting') : t('tx.empty');
   }
@@ -586,6 +598,9 @@ async function loadResult() {
     // library's panel, which must not move the studio's button.
     txHasText = transcriptHasText(d.result);
     renderTranscript(d.result);
+    // The panel holds the result now, whatever it held before; a preview that
+    // is still wanted is drawn again from scratch on this same tick.
+    leaveLive();
     renderSummary(d.summary);
     $('sumCut').hidden = !(d.summary && d.summary_cut_short);
     return true;
@@ -746,6 +761,7 @@ $('cancelBtn').onclick = async () => {
   // as new.
   $('transcript').innerHTML =
     '<span class="empty" data-i18n="tx.empty">' + esc(t('tx.empty')) + '</span>';
+  leaveLive();
   renderSummary(null);
   toast(t('toast.cancelled'));
 };
@@ -781,6 +797,175 @@ $('ctxBtn').onclick = () => {
   box.style.display = on ? 'grid' : 'none';
   $('ctxBtn').classList.toggle('on', on);
 };
+
+// ---- live transcript ----
+// The switch in the transcript head, and the preview it puts in the panel
+// while there is no finished transcript to show there instead. Within a take
+// the preview's settled lines only ever grow, so the page keeps what it has
+// drawn and asks only for what came after; the server's `take` changing is
+// the signal to start again.
+let liveBusy = false;       // a press of the switch is on its way to the server
+let txShowsLive = false;    // the studio panel holds the preview, not a result
+// Bumped whenever something else takes the panel. Polls overlap -- each tick
+// is 700ms and a fetch can outlast it -- so a preview fetched before a result
+// landed must not be drawn over that result once it arrives.
+let txOwner = 0;
+let liveTake = -1, liveCount = 0, liveRev = -1, liveLoading = false;
+let liveEls = null;         // the preview's own nodes, while it is on screen
+
+function syncLiveBtn(lv, rec) {
+  const b = $('liveBtn');
+  const on = !!lv.on;
+  // Shape, colour and aria-pressed all change together; the stylesheet keys
+  // the struck-through icon off .off.
+  b.classList.toggle('on', on);
+  b.classList.toggle('off', !on);
+  // The waves move only while a take is actually being heard. On between
+  // takes, or on with no model to run, is on and still.
+  b.classList.toggle('hearing', on && !!lv.active && !!rec);
+  b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  b.title = t(on ? 'live.onTitle' : 'live.offTitle');
+}
+
+$('liveBtn').onclick = async () => {
+  if (liveBusy) return;
+  liveBusy = true;
+  const want = !$('liveBtn').classList.contains('on');
+  // Drawn now: the press is its own answer, and the next poll is up to 700ms
+  // away. Put back if the server says no.
+  syncLiveBtn({on: want}, false);
+  try {
+    const r = await post('/api/live', {on: want});
+    if (r.error) { toast(r.error); syncLiveBtn({on: !want}, false); }
+  } catch (e) {
+    syncLiveBtn({on: !want}, false);
+  } finally {
+    liveBusy = false;
+  }
+};
+
+function liveLine(l, partial) {
+  const div = document.createElement('div');
+  div.className = partial ? 'line partial' : 'line';
+  if (l.ts) {
+    const ts = document.createElement('span');
+    ts.className = 'ts'; ts.textContent = l.ts;
+    div.appendChild(ts);
+  }
+  const txt = document.createElement('span');
+  txt.className = 'txt'; txt.textContent = l.text;
+  div.appendChild(txt);
+  return div;
+}
+
+// No `.empty` anywhere in here: poll() rewrites the text of the first one it
+// finds in this panel.
+function buildLiveView() {
+  const el = $('transcript');
+  el.innerHTML = '';
+  const lines = document.createElement('div');
+  const msg = document.createElement('div'); msg.className = 'live-msg'; msg.hidden = true;
+  el.appendChild(lines); el.appendChild(msg);
+  liveEls = {head: $('liveHead'), pill: $('livePill'), state: $('liveState'),
+             lines, msg, partial: null};
+  liveEls.head.hidden = false;
+  liveCount = 0;
+  txShowsLive = true;
+}
+
+// The panel is someone else's now: a result, a cleared take, the empty state.
+function leaveLive() {
+  txShowsLive = false; txOwner++; liveEls = null; liveTake = -1;
+  $('liveHead').hidden = true;
+}
+
+function renderLiveText(d, append) {
+  const el = $('transcript');
+  const e = liveEls;
+  // Kept at the bottom only if the reader was there: someone scrolled up to
+  // read back is not dragged down by every new line.
+  const follow = !append || el.scrollTop + el.clientHeight >= el.scrollHeight - 24;
+  if (e.partial) { e.partial.remove(); e.partial = null; }
+  (d.lines || []).forEach(l => e.lines.appendChild(liveLine(l, false)));
+  liveCount = typeof d.count === 'number' ? d.count : liveCount;
+  if (d.partial) {
+    e.partial = liveLine({ts: d.partial_ts, text: d.partial}, true);
+    e.lines.appendChild(e.partial);
+  }
+  if (follow) el.scrollTop = el.scrollHeight;
+}
+
+// The head and the note under the lines. Painted every tick: they follow the
+// session's state and the interface language, neither of which moves the
+// text's revision.
+function paintLiveHead(lv, rec) {
+  const e = liveEls;
+  if (!e) return;
+  e.pill.textContent = t('live.now');
+  e.head.classList.toggle('done', !lv.active);
+  let state = '';
+  if (lv.active) {
+    state = t(lv.state === 'loading' ? 'live.loading'
+            : lv.state === 'finishing' ? 'live.finishing' : 'live.listening');
+  } else if (lv.has_text) {
+    state = t('live.preview');
+  }
+  e.state.textContent = state;
+
+  let note = '', err = false;
+  if (rec && browserRec) note = t('live.browser');
+  else if (lv.error) { note = lv.error; err = true; }
+  else if (rec && lv.on && !lv.ready) note = t('live.noModel');
+  else if (lv.lagging) note = t('live.lagging');
+  e.msg.textContent = note;
+  e.msg.hidden = !note;
+  e.msg.classList.toggle('err', err);
+}
+
+async function syncLive(s, rec) {
+  const lv = s.live || {};
+  // The finished transcript always wins the panel. Short of one, the preview
+  // has it whenever it has something to say: a take being heard, the switch
+  // on during a take -- if only to say why nothing is coming -- or the text
+  // the take that just ended left behind.
+  const wanted = !s.has_result && !!((rec && lv.on) || lv.active || lv.has_text);
+  if (!wanted) {
+    if (txShowsLive) {
+      leaveLive();
+      $('transcript').innerHTML = '<span class="empty">' +
+        esc(t(s.has_audio ? 'tx.waiting' : 'tx.empty')) + '</span>';
+    }
+    return;
+  }
+
+  const same = txShowsLive && lv.take === liveTake;
+  if ((!same || lv.rev !== liveRev) && !liveLoading) {
+    liveLoading = true;
+    const owner = txOwner;
+    try {
+      const from = same ? liveCount : 0;
+      const d = await api('/api/live?from=' + from);
+      if (owner !== txOwner) return;   // a result took the panel meanwhile
+      let drawn = true;
+      if (same && d.take === liveTake && d.from === from) {
+        renderLiveText(d, true);
+      } else {
+        buildLiveView();
+        // Lines from part-way into a take this page has not seen are no use
+        // on their own; the next tick asks again from the start.
+        if (d.from === 0) renderLiveText(d, false);
+        else drawn = false;
+      }
+      liveTake = d.take;
+      liveRev = drawn ? d.rev : -1;
+    } catch (e) {
+      /* the next tick asks again */
+    } finally {
+      liveLoading = false;
+    }
+  }
+  paintLiveHead(lv, rec);
+}
 
 // Populate the note-template dropdown from settings (labels + saved default).
 async function initTpl() {
@@ -991,8 +1176,11 @@ $('s_ggufsel').addEventListener('change', () => {
 const DL = {
   llm:     {sel: 's_llmdl', btn: 'dlLlm',     cancel: 'cancelLlmDl',     note: 'llmDlNote'},
   whisper: {sel: 's_model', btn: 'dlWhisper', cancel: 'cancelWhisperDl', note: 'whisperDlNote'},
+  // The live transcript's model: the speech catalog again, for a setting of
+  // its own.
+  live:    {sel: 's_livemodel', btn: 'dlLive', cancel: 'cancelLiveDl', note: 'liveDlNote'},
 };
-let catalogs = {llm: [], whisper: []};
+let catalogs = {llm: [], whisper: [], live: []};
 let dlTimer = null;
 let dlKind = 'llm';       // which section the running download belongs to
 
@@ -1074,12 +1262,21 @@ function setNote(kind, text, isError) {
 // is here or what fetching it will cost.
 function showNote(kind) {
   const m = catalogEntry(kind, $(DL[kind].sel).value);
+  // The catalog's own notes are written for the finished transcript, where
+  // the biggest model is the recommendation. For the live one, what matters
+  // is whether it keeps up, so that is what the note says instead.
+  if (kind === 'live') {
+    return setNote(kind, (m ? (m.downloaded ? t('live.here')
+                                            : t('live.willDl', {size: m.size})) : '') +
+                         t('live.pick'));
+  }
   if (!m) return setNote(kind, kind === 'whisper' ? t('stt.pick') : '');
   setNote(kind, m.downloaded ? (m.note + t('llm.already'))
                              : (m.note + t('llm.willDl') + m.size));
 }
 $('s_llmdl').addEventListener('change', () => showNote('llm'));
 $('s_model').addEventListener('change', () => showNote('whisper'));
+$('s_livemodel').addEventListener('change', () => showNote('live'));
 
 // Download and Cancel are the same control in two states: only one of them is
 // ever useful, so only one is ever on screen.
@@ -1123,11 +1320,21 @@ function pollDownload() {
     // The server already pointed the settings at the new file; mirror that here
     // so saving the panel does not undo it.
     const s = await api('/api/settings');
-    if (kind === 'whisper') {
+    // Both speech pickers list the same files, so a download for either one
+    // changes what the other marks as on disk. Only the one it was for is
+    // moved to it; the other keeps whatever is picked there.
+    if (kind === 'whisper' || kind === 'live') {
       fillCatalog('whisper', s.whisper_catalog, t('stt.none'), s.whisper_model);
+      fillCatalog('live', s.whisper_catalog, t('stt.none'), s.live_whisper_model);
+    }
+    if (kind === 'whisper') {
       $('s_model').value = s.whisper_model || '';
       $('s_whisperpath').value = s.whisper_model_path || '';
       refreshSelect('s_model');
+    } else if (kind === 'live') {
+      $('s_livemodel').value = s.live_whisper_model || '';
+      refreshSelect('s_livemodel');
+      showNote('live');
     } else {
       fillCatalog('llm', s.llm_catalog);
       $('s_llmpath').value = s.llm_model_path || '';
@@ -1144,6 +1351,8 @@ async function startDownload(kind) {
     // Nothing to fetch — just select it, which is what the user meant.
     if (kind === 'whisper') {
       $('s_whisperpath').value = '';   // the picked model, not a stale path
+    } else if (kind === 'live') {
+      // Nothing to point at: picking it is the whole of the setting.
     } else {
       $('s_llmpath').value = m.path;
       const s = await api('/api/settings');
@@ -1232,8 +1441,10 @@ $('libTranscript').addEventListener('keydown', (e) => {
 
 $('dlLlm').onclick     = () => startDownload('llm');
 $('dlWhisper').onclick = () => startDownload('whisper');
+$('dlLive').onclick    = () => startDownload('live');
 $('cancelLlmDl').onclick     = () => cancelDownload('llm');
 $('cancelWhisperDl').onclick = () => cancelDownload('whisper');
+$('cancelLiveDl').onclick    = () => cancelDownload('live');
 
 $('rescanGguf').onclick = async () => {
   const s = await api('/api/settings');
@@ -1266,6 +1477,10 @@ async function openSettings() {
   $('s_model').value = s.whisper_model || '';
   refreshSelect('s_model');
   showNote('whisper');
+  fillCatalog('live', s.whisper_catalog, t('stt.none'), s.live_whisper_model);
+  $('s_livemodel').value = s.live_whisper_model || '';
+  refreshSelect('s_livemodel');
+  showNote('live');
   $('s_language').value = s.language;
   $('s_whisperpath').value = s.whisper_model_path || '';
   $('s_sysgain').value = s.system_gain;
@@ -1321,8 +1536,8 @@ async function openSettings() {
 
   setupTplEditor(s);
   $('s_uilang').value = s.ui_language || LANG;
-  ['s_device','s_model','s_language','s_llmmodel','s_sumlang','s_llmbackend','s_llmdl',
-   's_uilang','s_theme'].forEach(refreshSelect);
+  ['s_device','s_model','s_livemodel','s_language','s_llmmodel','s_sumlang','s_llmbackend',
+   's_llmdl','s_uilang','s_theme'].forEach(refreshSelect);
   // Assigned, not added: openSettings() runs on every open, and addEventListener
   // would stack another copy of the handler each time.
   $('s_language').onchange = showClthrNote;
@@ -1423,7 +1638,7 @@ $('diarHint').addEventListener('click', async (e) => {
   await openSettings();
   showSetTab('general');
   // Land on the control, not just the tab it lives in.
-  const sel = $('s_model');
+  const sel = $(link.dataset.go === 'live' ? 's_livemodel' : 's_model');
   if (sel && sel._x && sel._x.wrap && sel._x.wrap.scrollIntoView) {
     sel._x.wrap.scrollIntoView({block: 'center'});
   }
@@ -1456,6 +1671,7 @@ $('saveSettings').onclick = async () => {
     template_overrides: tplOverrides,
     custom_templates: customs,
     device: $('s_device').value, whisper_model: $('s_model').value,
+    live_whisper_model: $('s_livemodel').value,
     language: $('s_language').value,
     whisper_model_path: $('s_whisperpath').value,
 

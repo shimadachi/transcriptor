@@ -42,7 +42,12 @@ nlohmann::json engine_view(const Settings& s) {
                             "custom_templates", "output_dir", "save_audio",
                             "save_transcript", "save_summary", "auto_transcribe",
                             "auto_summarize", "manage_vram", "check_updates",
-                            "host", "port", "source_id", "mic_gain", "system_gain"}) {
+                            "host", "port", "source_id", "mic_gain", "system_gain",
+                            // The live transcript has a model and a thread of
+                            // its own, read afresh at the start of each take;
+                            // switching it from the studio must not throw away
+                            // the models these two engines have loaded.
+                            "live_transcript", "live_whisper_model"}) {
         j.erase(key);
     }
     return j;
@@ -80,6 +85,9 @@ nlohmann::json Settings::to_json() const {
         {"device", device},
         {"compute_type", compute_type},
         {"stt_threads", stt_threads},
+
+        {"live_transcript", live_transcript},
+        {"live_whisper_model", live_whisper_model},
 
         {"enable_diarization", enable_diarization},
         {"diar_segmentation_model", diar_segmentation_model},
@@ -134,6 +142,9 @@ void Settings::from_json(const nlohmann::json& j) {
     get(j, "device", &device);
     get(j, "compute_type", &compute_type);
     get(j, "stt_threads", &stt_threads);
+
+    get(j, "live_transcript", &live_transcript);
+    get(j, "live_whisper_model", &live_whisper_model);
 
     get(j, "enable_diarization", &enable_diarization);
     get(j, "diar_segmentation_model", &diar_segmentation_model);
@@ -265,6 +276,13 @@ paths::fs::path Settings::whisper_model_file() const {
     // wrong reason and print that nonsense in the error.
     if (whisper_model.empty()) return {};
     return paths::models_dir() / ("ggml-" + whisper_model + ".bin");
+}
+
+paths::fs::path Settings::live_whisper_model_file() const {
+    // Always a managed download: the live model is picked from the catalog, and
+    // two models sharing an id share the file rather than fetching it twice.
+    if (live_whisper_model.empty()) return {};
+    return paths::models_dir() / ("ggml-" + live_whisper_model + ".bin");
 }
 
 bool Settings::same_engines(const Settings& other) const {
