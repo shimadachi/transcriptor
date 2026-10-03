@@ -1,7 +1,8 @@
-// Regression tests for the reasoning budget.
+// Regression tests for the reasoning budget (V41) and for reasoning that
+// reached the summary (V51, V5, V36).
 //
-// The bug: one max_tokens bounded the whole stream, so a model that thought for
-// two thousand tokens had nothing left to answer with. The run then failed with
+// V41: one max_tokens bounded the whole stream, so a model that thought for two
+// thousand tokens had nothing left to answer with. The run then failed with
 // "the model used the whole answer budget on reasoning" -- after every section
 // of a long recording had already been paid for -- and the advice it gave,
 // raise the answer length, shrank the slice budget and made the next attempt
@@ -65,26 +66,26 @@ void thinking_does_not_spend_the_answer() {
     // whole when the block closes: this is the whole point of the change.
     Run r = drive(budget, {"<think>", "the", "meeting", "was", "about",
                            "</think>", "Notes", "follow"});
-    check("reasoning is charged to the think budget", r.think_used == 6,
+    check("V41 reasoning is charged to the think budget", r.think_used == 6,
           "think_used=" + std::to_string(r.think_used));
-    check("the answer budget is untouched by reasoning", r.answer_used == 2,
+    check("V41 the answer budget is untouched by reasoning", r.answer_used == 2,
           "answer_used=" + std::to_string(r.answer_used));
-    check("a closed block needs no forcing", r.forced == 0);
+    check("V41 a closed block needs no forcing", r.forced == 0);
 }
 
 void an_overrun_is_closed_not_fatal() {
     ReasoningBudget budget(/*allow_thinking=*/true, /*think=*/4, /*answer=*/3);
     Run r = drive(budget, {"<think>", "still", "thinking", "and", "more",
                            "and", "more", "and", "more"});
-    check("an overrunning think block is force-closed once", r.forced == 1,
+    check("V41 an overrunning think block is force-closed once", r.forced == 1,
           "forced=" + std::to_string(r.forced));
-    check("reasoning stops at its budget", r.think_used == 4,
+    check("V41 reasoning stops at its budget", r.think_used == 4,
           "think_used=" + std::to_string(r.think_used));
     // Everything after the forced close is the answer, so the model still gets
     // its full allowance to write one.
-    check("the answer budget survives the overrun", r.answer_used == 3,
+    check("V41 the answer budget survives the overrun", r.answer_used == 3,
           "answer_used=" + std::to_string(r.answer_used));
-    check("generation stops once the answer is spent", r.stopped);
+    check("V41 generation stops once the answer is spent", r.stopped);
 }
 
 void a_plain_answer_is_never_mistaken_for_reasoning() {
@@ -92,10 +93,10 @@ void a_plain_answer_is_never_mistaken_for_reasoning() {
     // splice a stray </think> into the middle of a perfectly good summary.
     ReasoningBudget budget(/*allow_thinking=*/true, /*think=*/2, /*answer=*/10);
     Run r = drive(budget, words("The team agreed to ship on Friday"));
-    check("a straight answer is never force-closed", r.forced == 0);
-    check("no reasoning is charged for it", r.think_used == 0,
+    check("V41 a straight answer is never force-closed", r.forced == 0);
+    check("V41 no reasoning is charged for it", r.think_used == 0,
           "think_used=" + std::to_string(r.think_used));
-    check("every token counts against the answer", r.answer_used == 7,
+    check("V41 every token counts against the answer", r.answer_used == 7,
           "answer_used=" + std::to_string(r.answer_used));
 }
 
@@ -105,11 +106,11 @@ void the_opening_tag_may_arrive_in_pieces() {
     ReasoningBudget budget(true, /*think=*/8, /*answer=*/4);
     Run r = drive(budget, {"\n", "<", "th", "ink", ">", "hmm", "</th", "ink>",
                            "Done"});
-    check("a split opening tag is still recognized", r.think_used > 0,
+    check("V41 a split opening tag is still recognized", r.think_used > 0,
           "think_used=" + std::to_string(r.think_used));
-    check("a split closing tag still ends the block", r.answer_used == 1,
+    check("V41 a split closing tag still ends the block", r.answer_used == 1,
           "answer_used=" + std::to_string(r.answer_used));
-    check("no forcing was needed", r.forced == 0);
+    check("V41 no forcing was needed", r.forced == 0);
 }
 
 void thinking_off_charges_everything_to_the_answer() {
@@ -117,11 +118,11 @@ void thinking_off_charges_everything_to_the_answer() {
     // is already past reasoning and there is nothing to watch for.
     ReasoningBudget budget(/*allow_thinking=*/false, /*think=*/0, /*answer=*/3);
     Run r = drive(budget, {"a", "b", "c", "d"});
-    check("every token is answer when thinking is off", r.answer_used == 3,
+    check("V41 every token is answer when thinking is off", r.answer_used == 3,
           "answer_used=" + std::to_string(r.answer_used));
-    check("it stops on the answer budget", r.stopped && r.consumed == 3,
+    check("V41 it stops on the answer budget", r.stopped && r.consumed == 3,
           "consumed=" + std::to_string(r.consumed));
-    check("nothing is charged to reasoning", r.think_used == 0);
+    check("V41 nothing is charged to reasoning", r.think_used == 0);
 }
 
 void a_finished_answer_owes_nothing() {
@@ -131,25 +132,29 @@ void a_finished_answer_owes_nothing() {
     // finished.
     ReasoningBudget spent(false, 0, 2);
     drive(spent, {"a", "b"});
-    check("a spent budget owes nothing", spent.answer_left() == 0,
+    check("V41 a spent budget owes nothing", spent.answer_left() == 0,
           "left=" + std::to_string(spent.answer_left()));
 
     ReasoningBudget partial(false, 0, 10);
     drive(partial, {"a", "b"});
-    check("an unfinished answer still owes tokens", partial.answer_left() == 8,
+    check("V41 an unfinished answer still owes tokens",
+          partial.answer_left() == 8,
           "left=" + std::to_string(partial.answer_left()));
 }
 
+// V51: reasoning models wrap their chain of thought in <think>...</think>, and
+// nothing removed it: the tags and everything between them reached the summary
+// pane, summary.txt and the library preview.
 void whole_blocks_come_off_the_answer() {
-    check("a finished block is removed",
+    check("V51 a finished block is removed",
           strip_reasoning("<think>weighing it up</think>\nThe notes") ==
               "The notes");
-    check("an unterminated block takes the rest with it",
+    check("V51 an unterminated block takes the rest with it",
           strip_reasoning("Answer<think>and then it was cut off").empty() ==
               false);
-    check("reasoning-only output leaves nothing",
+    check("V51 reasoning-only output leaves nothing",
           strip_reasoning("<think>only ever thought").empty());
-    check("a word starting with think is not a tag",
+    check("V51 a word starting with think is not a tag",
           strip_reasoning("the thinker said so") == "the thinker said so");
 }
 

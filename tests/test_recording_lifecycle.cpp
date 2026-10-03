@@ -1,5 +1,4 @@
-// Regression tests for the recording lifecycle (R1, R4, G6, N6, and the
-// original device-disconnection finding).
+// Regression tests for the recording lifecycle (R1, R4, G6, N6, V42-V48).
 //
 // This is where the expensive bugs live: everything here is about the moment a
 // take exists only in memory, and every bug in this area ended with a recording
@@ -295,9 +294,9 @@ void test_normal_take_is_kept_and_saved() {
                 !fake_capture::any_running() && fake_capture::stops() == 1);
 }
 
-// The original finding 4: a device that dies mid-take used to take the whole
-// recording with it, because the error was reported and the samples returned
-// alongside it were dropped on the floor.
+// V42: A device that dies mid-take used to take the whole recording with it,
+// because the error was reported and the samples returned alongside it were
+// dropped on the floor.
 void test_device_failure_keeps_what_was_captured() {
     const paths::fs::path out = fresh_output_dir();
     fake_capture::reset();
@@ -310,16 +309,16 @@ void test_device_failure_keeps_what_was_captured() {
     state.stop_and_process();
 
     const nlohmann::json snapshot = state.state_json();
-    test::check("a device failure is reported", state.phase() == "error",
+    test::check("V42 a device failure is reported", state.phase() == "error",
                 "phase=" + state.phase() + " message=" + state.message());
-    test::check("the audio captured before the failure is kept",
+    test::check("V42 the audio captured before the failure is kept",
                 json_bool(snapshot, "has_audio"));
-    test::check("the audio captured before the failure is saved",
+    test::check("V42 the audio captured before the failure is saved",
                 size_of(saved_audio_in(out)) == 44 + kTakeSamples * 2);
 }
 
-// A device that will not open must hand the claim back, or the app is stuck
-// "recording" for ever with nothing behind it.
+// V43: A device that will not open must hand the claim back, or the app is
+// stuck "recording" for ever with nothing behind it.
 void test_failed_device_open_releases_the_claim() {
     const paths::fs::path out = fresh_output_dir();
     fake_capture::reset();
@@ -331,8 +330,8 @@ void test_failed_device_open_releases_the_claim() {
         state.start_recording(test_source(), {});
     } catch (const std::exception&) { threw = true; }
 
-    test::check("a device that cannot open reports it", threw);
-    test::check("a failed open does not leave the app recording",
+    test::check("V43 a device that cannot open reports it", threw);
+    test::check("V43 a failed open does not leave the app recording",
                 !state.recording() && !fake_capture::any_running());
 
     // ...and the next attempt is allowed through.
@@ -342,11 +341,11 @@ void test_failed_device_open_releases_the_claim() {
     try {
         state.start_recording(test_source(), {});
     } catch (const std::exception&) { second = false; }
-    test::check("a later attempt still works", second && state.recording());
+    test::check("V43 a later attempt still works", second && state.recording());
     state.cancel();
 }
 
-// An optional feature has to actually reach the code that implements it.
+// V44: An optional feature has to actually reach the code that implements it.
 // Moving the sources into an object library once left the feature defines
 // behind on the executable: diarize/diarizer.cpp compiles itself out when its
 // define is missing, so speaker separation vanished from a build that still
@@ -366,16 +365,16 @@ void test_build_features_reach_their_code() {
 
     const bool built    = state.state_json()["diar_supported"].get<bool>();
     const bool intended = TRANSCRIPTOR_EXPECT_DIARIZE != 0;
-    test::check("speaker separation is built exactly when the build asks for it",
+    test::check("V44 speaker separation is built exactly when it is asked for",
                 built == intended,
                 std::string("option=") + (intended ? "ON" : "OFF") +
                     ", compiled in=" + (built ? "yes" : "no"));
 }
 
-// A finished run is not the same as a transcript worth summarizing, and the
-// gap between the two is where auto-summarize used to sequence the VRAM, load
-// a model and end a perfectly good take on an error. The subtle half is the
-// diarized case: plain_text() labels every line, so a result of empty lines
+// V45: A finished run is not the same as a transcript worth summarizing, and
+// the gap between the two is where auto-summarize used to sequence the VRAM,
+// load a model and end a perfectly good take on an error. The subtle half is
+// the diarized case: plain_text() labels every line, so a result of empty lines
 // reads back as "Speaker 1: " and looks like text to anyone who asks for it as
 // a string.
 void test_empty_transcripts_are_recognized() {
@@ -383,24 +382,26 @@ void test_empty_transcripts_are_recognized() {
     using pipeline::ProcessResult;
 
     ProcessResult none;
-    test::check("a result with no lines has no text", !none.has_text());
+    test::check("V45 a result with no lines has no text", !none.has_text());
 
     ProcessResult blank;
     blank.lines.push_back(Line{-1, "", 0.0, 1.0});
     blank.lines.push_back(Line{-1, "  \n\t", 1.0, 2.0});
-    test::check("lines holding only whitespace are not text", !blank.has_text());
+    test::check("V45 lines holding only whitespace are not text",
+                !blank.has_text());
 
     ProcessResult diarized;
     diarized.diarized = true;
     diarized.num_speakers = 1;
     diarized.lines.push_back(Line{0, "   ", 0.0, 1.0});
-    test::check("a labelled empty line is still not text", !diarized.has_text(),
+    test::check("V45 a labelled empty line is still not text",
+                !diarized.has_text(),
                 "plain_text=\"" + diarized.plain_text("en") + "\"");
 
     ProcessResult spoken;
     spoken.lines.push_back(Line{-1, "  ", 0.0, 1.0});
     spoken.lines.push_back(Line{-1, "We ship on Friday.", 1.0, 2.0});
-    test::check("one line with words is enough", spoken.has_text());
+    test::check("V45 one line with words is enough", spoken.has_text());
 }
 
 #ifndef _WIN32
@@ -448,11 +449,11 @@ struct GatedDecoder {
     void release() const { paths::write_file(go, ""); }
 };
 
-// Cancel during an upload's decode was accepted -- cancel_job() returned true
-// and raised the flags -- and then quietly undone: the flags were cleared where
-// the worker starts, which for an upload is on the far side of the decode. With
-// automatic transcription on, the cancelled upload carried straight on into the
-// pipeline.
+// V46: Cancel during an upload's decode was accepted -- cancel_job() returned
+// true and raised the flags -- and then quietly undone: the flags were cleared
+// where the worker starts, which for an upload is on the far side of the
+// decode. With automatic transcription on, the cancelled upload carried
+// straight on into the pipeline.
 void test_cancel_during_upload_decode() {
     const paths::fs::path out = fresh_output_dir();
     fake_capture::reset();
@@ -468,24 +469,26 @@ void test_cancel_during_upload_decode() {
     bool accepted = true;
     std::thread uploader([&] { accepted = state.process_file(upload, "upload.mka"); });
 
-    test::check("the upload reaches the decoder", decoder.wait_until_decoding());
-    test::check("cancel is accepted while the file is decoding", state.cancel_job());
+    test::check("V46 the upload reaches the decoder",
+                decoder.wait_until_decoding());
+    test::check("V46 cancel is accepted while the file is decoding",
+                state.cancel_job());
     decoder.release();   // for the unfixed code, which never kills the child
     uploader.join();
 
-    test::check("a cancelled upload is not accepted", !accepted);
-    test::check("a cancelled upload ends cancelled rather than transcribing",
+    test::check("V46 a cancelled upload is not accepted", !accepted);
+    test::check("V46 a cancelled upload ends cancelled, not transcribing",
                 state.phase() == "idle",
                 "phase=" + state.phase() + " message=" + state.message());
-    test::check("the job slot is handed back", !state.processing());
-    test::check("the cancelled upload is not held for transcription",
+    test::check("V46 the job slot is handed back", !state.processing());
+    test::check("V46 the cancelled upload is not held for transcription",
                 !json_bool(state.state_json(), "has_audio"));
 }
 
-// The library's Delete checked only the studio session folder. A re-run works in
-// a folder session_dir_ never names, so its target could be deleted mid-run --
-// and the worker then recreated the directory through write_file() and saved
-// into it, leaving one transcript where a whole recording had been.
+// V47: The library's Delete checked only the studio session folder. A re-run
+// works in a folder session_dir_ never names, so its target could be deleted
+// mid-run -- and the worker then recreated the directory through write_file()
+// and saved into it, leaving one transcript where a whole recording had been.
 void test_a_rerun_protects_the_folder_it_writes_into() {
     const paths::fs::path out = fresh_output_dir();
     fake_capture::reset();
@@ -510,34 +513,35 @@ void test_a_rerun_protects_the_folder_it_writes_into() {
     std::string error;
     const bool started =
         state.start_library_transcribe("2026-09-06_10-00-00", "second pass", &error);
-    test::check("a library re-run starts", started, error);
-    test::check("the re-run reaches the decoder", decoder.wait_until_decoding());
+    test::check("V47 a library re-run starts", started, error);
+    test::check("V47 the re-run reaches the decoder",
+                decoder.wait_until_decoding());
 
-    test::check("its target cannot be deleted while it runs",
+    test::check("V47 its target cannot be deleted while it runs",
                 state.delete_library_session(dir, s.output_dir) ==
                     app::AppState::DeleteOutcome::kBusy);
-    test::check("the recording is still there",
+    test::check("V47 the recording is still there",
                 paths::fs::is_regular_file(dir / "audio.webm", ec));
 
     // ...and an unrelated session is still deletable, which is what a guard that
     // is too broad would break.
-    test::check("another session can still be deleted",
+    test::check("V47 another session can still be deleted",
                 state.delete_library_session(other, s.output_dir) ==
                     app::AppState::DeleteOutcome::kOk);
 
     decoder.release();
     state.shutdown();   // joins the worker, which fails on the fake model
 
-    test::check("the folder survives the run either way",
+    test::check("V47 the folder survives the run either way",
                 paths::fs::is_regular_file(dir / "audio.webm", ec));
-    test::check("and it is deletable once nothing is writing to it",
+    test::check("V47 and it is deletable once nothing is writing to it",
                 state.delete_library_session(dir, s.output_dir) ==
                     app::AppState::DeleteOutcome::kOk);
 }
 
 #endif  // _WIN32
 
-// A directory is not a model. file_size() fails on one and hands back the
+// V48: A directory is not a model. file_size() fails on one and hands back the
 // unsigned error sentinel, which is greater than zero -- so a folder given as a
 // custom model path reported itself ready and the failure surfaced much later,
 // somewhere far less legible.
@@ -549,22 +553,25 @@ void test_a_directory_is_not_a_model_file() {
     const paths::fs::path folder = out / "large-v3.bin";   // a folder, despite the name
     paths::fs::create_directories(folder, ec);
     s.whisper_model_path = paths::to_utf8(folder);
-    test::check("a directory is not a usable speech model",
+    test::check("V48 a directory is not a usable speech model",
                 !models::whisper_ready(s),
                 "reason=" + models::whisper_missing_reason(s));
 
     const paths::fs::path empty = out / "empty.bin";
     paths::write_file(empty, "");
     s.whisper_model_path = paths::to_utf8(empty);
-    test::check("an empty file is not one either", !models::whisper_ready(s));
+    test::check("V48 an empty file is not one either",
+                !models::whisper_ready(s));
 
     s.whisper_model_path = paths::to_utf8(out / "absent.bin");
-    test::check("a missing file is not one either", !models::whisper_ready(s));
+    test::check("V48 a missing file is not one either",
+                !models::whisper_ready(s));
 
     const paths::fs::path real = out / "real.bin";
     paths::write_file(real, "weights");
     s.whisper_model_path = paths::to_utf8(real);
-    test::check("a file with something in it still counts", models::whisper_ready(s));
+    test::check("V48 a file with something in it still counts",
+                models::whisper_ready(s));
 }
 
 }  // namespace

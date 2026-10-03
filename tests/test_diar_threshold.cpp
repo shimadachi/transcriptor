@@ -1,12 +1,12 @@
 // The diarization clustering threshold, which follows the transcription
-// language rather than being a setting of its own.
+// language rather than being a setting of its own (V49).
 //
-// What this guards: one constant, 0.5, used to sit in Settings as the threshold
-// for every language. Measured with eval/ on the CAM++ embedding model, 0.5
-// scores 48.7% diarization error rate on Turkish where 0.80 scores 26.4%, and
-// 11.2% on English where 0.65 scores 9.5%. It was the wrong number for both,
-// and no value exists that is right for both -- which is why it is derived now
-// and not stored.
+// V49: one constant, 0.5, used to sit in Settings as the threshold for every
+// language. Measured with eval/ on the CAM++ embedding model, 0.5 scores 48.7%
+// diarization error rate on Turkish where 0.80 scores 26.4%, and 11.2% on
+// English where 0.65 scores 9.5%. It was the wrong number for both, and no
+// value exists that is right for both -- which is why it is derived now and not
+// stored.
 
 #include "config.h"
 
@@ -27,19 +27,22 @@ void follows_the_language() {
     Settings s;
 
     s.language = "tr";
-    test::check("Turkish resolves to 0.80", near(s.cluster_threshold(), 0.80f),
+    test::check("V49 Turkish resolves to 0.80",
+                near(s.cluster_threshold(), 0.80f),
                 show(s.cluster_threshold()));
 
     s.language = "en";
-    test::check("English resolves to 0.65", near(s.cluster_threshold(), 0.65f),
+    test::check("V49 English resolves to 0.65",
+                near(s.cluster_threshold(), 0.65f),
                 show(s.cluster_threshold()));
 
     // "" is the UI's auto-detect: no language to choose from, so the value has
     // to sit between the two rather than favour either.
     s.language = "";
     const float mid = s.cluster_threshold();
-    test::check("auto-detect resolves to 0.70", near(mid, 0.70f), show(mid));
-    test::check("auto-detect sits between the two language values",
+    test::check("V49 auto-detect resolves to 0.70",
+                near(mid, 0.70f), show(mid));
+    test::check("V49 auto-detect sits between the two language values",
                 mid > 0.65f && mid < 0.80f, show(mid));
 }
 
@@ -51,7 +54,7 @@ void never_returns_something_unusable() {
         Settings s;
         s.language = lang;
         const float v = s.cluster_threshold();
-        test::check("resolved threshold is usable", v > 0.0f && v <= 1.0f,
+        test::check("V49 resolved threshold is usable", v > 0.0f && v <= 1.0f,
                     std::string(lang) + " -> " + show(v));
     }
 }
@@ -62,7 +65,7 @@ void is_not_stored() {
     // and a language that are no longer in play.
     Settings s;
     s.language = "tr";
-    test::check("the threshold is not written to the config file",
+    test::check("V49 the threshold is not written to the config file",
                 !s.to_json().contains("cluster_threshold"),
                 s.to_json().dump().substr(0, 60));
 
@@ -71,7 +74,7 @@ void is_not_stored() {
     Settings back;
     back.from_json(nlohmann::json{{"language", "tr"},
                                   {"cluster_threshold", 0.5}});
-    test::check("a stored threshold from an older file is ignored",
+    test::check("V49 a stored threshold from an older file is ignored",
                 near(back.cluster_threshold(), 0.80f),
                 show(back.cluster_threshold()));
 }
@@ -82,9 +85,9 @@ void survives_a_round_trip() {
 
     Settings back;
     back.from_json(s.to_json());
-    test::check("the language survives a save and reload",
+    test::check("V49 the language survives a save and reload",
                 back.language == "tr", back.language);
-    test::check("so the threshold comes back the same",
+    test::check("V49 so the threshold comes back the same",
                 near(back.cluster_threshold(), 0.80f),
                 show(back.cluster_threshold()));
 }

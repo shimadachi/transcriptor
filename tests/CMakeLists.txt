@@ -23,20 +23,20 @@ transcriptor_test(test_chunking
 target_link_libraries(test_chunking PRIVATE nlohmann_json::nlohmann_json)
 add_test(NAME chunking COMMAND test_chunking)
 
-# -- reasoning budget (R1, V5, V36) -------------------------------------------
+# -- reasoning budget, and reasoning in the summary (V41, V51, V5, V36) -------
 transcriptor_test(test_reasoning
     "${TESTS_SRC}/test_reasoning.cpp"
     "${APP_SRC}/llm/reasoning.cpp")
 add_test(NAME reasoning COMMAND test_reasoning)
 
-# -- hallucinated subtitle / audio-description credits (V32) ------------------
+# -- hallucinated subtitle / audio-description credits (V50, V32) -------------
 transcriptor_test(test_credits
     "${TESTS_SRC}/test_credits.cpp"
     "${APP_SRC}/stt/credits.cpp")
 target_link_libraries(test_credits PRIVATE nlohmann_json::nlohmann_json)
 add_test(NAME credits COMMAND test_credits)
 
-# -- diarization clustering threshold -----------------------------------------
+# -- diarization clustering threshold (V49) -----------------------------------
 transcriptor_test(test_diar_threshold
     "${TESTS_SRC}/test_diar_threshold.cpp"
     "${APP_SRC}/config.cpp"
@@ -65,7 +65,7 @@ target_link_libraries(test_settings PRIVATE nlohmann_json::nlohmann_json)
 add_test(NAME settings
          COMMAND test_settings "${CMAKE_CURRENT_BINARY_DIR}/settings_scratch")
 
-# -- library versions, and what counts as a session (V16, V20, V29) ------------
+# -- library versions, and what counts as a session (V16, V20, V29, V53) ------
 transcriptor_test(test_library
     "${TESTS_SRC}/test_library.cpp"
     "${APP_SRC}/util/library.cpp"
@@ -85,7 +85,7 @@ add_test(NAME unicode_paths
          COMMAND test_unicode_paths "${CMAKE_CURRENT_BINARY_DIR}/unicode_paths_scratch")
 set_tests_properties(unicode_paths PROPERTIES TIMEOUT 60)
 
-# -- output writing (R2, V4, V37) ---------------------------------------------
+# -- output writing (R2, V54, V4, V37) ----------------------------------------
 # RLIMIT_FSIZE is how the failure is provoked, so POSIX only.
 if(UNIX)
     transcriptor_test(test_write_failure
@@ -129,7 +129,7 @@ target_link_libraries(test_mixing PRIVATE Threads::Threads)
 add_test(NAME mixing COMMAND test_mixing)
 set_tests_properties(mixing PROPERTIES TIMEOUT 60)
 
-# -- recording lifecycle (R1, R4, G6, N6) -------------------------------------
+# -- recording lifecycle (R1, R4, G6, N6, V42-V48) ----------------------------
 # The one test that links the application itself, because these bugs are in how
 # AppState, the Recorder and the worker thread fit together. Only the audio
 # device is substituted: AudioCapture is a pimpl, so tests/fake_capture.cpp can
@@ -173,7 +173,8 @@ if(TRANSCRIPTOR_NODE)
                      "${CMAKE_SOURCE_DIR}")
     set_tests_properties(ui PROPERTIES TIMEOUT 60)
 
-    # Constants the browser and the C++ each hold a copy of.
+    # Constants the browser and the C++ each hold a copy of, and the page's own
+    # tables (V14, V23, V26, V27, V28, V31, V49, V52).
     add_test(NAME ui_tables
              COMMAND "${TRANSCRIPTOR_NODE}" "${TESTS_SRC}/ui/test_tables.js"
                      "${CMAKE_SOURCE_DIR}")

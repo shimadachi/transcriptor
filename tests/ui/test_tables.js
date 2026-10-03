@@ -1,6 +1,6 @@
 // Constants that exist twice, checked against each other.
 //
-// The clustering threshold is derived from the transcription language by
+// V49: the clustering threshold is derived from the transcription language by
 // Settings::cluster_threshold in src/config.cpp. The settings panel shows which
 // value is in force, and it has to show the right one before a save as well as
 // after, so web/app.js carries its own copy of the same table. Two copies of a
@@ -51,18 +51,19 @@ function cppTable() {
 const ui = uiTable();
 const cpp = cppTable();
 
-check('web/app.js still declares CLTHR_BY_LANG', ui !== null);
-check('src/config.cpp still defines Settings::cluster_threshold', cpp !== null);
+check('V49 web/app.js still declares CLTHR_BY_LANG', ui !== null);
+check('V49 src/config.cpp still defines Settings::cluster_threshold',
+      cpp !== null);
 
 if (ui && cpp) {
   for (const lang of ['tr', 'en', '']) {
     const label = lang === '' ? 'auto-detect' : lang;
-    check(`threshold for ${label} agrees`,
+    check(`V49 threshold for ${label} agrees`,
           cpp[lang] !== null && Math.abs(ui[lang] - cpp[lang]) < 1e-9,
           `panel ${ui[lang]} vs diarizer ${cpp[lang]}`);
   }
   // A language in one table and not the other is the same bug in another shape.
-  check('neither table has a language the other lacks',
+  check('V49 neither table has a language the other lacks',
         Object.keys(ui).sort().join() === Object.keys(cpp).sort().join(),
         `panel [${Object.keys(ui)}] vs diarizer [${Object.keys(cpp)}]`);
 }
@@ -82,11 +83,11 @@ vm.createContext(sandbox);
 vm.runInContext(read('web/i18n.js'), sandbox, {filename: 'i18n.js'});
 const STR = vm.runInContext('STR', sandbox);
 
-check('set.clthr exists', Boolean(STR && STR['set.clthr']));
+check('V49 set.clthr exists', Boolean(STR && STR['set.clthr']));
 if (STR && STR['set.clthr']) {
   for (const lang of ['en', 'tr']) {
     const s = STR['set.clthr'][lang];
-    check(`set.clthr[${lang}] keeps the {v} placeholder`,
+    check(`V49 set.clthr[${lang}] keeps the {v} placeholder`,
           typeof s === 'string' && s.includes('{v}'), s);
   }
 }
@@ -119,11 +120,11 @@ if (askTable && STR) {
   }
 }
 
-check('the toast for a run that finished mid-question is translated',
+check('V26 the toast for a run that finished mid-question is translated',
       Boolean(STR && STR['toast.jobAlreadyDone'] &&
               STR['toast.jobAlreadyDone'].tr));
 
-// -- paths truncate at the front, without losing their leading slash ---------
+// -- V52: paths truncate at the front, without losing their leading slash ----
 // direction:rtl is what puts the ellipsis at the front of a path, where the
 // session id survives being cut. On its own it also drags the leading slash of
 // an absolute path to the far right, so /home/user/Transcriptor renders as
@@ -136,11 +137,11 @@ const css = read('web/style.css');
 
 for (const cls of ['lib-dir', 'lib-path']) {
   const rule = css.match(new RegExp('\\.' + cls + '\\s*\\{[^}]*\\}'));
-  check(`.${cls} still truncates at the front`,
+  check(`V52 .${cls} still truncates at the front`,
         Boolean(rule && /direction:\s*rtl/.test(rule[0])));
   // The <bdi> has to be inside that element, not beside it.
   const el = html.match(new RegExp('<code[^>]*class="' + cls + '"[^>]*>([\\s\\S]*?)</code>'));
-  check(`.${cls} wraps its text in a <bdi dir="ltr">`,
+  check(`V52 .${cls} wraps its text in a <bdi dir="ltr">`,
         Boolean(el && /<bdi[^>]*dir="ltr"[^>]*>/.test(el[1])),
         el ? el[1].trim().slice(0, 46) : 'element not found');
 }
@@ -148,15 +149,15 @@ for (const cls of ['lib-dir', 'lib-path']) {
 // The ids the JS writes to have to be on the <bdi>, or setting textContent
 // would replace the wrapper it depends on.
 for (const id of ['libDir', 'libPath']) {
-  check(`#${id} is the <bdi>, so writing to it keeps the wrapper`,
+  check(`V52 #${id} is the <bdi>, so writing to it keeps the wrapper`,
         new RegExp('<bdi[^>]*id="' + id + '"').test(html));
 }
 
 // The setting is gone, so nothing should still be reaching for its input.
-check('no leftover reference to the removed threshold input',
+check('V49 no leftover reference to the removed threshold input',
       !read('web/app.js').includes('s_clthr') &&
       !read('web/index.html').includes('s_clthr'));
-check('the settings POST no longer sends a threshold',
+check('V49 the settings POST no longer sends a threshold',
       !read('web/app.js').includes('cluster_threshold:'));
 
 // -- V14: every label names a control ----------------------------------------

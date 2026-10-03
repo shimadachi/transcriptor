@@ -1,10 +1,11 @@
-// Regression tests for hallucinated credits surviving into a saved transcript.
+// Regression tests for hallucinated credits surviving into a saved transcript
+// (V50, V32).
 //
-// The bug: a recording that opens on silence gets "Bu dizinin betimlemesi TRT
-// tarafından Sesli Betimleme Derneğine yaptırılmıştır." in the first window --
-// a broadcaster's audio-description disclaimer Whisper has memorised. The
-// filter knew about subtitle credits but not this family, so the line was
-// saved as if someone had said it.
+// V50: short recordings ended in "Altyazı M.K.", a subtitle credit Whisper has
+// memorised, saved as though someone had said it. A recording that opens on
+// silence gets "Bu dizinin betimlemesi TRT tarafından Sesli Betimleme Derneğine
+// yaptırılmıştır." in the first window -- a broadcaster's audio-description
+// disclaimer from the same family -- which the filter did not know at first.
 //
 // The real fix is the voice detector in whisper_stt.cpp, which keeps silence
 // away from the decoder; that needs a model, a GPU and a recording, so what is
@@ -82,32 +83,32 @@ int main() {
     // -- the disclaimer that prompted this ------------------------------------
     // Nine words, and the tail varies by broadcaster, so neither an exact line
     // nor the old eight-word trailing scan would have caught it.
-    dropped("TRT audio-description disclaimer",
+    dropped("V50 TRT audio-description disclaimer",
             {"Bu", "dizinin", "betimlemesi", "TRT", "tarafından", "Sesli",
              "Betimleme", "Derneğine", "yaptırılmıştır."});
 
-    dropped("the same disclaimer for a film",
+    dropped("V50 the same disclaimer for a film",
             {"Bu", "filmin", "betimlemesi", "Sesli", "Betimleme", "Derneği",
              "tarafından", "yapılmıştır."});
 
-    dropped("the same disclaimer for a programme",
+    dropped("V50 the same disclaimer for a programme",
             {"Bu", "programın", "betimlemesi", "yapılmıştır."});
 
-    dropped("the same disclaimer for an episode",
+    dropped("V50 the same disclaimer for an episode",
             {"Bu", "bölümün", "betimlemesi", "yapılmıştır."});
 
     // -- the subtitle credits that were already known -------------------------
-    dropped("Altyazı M.K.", {"Altyazı", "M.K."});
-    dropped("case and punctuation folded", {"ALTYAZI:", "m.k."});
-    dropped("English subtitle-site credit",
+    dropped("V50 Altyazı M.K.", {"Altyazı", "M.K."});
+    dropped("V50 case and punctuation folded", {"ALTYAZI:", "m.k."});
+    dropped("V50 English subtitle-site credit",
             {"Subtitles", "by", "the", "Amara.org", "community"});
 
     // -- a credit stuck to the end of real speech -----------------------------
-    trimmed_to("trailing credit trimmed, speech kept",
+    trimmed_to("V50 trailing credit trimmed, speech kept",
                {"Görüşmek", "üzere", "arkadaşlar.", "Altyazı", "M.K."},
                "Görüşmek üzere arkadaşlar.");
 
-    trimmed_to("trailing disclaimer trimmed, speech kept",
+    trimmed_to("V50 trailing disclaimer trimmed, speech kept",
                {"Herkese", "iyi", "çalışmalar.", "Bu", "dizinin", "betimlemesi",
                 "TRT", "tarafından", "Sesli", "Betimleme", "Derneğine",
                 "yaptırılmıştır."},
@@ -116,17 +117,17 @@ int main() {
     // -- speech that must survive ---------------------------------------------
     // The credit words do occur in real sentences. Whole-segment and trailing
     // matching is what keeps these; a substring search would eat them.
-    kept_whole("a question about subtitles",
+    kept_whole("V50 a question about subtitles",
                {"Altyazıları", "açar", "mısın?"});
 
-    kept_whole("betimleme discussed rather than credited",
+    kept_whole("V50 betimleme discussed rather than credited",
                {"Sesli", "betimleme", "desteği", "ekleyelim", "mi?"});
 
-    kept_whole("a sentence that merely starts the same way",
+    kept_whole("V50 a sentence that merely starts the same way",
                {"Bu", "dizinin", "betimlemesi", "hakkında", "ne",
                 "düşünüyorsunuz?"});
 
-    kept_whole("thanks in the middle of a meeting",
+    kept_whole("V50 thanks in the middle of a meeting",
                {"Teşekkürler,", "sonra", "konuşuruz."});
 
     // -- V32: sign-offs people really say -------------------------------------
