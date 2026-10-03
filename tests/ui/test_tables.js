@@ -256,6 +256,35 @@ for (const [name, t] of THEMES) {
   }
 }
 
+// -- V31: what a caution says a download costs ---------------------------------
+// The speaker-separation caution promised "≈ 75 MB" -- the size of the
+// embedding model it used to fetch -- long after that became CAM++ at 28 MB.
+// The real sizes are the specs in src/util/models.cpp; the cautions quote
+// them, so the two are checked here. Megabytes as human_size() counts them,
+// and "≈" taken as within a tenth.
+{
+  const models = read('src/util/models.cpp');
+  const bytes = fn => {
+    const m = models.match(new RegExp('ModelSpec ' + fn + '\\(\\)[\\s\\S]*?([\\d\']+)ULL'));
+    return m ? Number(m[1].replace(/'/g, '')) : NaN;
+  };
+  const MB = 1024 * 1024;
+  const cases = [
+    ['note.diarMissing', (bytes('segmentation_spec') + bytes('embedding_spec')) / MB],
+    ['note.vadMissing', bytes('vad_spec') / MB],
+  ];
+  for (const [key, real] of cases) {
+    for (const lang of ['en', 'tr']) {
+      const text = (STR[key] || {})[lang] || '';
+      const m = /≈ ([\d.,]+) MB/.exec(text);
+      const said = m ? parseFloat(m[1].replace(',', '.')) : NaN;
+      check(`V31 ${key} (${lang}) quotes the download's real size`,
+            Math.abs(said - real) <= real / 10,
+            `says ${m ? m[1] : 'nothing'} MB, the download is ${real.toFixed(2)} MB`);
+    }
+  }
+}
+
 console.log(failures === 0 ? '\ntables: all checks passed'
                            : `\ntables: ${failures} check(s) FAILED`);
 process.exit(failures === 0 ? 0 : 1);
