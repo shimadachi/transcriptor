@@ -315,6 +315,12 @@ private:
     // recorded. Outermost again: output_mutex_ -> job_mutex_ -> mutex_.
     std::mutex output_mutex_;
 
+    // Guards download_thread_ and starting a download against shutting down:
+    // a start holds it from its shutdown check to the new thread's assignment,
+    // shutdown() around its cancel and join. Never taken with any other lock
+    // held, and the download thread itself never takes it.
+    std::mutex download_mutex_;
+
     Settings   settings_;          // guarded by mutex_
     DeviceInfo device_;            // guarded by mutex_
 

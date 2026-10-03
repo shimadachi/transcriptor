@@ -28,6 +28,10 @@
 // the network for it first, unasked -- in an app that says it stays on the
 // machine -- and on a network that drops traffic, curl's retries held each run
 // back by a minute and a half.
+//
+// V34: a model download could still be started once the app had begun to shut
+// down -- main() stops the server only afterwards -- clearing the cancellation
+// shutdown() had raised and assigning the thread handle it was joining.
 
 #include <chrono>
 #include <cstdio>
@@ -390,6 +394,21 @@ void test_a_transcription_stays_off_the_network() {
     state.shutdown();
 }
 
+void test_no_download_starts_once_the_app_is_closing() {
+    const paths::fs::path dir = fresh_dir();
+    // Should the gate fail, the download must still not reach the network.
+    const paths::fs::path mark = dir / "curl-ran";
+    const FakeTool curl(dir, "curl", "touch '" + paths::to_utf8(mark) + "'\nexit 6\n");
+
+    app::AppState state(test_settings(dir / "out"));
+    state.shutdown();
+    std::string error;
+    const bool started = state.start_model_download("vad", "vad", &error);
+    test::check("V34 a download is refused once the app is closing", !started, error);
+    test::check("V34 and says why", error == "The app is closing.", error);
+    test::check("V34 and nothing is running", !state.model_download_json().value("active", true));
+}
+
 void test_utf8_cuts() {
     const std::string s = "a\xC5\x9F" "b";   // "aşb"
     test::check("V3 a cut from the front backs off to a character boundary",
@@ -428,6 +447,7 @@ int main(int argc, char** argv) {
     test_both_download_reports_agree();
     test_a_summary_cut_at_the_limit_says_so();
     test_a_transcription_stays_off_the_network();
+    test_no_download_starts_once_the_app_is_closing();
 
     return test::summary("api");
 }

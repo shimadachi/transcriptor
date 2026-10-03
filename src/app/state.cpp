@@ -125,6 +125,7 @@ void AppState::shutdown() {
     // the app until it was force-killed. The child dies, the .part file is
     // removed, and the thread returns at once -- which is also the only way
     // the state it writes to is safe to tear down.
+    std::lock_guard<std::mutex> dl_lock(download_mutex_);
     dl_cancel_.request();
     join_download();
 }
@@ -1437,6 +1438,17 @@ bool AppState::start_model_download(const std::string& kind,
         ? L("The speaker models are ready.", "Konuşmacı modelleri hazır.")
         : label + L(" is ready.", " hazır.");
 
+    // Held until the new thread is in download_thread_, and taken by shutdown()
+    // around its cancel and join, so the two cannot meet in the middle. This
+    // had no gate at all: main() shuts the app down before it stops the
+    // server, and a download asked for in between cleared the cancellation
+    // shutdown() had just raised, then assigned the thread handle while
+    // shutdown() was joining it.
+    std::lock_guard<std::mutex> dl_lock(download_mutex_);
+    if (shutting_down_.load()) {
+        if (error) *error = L("The app is closing.", "Uygulama kapanıyor.");
+        return false;
+    }
     if (downloading_.exchange(true)) {
         if (error) {
             *error = L("A model is already downloading.",
