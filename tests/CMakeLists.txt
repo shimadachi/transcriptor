@@ -108,6 +108,15 @@ if(UNIX)
     set_tests_properties(process_runner PROPERTIES TIMEOUT 60)
 endif()
 
+# -- counting cores on a hybrid CPU (V39) --------------------------------------
+# Hands the Linux query a sysfs tree of its own, so Linux only.
+if(UNIX AND NOT APPLE)
+    transcriptor_test(test_cpu
+        "${TESTS_SRC}/test_cpu.cpp"
+        "${APP_SRC}/util/cpu.cpp")
+    add_test(NAME cpu COMMAND test_cpu "${CMAKE_CURRENT_BINARY_DIR}/cpu_scratch")
+endif()
+
 # -- mixing a microphone into system audio (V2) --------------------------------
 # The real Recorder against the stand-in capture, which can make one source
 # silent the way WASAPI loopback is while nothing plays.
