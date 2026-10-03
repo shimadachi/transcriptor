@@ -64,9 +64,10 @@ jobs:
       # out at 12.6.2 and defaulted to 12.6.1, so RTX 50xx was falling back to
       # JIT. Hence the action bump alongside the pin.
       #
-      # Staying on 12.x also keeps the driver floor low: the bundled 12.9
-      # runtime runs on any 525+ driver thanks to CUDA minor version
-      # compatibility, where 13.x would demand 580+ from end users.
+      # Staying on 12.x also keeps what users need modest: the package links
+      # the 12.x runtime, which they install with any 12.x toolkit and which
+      # runs on a 525+ driver thanks to CUDA minor version compatibility,
+      # where 13.x would demand 580+.
       - name: CUDA toolkit
         if: inputs.cuda
         uses: Jimver/cuda-toolkit@v0.2.36
@@ -144,9 +145,9 @@ jobs:
       #
       # --no-tests=error because ctest exits 0 when it finds nothing to run, so
       # a suite that quietly stopped being registered would look exactly like a
-      # passing one. Two of the five are POSIX-only and the UI suite is skipped
-      # where node is absent, so the count differs per platform; zero is the
-      # only number that means something has gone wrong.
+      # passing one. Some suites are POSIX- or Linux-only and the UI ones are
+      # skipped where node is absent, so the count differs per platform; zero
+      # is the only number that means something has gone wrong.
       # Explicitly bash for the same reason the ccache step is: the default
       # shell on the Windows runners is pwsh.
       #

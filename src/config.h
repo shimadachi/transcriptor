@@ -43,7 +43,7 @@ struct Settings {
     std::string language      = "en";         // "" = auto-detect
     std::string device        = "auto";       // auto/cuda/cpu
     std::string compute_type  = "auto";       // kept for UI parity (quantization)
-    int         stt_threads   = 0;            // 0 = hardware_concurrency
+    int         stt_threads   = 0;            // 0 = physical cores, up to 8
 
     // -- live transcript ---------------------------------------------------
     // Text on screen while the take is still going, from a speech model of its
