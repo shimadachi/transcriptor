@@ -53,6 +53,10 @@ struct Settings {
     // Switched from the studio, not from the settings panel.
     bool        live_transcript = false;
     std::string live_whisper_model;           // a models::whisper_catalog() id
+    // When the live transcript heard the whole take, it becomes the take's
+    // transcript at Stop, and no offline pass is needed for one. The full model
+    // is still a press of Transcribe away, over the same audio.
+    bool        keep_live_transcript = true;
 
     // -- diarization (sherpa-onnx) ---------------------------------------
     bool        enable_diarization = false;

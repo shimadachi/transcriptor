@@ -27,7 +27,11 @@ Genel → "Yeni sürümler için GitHub'a bak" ile kapatılır.
 - **Metne döker** — whisper.cpp, kelime bazlı zaman damgalarıyla.
 - **Canlı metin** — isteğe bağlı, stüdyodan açılır: siz kaydederken metin
   belirir; bunun için Ayarlar → Genel'de ayrıca seçilen daha hafif bir konuşma
-  modeli kullanılır. Kayıt metne dönüştürülünce yerini tam metin alır.
+  modeli kullanılır. Kaydın tamamını duyduysa Durdur'da kaydın metni olarak
+  saklanır, ikinci bir geçiş gerekmez; kaydın bir bölümünü kaçırdıysa saklanmaz
+  ve durum satırı nedenini söyler. **Metne Dönüştür** aynı ses üzerinde tam
+  modeli çalıştırmaya ve canlı metnin hiç yapmadığı konuşmacı ayrımına yine
+  hazırdır. Saklama Ayarlar → Genel'den kapatılabilir.
 - **Konuşmacıları ayırır** — sherpa-onnx; "Konuşmacı 1/2/3" olarak etiketler.
 - **Özetler** — gömülü llama.cpp ile, seçtiğiniz not şablonuna göre. Uzun
   kayıtlar parça parça özetlenip birleştirilir.

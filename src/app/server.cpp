@@ -893,6 +893,7 @@ bool Server::start() {
             {"live_whisper_model", s.live_whisper_model},
             {"live_whisper_ready", models::live_whisper_ready(s)},
             {"live_transcript", s.live_transcript},
+            {"keep_live_transcript", s.keep_live_transcript},
             {"language", s.language},
             {"device", s.device},
             {"compute_type", s.compute_type},
@@ -1043,6 +1044,7 @@ bool Server::start() {
         flag("check_updates", &s.check_updates);
         flag("llm_thinking", &s.llm_thinking);
         flag("live_transcript", &s.live_transcript);
+        flag("keep_live_transcript", &s.keep_live_transcript);
 
         clamped_float("mic_gain", &s.mic_gain, 0.0f, 4.0f);
         clamped_float("system_gain", &s.system_gain, 0.0f, 4.0f);

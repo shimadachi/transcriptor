@@ -27,8 +27,11 @@ about you or your recordings, and is switched off under Settings → General →
 - **Transcribes** — whisper.cpp, with word-level timestamps.
 - **Live transcript** — optional, switched on from the studio: the text appears
   while you record, from a lighter speech model chosen separately in
-  Settings → General. The full transcript replaces it once the recording is
-  transcribed.
+  Settings → General. When it heard the whole take it is kept as the
+  transcript at Stop, with no second pass; one that missed part of the take is
+  not, and the status line says why. **Transcribe** still runs the full model
+  over the same audio, and separates speakers, which the live one never does.
+  Keeping it can be switched off in Settings → General.
 - **Separates speakers** — sherpa-onnx, labelling them "Speaker 1/2/3".
 - **Summarizes** — embedded llama.cpp, following the note template you pick.
   Recordings too long for the context window are summarized in chunks and merged.

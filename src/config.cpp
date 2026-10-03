@@ -47,7 +47,8 @@ nlohmann::json engine_view(const Settings& s) {
                             // its own, read afresh at the start of each take;
                             // switching it from the studio must not throw away
                             // the models these two engines have loaded.
-                            "live_transcript", "live_whisper_model"}) {
+                            "live_transcript", "live_whisper_model",
+                            "keep_live_transcript"}) {
         j.erase(key);
     }
     return j;
@@ -88,6 +89,7 @@ nlohmann::json Settings::to_json() const {
 
         {"live_transcript", live_transcript},
         {"live_whisper_model", live_whisper_model},
+        {"keep_live_transcript", keep_live_transcript},
 
         {"enable_diarization", enable_diarization},
         {"diar_segmentation_model", diar_segmentation_model},
@@ -145,6 +147,7 @@ void Settings::from_json(const nlohmann::json& j) {
 
     get(j, "live_transcript", &live_transcript);
     get(j, "live_whisper_model", &live_whisper_model);
+    get(j, "keep_live_transcript", &keep_live_transcript);
 
     get(j, "enable_diarization", &enable_diarization);
     get(j, "diar_segmentation_model", &diar_segmentation_model);

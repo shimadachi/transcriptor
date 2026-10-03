@@ -400,6 +400,9 @@
                     data-i18n-title="set.dlCancelTitle" data-i18n="set.dlCancel"
                     style="display:none;">✕ Cancel</button></div>
           <div id="liveDlNote" class="dlnote"></div></div>
+        <!-- On by default: a take Live heard from start to finish needs no
+             second pass. One it did not is never kept as though it were. -->
+        <div class="field check"><input type="checkbox" id="s_keeplive"><label for="s_keeplive" data-i18n="set.keepLive">Keep the live transcript as the take's transcript when it heard the whole take — no offline pass needed</label></div>
         <div class="field"><label for="s_device" data-i18n="set.device">Device</label>
           <select id="s_device"><option value="auto" data-i18n="set.auto">Automatic</option>
             <option value="cpu">CPU</option></select>

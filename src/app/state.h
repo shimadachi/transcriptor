@@ -221,6 +221,13 @@ private:
     // path outside begin().
     void save_orphaned_take(const std::vector<float>& audio);
     void process_worker(AudioBuffer audio);
+
+    // A take the live transcript heard: waits for the preview to finish its
+    // tail, then keeps it as the transcript when it heard the whole take.
+    // When it did not, the take goes the usual way -- process_worker() under
+    // auto_transcribe, otherwise waiting for Transcribe -- with the status
+    // line saying what the preview missed.
+    void keep_live_worker(AudioBuffer audio);
     void do_summarize();
 
     // The two model runs, with no opinion about where their output goes, so a

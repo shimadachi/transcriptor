@@ -6,6 +6,7 @@
 
 #include "pipeline/processor.h"
 #include "stt/credits.h"
+#include "util/lang.h"
 
 namespace transcriptor::pipeline {
 
@@ -55,6 +56,7 @@ void LiveTranscriber::begin(LiveEngine engine, int samplerate) {
         std::lock_guard<std::mutex> lock(m_);
         session     = ++session_;
         samplerate_ = samplerate > 0 ? samplerate : 16000;
+        took_part_  = true;
         active_     = true;
         accepting_  = true;
         finishing_  = false;
@@ -73,6 +75,15 @@ void LiveTranscriber::begin(LiveEngine engine, int samplerate) {
 void LiveTranscriber::feed(const std::vector<float>& block, std::size_t offset) {
     std::lock_guard<std::mutex> lock(m_);
     if (!accepting_ || block.empty()) return;
+    // What of the take this has heard, for kept_transcript(). A block that does
+    // not start where the last one ended means Live was off in between.
+    if (!heard_) {
+        heard_      = true;
+        heard_from_ = offset;
+    } else if (offset != heard_to_) {
+        heard_gap_ = true;
+    }
+    heard_to_ = offset + block.size();
     if (!have_start_) {
         buf_start_  = offset;
         have_start_ = true;
@@ -111,6 +122,12 @@ void LiveTranscriber::clear() {
     ++session_;
     ++take_;
     ++rev_;
+    took_part_  = false;
+    heard_      = false;
+    heard_from_ = 0;
+    heard_to_   = 0;
+    heard_gap_  = false;
+    cut_short_  = false;
     active_    = false;
     accepting_ = false;
     finishing_ = false;
@@ -303,6 +320,12 @@ void LiveTranscriber::end_locked(std::uint64_t session, bool keep_partial) {
     // A session that has been replaced or cleared leaves everything to the
     // one that replaced it.
     if (session_ != session) return;
+    // Audio still waiting here was never transcribed: the session was stopped
+    // rather than finished, or failed. Whatever it held is missing from the
+    // text, so the text is not the whole take.
+    if (buf_.size() >= samples(kShortest, samplerate_) || !error_.empty()) {
+        cut_short_ = true;
+    }
     if (keep_partial && !partial_.empty()) {
         lines_.push_back({partial_start_, partial_end_, partial_});
     }
@@ -329,6 +352,65 @@ nlohmann::json LiveTranscriber::status_json() const {
         {"lagging", lagging_},
         {"error", error_.empty() ? nlohmann::json(nullptr) : nlohmann::json(error_)},
     };
+}
+
+bool LiveTranscriber::heard_take() const {
+    std::lock_guard<std::mutex> lock(m_);
+    return took_part_;
+}
+
+std::optional<ProcessResult> LiveTranscriber::kept_transcript(
+    std::size_t take_samples, std::string* why) const {
+    std::lock_guard<std::mutex> lock(m_);
+    const auto missed = [why](const std::string& reason) {
+        if (why) *why = reason;
+        return std::optional<ProcessResult>();
+    };
+    if (why) why->clear();
+    if (!took_part_) return std::nullopt;   // Live was off: nothing to explain
+
+    // In the order a person would look for the cause.
+    if (active_) {
+        return missed(L("it had not finished.", "bitmemişti."));
+    }
+    if (!error_.empty()) {
+        // The error is someone else's sentence; close it so the advice the
+        // caller adds after it does not run on.
+        const char last = error_.back();
+        const std::string end = (last == '.' || last == '!' || last == '?') ? "" : ".";
+        return missed(L("it stopped on an error — ", "bir hatayla durdu — ") + error_ + end);
+    }
+    if (!heard_) {
+        return missed(L("Live heard none of the take.",
+                        "Canlı metin kaydın hiçbir bölümünü duymadı."));
+    }
+    if (heard_from_ > 0) {
+        return missed(L("Live came on ", "Canlı metin kaydın ") +
+                      fmt_ts(static_cast<double>(heard_from_) / samplerate_) +
+                      L(" into the take, so it missed the start.",
+                        " noktasında açıldı, başını kaçırdı."));
+    }
+    if (heard_gap_) {
+        return missed(L("Live was off for part of the take.",
+                        "Canlı metin kaydın bir bölümünde kapalıydı."));
+    }
+    if (heard_to_ < take_samples) {
+        return missed(L("Live was switched off before the take ended.",
+                        "Canlı metin kayıt bitmeden kapatıldı."));
+    }
+    if (lagging_) {
+        return missed(L("the live model fell behind and skipped part of the take.",
+                        "canlı model geride kaldı ve kaydın bir bölümünü atladı."));
+    }
+    if (cut_short_) {
+        return missed(L("it was stopped before it finished.", "bitmeden durduruldu."));
+    }
+
+    ProcessResult result;
+    result.duration = static_cast<double>(take_samples) / samplerate_;
+    result.lines.reserve(lines_.size());
+    for (const Line& l : lines_) result.lines.push_back({-1, l.text, l.start, l.end});
+    return result;
 }
 
 nlohmann::json LiveTranscriber::text_json(std::size_t from) const {

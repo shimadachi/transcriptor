@@ -297,6 +297,8 @@ const STR = {
   'set.liveModel':  {en: 'Live transcript model — used while recording, when Live is on in the studio',
                      tr: 'Canlı metin modeli — stüdyoda Canlı açıkken, kayıt sırasında kullanılır'},
   'set.diarOn':     {en: 'Separate speakers', tr: 'Konuşmacıları ayır'},
+  'set.keepLive':   {en: 'Keep the live transcript as the take\'s transcript when it heard the whole take — no offline pass needed',
+                     tr: 'Canlı metin kaydın tamamını duyduysa onu kaydın metni olarak sakla — ayrıca metne dönüştürmek gerekmez'},
   'set.updates':    {en: 'Check GitHub for new releases (once a day; nothing else is sent)',
                      tr: 'Yeni sürümler için GitHub\'a bak (günde bir; başka hiçbir şey gönderilmez)'},
   'set.version':    {en: 'This build:', tr: 'Bu sürüm:'},

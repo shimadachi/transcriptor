@@ -647,6 +647,9 @@ bool AppState::cancel_job() {
     // here, and until this was wired through, Cancel during that stretch was
     // accepted and then quietly forgotten.
     job_cancel_.request();
+    // So is the preview finishing a take's last seconds before it is kept. A
+    // preview stopped short is not kept; the audio waits for Transcribe.
+    live_->stop();
     {
         std::lock_guard<std::mutex> lock(mutex_);
         // Both, not whichever is thought to be running: a job moves between
@@ -856,6 +859,17 @@ bool AppState::begin(std::vector<float> audio, const paths::fs::path& original_f
         pending_audio_ = buffer;
     }
 
+    // A take the live transcript heard may already have its transcript, and
+    // keeping it saves a second pass over the same audio -- whatever
+    // auto_transcribe says, since there is no wait left to spare anyone. Not
+    // for an upload, which no preview heard, and not after a device failure,
+    // whose message has to stay the status line.
+    if (claimed && original_file.empty() && device_msg.empty() &&
+        settings.keep_live_transcript && live_->heard_take()) {
+        start_job([this, buffer] { keep_live_worker(buffer); });
+        return true;
+    }
+
     // The audio is saved and held either way; only the pipeline waits. A take
     // that ended on a device failure waits too, whatever auto_transcribe says:
     // running straight on would replace the one message explaining what
@@ -977,6 +991,62 @@ void AppState::process_worker(AudioBuffer audio) {
     }
     // The tail -- catch, release_backends(), processing_ -- belongs to
     // start_job(), which owns the thread this runs on.
+}
+
+void AppState::keep_live_worker(AudioBuffer audio) {
+    const Settings settings = settings_copy();
+    // Stop handed the take's last seconds to the preview, which is still
+    // decoding them on its own thread. The transcript is not whole until it
+    // has; Cancel stops it here like any other job.
+    set_phase("transcribe", -1.0,
+              L("Finishing the live transcript…", "Canlı metin tamamlanıyor…"));
+    live_->join();
+
+    std::string why;
+    std::optional<pipeline::ProcessResult> kept =
+        live_->kept_transcript(audio->size(), &why);
+    if (!kept) {
+        // Not the whole take. Saved as though it were, the part it missed
+        // would be gone from the transcript with nothing to say so -- so the
+        // take goes the way any other does, and the status line says why.
+        if (settings.auto_transcribe) {
+            process_worker(audio);
+            return;
+        }
+        const std::string note =
+            why.empty() ? std::string()
+                        : L("The live transcript was not kept: ",
+                            "Canlı metin saklanmadı: ") + why + " ";
+        set_phase("ready", -1.0,
+                  note + L("Press Transcribe for a complete transcript.",
+                           "Tam bir metin için Metne Dönüştür'e basın."));
+        return;
+    }
+
+    bool has_text = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        result_ = std::move(*kept);
+        ++result_rev_;
+        has_text = result_->has_text();
+    }
+    discard_summary();
+    save_transcript();
+    // Said, because the full model is still a press away and there is a reason
+    // to press it: the preview runs a smaller model, and never separates
+    // speakers.
+    set_phase("done", 1.0,
+              settings.enable_diarization
+                  ? L("Done — the live transcript was kept, without speakers. "
+                      "Transcribe separates them with the full model.",
+                      "Tamam — canlı metin konuşmacısız saklandı. Metne Dönüştür "
+                      "konuşmacıları tam modelle ayırır.")
+                  : L("Done — the live transcript was kept. Transcribe runs the "
+                      "full model over the same audio.",
+                      "Tamam — canlı metin saklandı. Metne Dönüştür aynı ses "
+                      "üzerinde tam modeli çalıştırır."));
+
+    if (settings.auto_summarize && has_text) do_summarize();
 }
 
 bool AppState::any_save() const {

@@ -1520,6 +1520,7 @@ async function openSettings() {
   $('s_diar').checked = s.enable_diarization;
   $('s_diar').disabled = !s.diar_supported;
   $('s_updates').checked = s.check_updates;
+  $('s_keeplive').checked = s.keep_live_transcript !== false;
   $('s_version').textContent = s.version || '';
   APP_VERSION = s.version || APP_VERSION;
   APP_REPO = s.repo || APP_REPO;
@@ -1709,6 +1710,7 @@ $('saveSettings').onclick = async () => {
     custom_templates: customs,
     device: $('s_device').value, whisper_model: $('s_model').value,
     live_whisper_model: $('s_livemodel').value,
+    keep_live_transcript: $('s_keeplive').checked,
     language: $('s_language').value,
     whisper_model_path: $('s_whisperpath').value,
 

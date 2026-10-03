@@ -7,9 +7,12 @@
 // waiting for agreement would only leave the preview further behind. What has
 // not settled is shown as well, as the line still being spoken.
 //
-// It is a preview. Nothing here is saved, and the transcript made once the take
-// ends replaces it on screen; that one is made the careful way, with the
-// offline model, and this one is made to keep up.
+// It is a preview first. When it heard the whole take -- on from the first
+// sample to the last, never switched off between, never so far behind that it
+// skipped ahead -- it can also be kept as the take's transcript, which saves a
+// second pass over the audio: kept_transcript() says whether it can. Otherwise
+// the transcript made once the take ends replaces it on screen; that one is
+// made the careful way, with the offline model, and this one to keep up.
 //
 // The speech model is not in here: begin() is handed one. That keeps the file
 // free of whisper, so the windowing can be driven by a stand-in.
@@ -27,6 +30,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include <optional>
+
+#include "pipeline/processor.h"
 #include "stt/whisper_stt.h"
 
 namespace transcriptor::pipeline {
@@ -107,6 +113,26 @@ public:
     // answered from the start, and the reply's own "from" says which it got.
     nlohmann::json text_json(std::size_t from) const;
 
+    // Whether Live was on at any point during the current take -- a session
+    // began since the last clear(), whether or not any audio reached it. False
+    // for a take recorded with Live off: there is nothing to keep, and nothing
+    // to explain either. True for one whose model failed before a word was
+    // heard, which has something to explain.
+    bool heard_take() const;
+
+    // The preview as the transcript of a take `take_samples` long, when it
+    // heard every sample of it: on from the first, never off in between, on
+    // until the last, never skipped ahead, and finished rather than stopped or
+    // failed. Otherwise nothing, with `why` saying -- in the interface's
+    // language, to follow "The live transcript was not kept:" on the status
+    // line -- what it missed. Lines carry no speakers: the preview never
+    // separates them.
+    //
+    // Ask once the session has ended (join()); a session still running is
+    // reported as not finished.
+    std::optional<ProcessResult> kept_transcript(std::size_t take_samples,
+                                                 std::string* why) const;
+
 private:
     struct Line {
         double      start = 0.0;   // seconds into the take
@@ -162,6 +188,18 @@ private:
     bool               have_start_ = false;
     // How much of buf_ the last decode covered.
     std::size_t        decoded_ = 0;
+
+    // How much of the current take reached feed(), for kept_transcript().
+    // Where the first block started; where the last one ended; whether any
+    // block started anywhere but where the one before it ended, which is Live
+    // switched off and on again; and whether a session ended with audio it
+    // never got to settle.
+    bool        took_part_ = false;   // a session began during this take
+    bool        heard_     = false;
+    std::size_t heard_from_ = 0;
+    std::size_t heard_to_   = 0;
+    bool        heard_gap_  = false;
+    bool        cut_short_  = false;
 
     std::vector<Line>        lines_;
     std::string              partial_;

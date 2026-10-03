@@ -168,6 +168,17 @@ add_test(NAME recording_lifecycle
                  "${CMAKE_CURRENT_BINARY_DIR}/recording_scratch")
 set_tests_properties(recording_lifecycle PROPERTIES TIMEOUT 120)
 
+# -- keeping the live transcript (V55) -----------------------------------------
+# The real LiveTranscriber against a stand-in engine. It stamps its lines with
+# the pipeline's timestamps, so it links the application the way the lifecycle
+# test does -- the stand-in capture included, in the device's place.
+transcriptor_test(test_live
+    "${TESTS_SRC}/test_live.cpp"
+    "${TESTS_SRC}/fake_capture.cpp")
+target_link_libraries(test_live PRIVATE transcriptor_core)
+add_test(NAME live COMMAND test_live)
+set_tests_properties(live PROPERTIES TIMEOUT 60)
+
 # -- the HTTP API (V3, V7, V12, V18, V23, V30, V34, V38) -----------------------
 # What the page is told, read through the real Server over a loopback socket.
 # Links the application the way the lifecycle test does. POSIX only: the config

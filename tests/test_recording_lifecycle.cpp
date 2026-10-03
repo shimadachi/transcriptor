@@ -1,5 +1,5 @@
 // Regression tests for the recording lifecycle (R1, R4, G6, N6, R14,
-// V42-V48).
+// V42-V48, V55).
 //
 // This is where the expensive bugs live: everything here is about the moment a
 // take exists only in memory, and every bug in this area ended with a recording
@@ -18,6 +18,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -627,6 +628,65 @@ void test_a_rerun_protects_the_folder_it_writes_into() {
                     app::AppState::DeleteOutcome::kOk);
 }
 
+
+// V55: Stop keeps the live transcript as the take's transcript when the preview
+// heard all of it. Every way it can fall short is checked against the real
+// LiveTranscriber in test_live; what is checked here is the app around it --
+// that a preview which fell short leaves the take waiting the usual way, with
+// the reason on the status line, rather than saving what it had. The success
+// half needs a speech model to make any text, which no test here may load.
+//
+// POSIX only, for the same reason as the cases above: the live model is put
+// where the models directory points, and only main()'s POSIX half moves that.
+void test_a_live_transcript_that_failed_is_not_kept() {
+    const paths::fs::path model = paths::models_dir() / "ggml-tiny.bin";
+    paths::write_file(model, "not really a model");   // Live is on; it will not load
+
+    const auto take_with_live = [&](bool keep) {
+        const paths::fs::path out = fresh_output_dir();
+        fake_capture::reset();
+        fake_capture::set_total_samples(kTakeSamples);
+        Settings s = test_settings(out);
+        s.live_transcript      = true;
+        s.live_whisper_model   = "tiny";
+        s.keep_live_transcript = keep;
+        auto state = std::make_unique<app::AppState>(s);
+        state->start_recording(test_source(), {});
+        let_audio_arrive();
+        state->stop_and_process();
+        for (int i = 0; i < 250 && state->processing(); ++i) {
+            std::this_thread::sleep_for(20ms);
+        }
+        return state;
+    };
+
+    {
+        const auto state = take_with_live(/*keep=*/true);
+        const nlohmann::json st = state->state_json();
+        test::check("V55 a preview that failed leaves the take waiting",
+                    state->phase() == "ready" && !state->processing(),
+                    "phase=" + state->phase());
+        test::check("V55 and says why it was not kept",
+                    state->message().find("not kept") != std::string::npos &&
+                        state->message().find("could not be loaded") != std::string::npos,
+                    state->message());
+        test::check("V55 nothing it had is passed off as the transcript",
+                    !json_bool(st, "has_result"));
+        test::check("V55 the audio is still there for Transcribe", json_bool(st, "has_audio"));
+    }
+    {
+        // Switched off, the take waits the way it always did, and there is
+        // nothing about the preview to explain.
+        const auto state = take_with_live(/*keep=*/false);
+        test::check("V55 with keeping off, a take waits as before",
+                    state->phase() == "ready" && state->message() == "Ready to transcribe",
+                    state->message());
+    }
+
+    std::error_code ec;
+    paths::fs::remove(model, ec);
+}
+
 #endif  // _WIN32
 
 // V48: A directory is not a model. file_size() fails on one and hands back the
@@ -701,6 +761,7 @@ int main(int argc, char** argv) {
     test_a_take_nobody_keeps_leaves_no_file_behind();
     test_cancel_during_upload_decode();
     test_a_rerun_protects_the_folder_it_writes_into();
+    test_a_live_transcript_that_failed_is_not_kept();
 #endif
 
     return test::summary("recording lifecycle");
