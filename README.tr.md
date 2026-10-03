@@ -12,6 +12,13 @@ macOS için doğrudan çalıştırılabilir dosya üretir.
 
 **Ses hiçbir sunucuya gönderilmez; tüm işleme yereldir.**
 
+Uygulama yalnızca iki iş için internete çıkar. Model indirir: Ayarlar'dan
+seçtikleriniz ve konuşmacı ayrımı modelleri, bir kayıt onları ilk kez
+kullandığında. Bir de günde bir kez GitHub'a daha yeni bir sürüm olup
+olmadığını sorar ve varsa bir şerit gösterir. Bu denetim varsayılan olarak
+açıktır, sizinle ya da kayıtlarınızla ilgili hiçbir şey taşımaz ve Ayarlar →
+Genel → "Yeni sürümler için GitHub'a bak" ile kapatılır.
+
 ## Neler yapar
 
 - **Sistem sesini ya da mikrofonu kaydeder** — ikisini aynı anda karıştırabilir
@@ -187,14 +194,15 @@ Binary'yi çalıştırın; pencere açılır. Konsoldan:
 ## Modeller
 
 Hiçbir model binary'ye gömülü değildir. Konuşma modeli Ayarlar → Genel'den
-elle seçilip indirilir; varsayılan yoktur ve metne dönüştürme sırasında hiçbir
-konuşma modeli indirilmez. Diğerleri ilk ihtiyaç duyulduğunda iner. İndirme
-için `curl` kullanılır — Windows 10 1803+, macOS ve Linux'ta hazır gelir.
+elle seçilip indirilir; varsayılan yoktur ve metne dönüştürme hiçbir şey
+indirmez. Konuşma algılayıcı konuşma modeliyle birlikte iner, onsuz bir
+kurulumda da stüdyo indirmeyi önerir; konuşmacı ayrımı modelleri bir kayıt
+onları ilk kez kullandığında iner. İndirme için `curl` kullanılır — Windows 10 1803+, macOS ve Linux'ta hazır gelir.
 
 | Model | Boyut | Ne zaman |
 |---|---|---|
 | Whisper `tiny` … `large-v3` | 74 MB – 2.9 GB | Ayarlar'dan seçilip indirilir |
-| Silero VAD v5.1.2 (GGML) | ~0,9 MB | Konuşma modeliyle ya da ilk dönüştürmede |
+| Silero VAD v5.1.2 (GGML) | ~0,8 MB | Konuşma modeliyle ya da stüdyonun önerisiyle |
 | pyannote segmentation-3.0 (ONNX) | ~6 MB | İlk konuşmacı ayrımında |
 | 3D-Speaker CAM++ ses izi | ~27 MB | İlk konuşmacı ayrımında |
 

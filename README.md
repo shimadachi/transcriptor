@@ -12,6 +12,13 @@ directly runnable executable for Windows and macOS.
 
 **Audio is never sent to any server; all processing is local.**
 
+The app goes online for two things only. It downloads models: the ones you
+pick in Settings, and the speaker-separation models the first time a recording
+uses them. And once a day it asks GitHub whether a newer release exists, to
+show a banner when one does. That check is on by default, carries nothing
+about you or your recordings, and is switched off under Settings → General →
+"Check GitHub for new releases".
+
 ## What it does
 
 - **Records system audio or a microphone** — or both at once, mixed live with
@@ -184,15 +191,16 @@ Run the binary and a window opens. From a console:
 ## Models
 
 No model is bundled. The speech model is chosen and downloaded by hand in
-Settings → General — there is no default, and no speech model is ever fetched
-during a transcription. The rest arrive the first time they are needed.
-Downloads go through `curl`, which ships with Windows 10 1803+, macOS, and
+Settings → General — there is no default, and a transcription never fetches
+anything. The voice detector comes with the speech model, and an install that
+lacks it is offered it in the studio; the speaker-separation models arrive the
+first time a recording uses them. Downloads go through `curl`, which ships with Windows 10 1803+, macOS, and
 Linux:
 
 | Model | Size | When |
 |---|---|---|
 | Whisper `tiny` … `large-v3` | 74 MB – 2.9 GB | Chosen and downloaded in Settings |
-| Silero VAD v5.1.2 (GGML) | ~0.9 MB | With the speech model, or on first transcription |
+| Silero VAD v5.1.2 (GGML) | ~0.8 MB | With the speech model, or offered in the studio |
 | pyannote segmentation-3.0 (ONNX) | ~6 MB | First speaker separation |
 | 3D-Speaker CAM++ embedding | ~27 MB | First speaker separation |
 
