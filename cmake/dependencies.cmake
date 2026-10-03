@@ -1,7 +1,8 @@
 # All third-party code is fetched and compiled from source, so the result is a
 # self-contained native binary. Every pin below is a released tag; bump them in
-# one place. See README "Bumping dependency pins" before changing ggml-backed
-# ones (llama.cpp and whisper.cpp must agree on their shared ggml).
+# one place. See "Upgrading dependency versions" on the wiki's Development page
+# before changing ggml-backed ones (llama.cpp and whisper.cpp must agree on
+# their shared ggml).
 
 include(FetchContent)
 set(FETCHCONTENT_QUIET OFF)
@@ -64,7 +65,7 @@ set(GGML_OPENMP OFF CACHE BOOL "" FORCE)   # avoids a libomp runtime dependency
 if(TRANSCRIPTOR_CUDA)
     find_package(CUDAToolkit QUIET)
     # The package links cudart and cuBLAS by their CUDA 13 names (see
-    # cmake/package.cmake), and the READMEs tell users to install 13. A build
+    # cmake/package.cmake), and the wiki tells users to install 13. A build
     # made with 12.x would ask for libraries nobody was told to install.
     if(CUDAToolkit_FOUND AND CUDAToolkit_VERSION VERSION_LESS "13")
         message(FATAL_ERROR

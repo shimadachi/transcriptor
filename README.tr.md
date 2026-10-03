@@ -1,10 +1,30 @@
-# Transcriptor
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-wordmark.svg">
+    <img src="assets/logo-wordmark-light.svg" alt="Transcriptor" width="380">
+  </picture>
+</h1>
 
-[English](README.md) · **Türkçe**
+<p align="center">
+  Toplantı, ders ve görüşmelerin metni ve özeti,<br>
+  tek bir binary'den, sesiniz bilgisayardan hiç çıkmadan.
+</p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-e4491f.svg)](LICENSE)
-![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)
-![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)
+<p align="center">
+  <a href="README.md">English</a> · <b>Türkçe</b>
+</p>
+
+<p align="center">
+  <a href="https://github.com/shimadachi/transcriptor/releases"><img src="https://img.shields.io/github/v/release/shimadachi/transcriptor?color=e4491f" alt="Son sürüm"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-e4491f.svg" alt="Lisans: MIT"></a>
+  <img src="https://img.shields.io/badge/C%2B%2B-17-blue.svg" alt="C++17">
+  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg" alt="Platform: Linux, macOS, Windows">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/library-tr.webp" width="900"
+       alt="Arşiv sekmesi: açık bir toplantı kaydı; ses oynatıcısı, konuşmacılara göre etiketlenmiş metin ve yanında üretilen toplantı tutanağı">
+</p>
 
 Toplantı, ders ve görüşme kayıtlarını metne döken ve özetleyen **tek bir yerel
 binary**. Kurulum, sanal ortam ya da harici bir servis gerekmez; Windows ve
@@ -42,6 +62,11 @@ Genel → "Yeni sürümler için GitHub'a bak" ile kapatılır.
 - **İki dilli arayüz** — English / Türkçe, seçim `config.json`'da saklanır.
   Hem dil hem aydınlık/karanlık tema Ayarlar → Genel altındadır.
 
+<p align="center">
+  <img src="docs/screenshots/studio-rec-tr.webp" width="900"
+       alt="Kayıt sürerken Stüdyo sekmesi: kayıt düğmesi durdurma düğmesine dönmüş, seviye göstergesi hareket ediyor ve kaydın klasörü altta görünüyor">
+</p>
+
 ## Bileşenler
 
 | Katman | Kullanılan |
@@ -54,340 +79,29 @@ Genel → "Yeni sürümler için GitHub'a bak" ile kapatılır.
 | HTTP | **cpp-httplib** |
 | Dağıtım | **tek binary** (web arayüzü içine gömülü) |
 
-## Gereksinimler
+## Başlarken
 
-- CMake ≥ 3.21, Ninja (ya da Visual Studio 2022), C++17 derleyici
-- Git (bağımlılıklar `FetchContent` ile kaynaktan derlenir)
-- İlk derlemede ~2 GB indirme + 10–25 dk derleme süresi (llama.cpp + whisper.cpp
-  + sherpa-onnx). Sonraki derlemeler saniyeler sürer.
-
-Platforma özel:
-
-- **Windows:** Visual Studio 2022 Build Tools. Pencere için **WebView2 Runtime**
-  (Windows 11'de kurulu gelir; Windows 10'da Microsoft'un dağıttığı Evergreen
-  runtime gerekir).
-- **macOS:** Xcode Command Line Tools. Ek çalışma zamanı gerekmez.
-- **Linux:** `libgtk-3-dev` + `libwebkit2gtk-4.1-dev` (native pencere için),
-  PipeWire ya da PulseAudio.
-
-## Derleme
+Linux, macOS ve Windows paketleri, CPU, CUDA, Vulkan ve Metal türleriyle her
+[sürüme](https://github.com/shimadachi/transcriptor/releases/latest) eklenir.
+CUDA paketleri CUDA Toolkit'in kurulu olmasını ister; hangi paketi
+seçeceğinizi [Derleme](https://github.com/shimadachi/transcriptor/wiki/Derleme)
+sayfası anlatır. Kaynak koddan derlemek için:
 
 ```bash
-# Linux
-cmake --preset linux        && cmake --build --preset linux
-cmake --preset linux-cuda   && cmake --build --preset linux-cuda     # NVIDIA
-cmake --preset linux-vulkan && cmake --build --preset linux-vulkan   # AMD/Intel
-
-# macOS (Apple Silicon — Metal açık)
-cmake --preset mac-arm64    && cmake --build --preset mac-arm64
-# macOS (Intel)
-cmake --preset mac-x64      && cmake --build --preset mac-x64
-
-# Windows
-cmake --preset win-msvc     && cmake --build --preset win-msvc
-cmake --preset win-cuda     && cmake --build --preset win-cuda       # NVIDIA
-cmake --preset win-vulkan   && cmake --build --preset win-vulkan     # AMD/Intel
+cmake --preset linux && cmake --build --preset linux
 ```
 
-Her satırdaki iki komut da gerekli: ilki (`cmake --preset …`) yalnızca
-yapılandırır, derlemeyi ikincisi (`cmake --build --preset …`) yapar. Her preset
-kendi `build/<preset>/` klasörüne yazar; başka bir klasördeki eski binary
-güncellenmez.
+Diğer preset'ler ve her birinin gereksinimleri aynı sayfada.
 
-Web arayüzü (`web/`) binary'nin içine gömülür — `index.html`/`app.js`/`style.css`
-değişince yeniden derlemeden arayüzde görünmez.
+## Belgeler
 
-Çıktı:
+Belgelerin tamamı [wiki'de](https://github.com/shimadachi/transcriptor/wiki):
 
-- Linux: `build/<preset>/transcriptor`
-- macOS: `build/<preset>/transcriptor.app`
-- Windows: `build/<preset>/transcriptor.exe`
-
-Dağıtılabilir paket için: `cd build/<preset> && cpack`
-(Windows → `.zip`, macOS → `.dmg`, Linux → `.tar.gz`).
-
-### Hazır yapılar (CI)
-
-Her preset kendi iş akışında, kendi işletim sistemi üzerinde derlenir. Rozete
-tıklayınca o hedefin çalışmalarına gidersiniz; paketler her çalışmanın
-**Artifacts** bölümünden inebilir.
-
-| Preset | Runner | Durum |
-|---|---|---|
-| `linux` | ubuntu-latest | [![linux](https://github.com/shimadachi/transcriptor/actions/workflows/linux.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/linux.yml) |
-| `linux-cuda` | ubuntu-latest | [![linux-cuda](https://github.com/shimadachi/transcriptor/actions/workflows/linux-cuda.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/linux-cuda.yml) |
-| `linux-vulkan` | ubuntu-latest | [![linux-vulkan](https://github.com/shimadachi/transcriptor/actions/workflows/linux-vulkan.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/linux-vulkan.yml) |
-| `mac-arm64` | macos-14 | [![mac-arm64](https://github.com/shimadachi/transcriptor/actions/workflows/mac-arm64.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/mac-arm64.yml) |
-| `mac-x64` | macos-15-intel | [![mac-x64](https://github.com/shimadachi/transcriptor/actions/workflows/mac-x64.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/mac-x64.yml) |
-| `win-msvc` | windows-2022 | [![win-msvc](https://github.com/shimadachi/transcriptor/actions/workflows/win-msvc.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/win-msvc.yml) |
-| `win-cuda` | windows-2022 | [![win-cuda](https://github.com/shimadachi/transcriptor/actions/workflows/win-cuda.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/win-cuda.yml) |
-| `win-vulkan` | windows-2022 | [![win-vulkan](https://github.com/shimadachi/transcriptor/actions/workflows/win-vulkan.yml/badge.svg)](https://github.com/shimadachi/transcriptor/actions/workflows/win-vulkan.yml) |
-
-CI yalnızca derler, çalıştırmaz; GPU yapıları için ilgili CUDA ya da Vulkan
-sürücüsüne sahip bir makine gerekir.
-
-CUDA presetini **derlemek** için `nvcc` PATH'te olmalı (ya da
-`-DCMAKE_CUDA_COMPILER=/nvcc/yolu`).
-
-CUDA yapısını **çalıştırmak** için [CUDA
-Toolkit](https://developer.nvidia.com/cuda-downloads) 13.x kurulu olmalı,
-NVIDIA sürücüsü 580 veya üstü olmalı ve kart Turing ya da daha yeni olmalıdır
-(RTX 20xx, GTX 16xx ve üstü). Paket `cudart` / `cublas` / `cublasLt`
-kütüphanelerini taşımaz: bunlar sürücüyle değil toolkit'le gelir ve tek başına
-cuBLAS neredeyse bir gigabayt tutuyor, bu da CUDA indirmesini diğerlerinin
-yaklaşık on katı yapıyordu. Toolkit yoksa uygulama hiç açılmaz ve hangi
-kütüphaneyi aradığını söyler: `libcudart.so.13: cannot open shared object
-file` ya da `cudart64_13.dll was not found`. 12.x toolkit de aynı hatayı verir
-— kütüphaneleri farklı bir ana sürüm taşır ve 12.x artık desteklenmiyor.
-
-İndireceğiniz paketi seçmeden önce: Vulkan yapısı NVIDIA kartlarında da
-çalışır, çünkü Vulkan uygulamasını sürücünün kendisi getirir ve o sürücünün
-ötesinde hiçbir kurulum istemez. CUDA daha hızlıdır; Vulkan sizden daha azını
-ister.
-
-#### CUDA yapıları hangi NVIDIA GPU'larını kapsar
-
-`cmake/dependencies.cmake`, `CMAKE_CUDA_ARCHITECTURES` değerini ggml'e
-bırakmak yerine sabitler. nvcc her çekirdeği her mimari için ayrı ayrı
-derlediğinden, bu listenin uzunluğu neredeyse tüm derleme süresine eşittir:
-126 CUDA dosyası boyunca, büyük bir çekirdek için mimari başına yaklaşık 31
-saniye.
-
-| Mimari | Kartlar | Nasıl gönderiliyor |
-|---|---|---|
-| Turing | RTX 20xx, GTX 16xx | yerel SASS + PTX |
-| Ampere | RTX 30xx | yerel SASS |
-| Ada | RTX 40xx | yerel SASS |
-| Blackwell | RTX 50xx | yerel SASS |
-| diğer her şey | A100, H100, gelecekteki GPU'lar | PTX, ilk çalıştırmada JIT |
-
-Tablodaki her tüketici kartı önceden derlenmiş kod çalıştırır; ilk açılışta
-JIT beklemesi olmaz. Turing satırı ayrıca PTX taşır ve sürücü bunu listede
-açıkça yer almayan daha yeni GPU'lar için derleyebilir — veri merkezi
-kartlarını ve gelecekteki donanımı çalışır tutan şey budur.
-
-CI, CUDA **13.3.1** ile derler ve tabanı CUDA 13 belirler: Maxwell, Pascal ve
-Volta'yı tamamen kaldırdı, bu yüzden GTX 9xx ve 10xx, Titan V ve V100 için CUDA
-yapısı yoktur — bu kartlarda Vulkan yapısı çalışır. Yerel kodu olan kartlar
-580+ sürücü ister; PTX'i JIT ile derleyenler ise en az 13.3 toolkit'i kadar
-yeni bir sürücü ister.
-
-`TRANSCRIPTOR_NATIVE=ON` ile derlerseniz liste yerini `native`'e bırakır: tek
-mimari, derlemeyi yapan makineninki. Derlemesi çok daha hızlıdır, başka yerde
-çalışmaz.
-
-### Derleme seçenekleri
-
-| Seçenek | Varsayılan | Ne yapar |
-|---|---|---|
-| `TRANSCRIPTOR_DIARIZE` | ON | Konuşmacı ayrımı (sherpa-onnx + ONNX Runtime). OFF ederseniz derleme hızlanır, metin etiketsiz üretilir. |
-| `TRANSCRIPTOR_WEBVIEW` | ON | Native pencere. OFF → tarayıcıda açılır. |
-| `TRANSCRIPTOR_CUDA` / `TRANSCRIPTOR_VULKAN` / `TRANSCRIPTOR_METAL` | OFF / OFF / macOS'ta ON | GPU hızlandırma. Hem STT hem özetleyici aynı ayarı kullanır. |
-| `TRANSCRIPTOR_NATIVE` | OFF | Yalnızca x86. ON, CPU backend'ini `-march=native` ile derler; daha hızlıdır ama *sadece* onu derleyen makineye benzer bir CPU'da çalışır. Derlemenin taşınabilir kalması için varsayılan kapalıdır; başkasına vereceğiniz bir binary için asla açmayın. |
-
-## Çalıştırma
-
-Binary'yi çalıştırın; pencere açılır. Konsoldan:
-
-```bash
-./transcriptor              # pencereyi aç
-./transcriptor --check      # başsız teşhis (cihaz, ses kaynakları, modeller)
-./transcriptor --no-window  # sadece sunucu; varsayılan tarayıcıda aç
-./transcriptor --port 5005
-```
-
-Windows ve Linux'ta uygulama sistem tepsisinde de durur. Pencereyi simge
-durumuna küçültmek onu tepsiye gizler; geri getirmek için simgeye tıklayın, ya
-da pencereyi açmadan kaydı başlatmak, durdurmak veya duraklatmak için sağ
-tıklayın. Pencereyi kapatmak yine uygulamadan çıkar. Ayarlar → Genel → Sistem
-tepsisi bunun ne kadarını istediğinizi seçer: tepsiye küçült (varsayılan),
-simge tepside kalsın ama görev çubuğuna küçült, ya da tepside hiç simge olmasın. Linux'ta simge için
-StatusNotifierItem gösteren bir panel gerekir — KDE Plasma gösterir, GNOME'da
-AppIndicator eklentisi gerekir — ve uygulamaya küçültüldüğünün hiç
-bildirilmediği Wayland'da gizlemeyi simgenin menüsündeki "Tepsiye gizle" yapar.
-Simgeyi gösterecek bir panel yoksa küçültme her zamanki gibi çalışır.
-
-## Modeller
-
-Hiçbir model binary'ye gömülü değildir. Konuşma modeli Ayarlar → Genel'den
-elle seçilip indirilir; varsayılan yoktur ve metne dönüştürme hiçbir şey
-indirmez. Konuşma algılayıcı konuşma modeliyle birlikte iner, onsuz bir
-kurulumda da stüdyo indirmeyi önerir; konuşmacı ayrımı modelleri bir kayıt
-onları ilk kez kullandığında iner. İndirme için `curl` kullanılır — Windows 10 1803+, macOS ve Linux'ta hazır gelir.
-
-| Model | Boyut | Ne zaman |
-|---|---|---|
-| Whisper `tiny` … `large-v3` | 74 MB – 2.9 GB | Ayarlar'dan seçilip indirilir |
-| Silero VAD v5.1.2 (GGML) | ~0,8 MB | Konuşma modeliyle ya da stüdyonun önerisiyle |
-| pyannote segmentation-3.0 (ONNX) | ~6 MB | İlk konuşmacı ayrımında |
-| 3D-Speaker CAM++ ses izi | ~27 MB | İlk konuşmacı ayrımında |
-
-Konuşma modelleri, küçükten iyiye: `tiny` ve `base` sesin geldiğini denemek
-için; `small` gerçek bir konuşmayı verebileceğiniz en hafif model; `medium`
-aksanlarda ve üst üste konuşmalarda belirgin biçimde daha iyi;
-`large-v3-turbo` önerilen seçim — `large-v3` doğruluğuna yakın, çok daha kısa
-sürede ve yarı boyutta; `large-v3` en doğrusu ve en yavaşı.
-
-Konuşma algılayıcı bir tercih değil, o yüzden Ayarlar'da yok. Whisper
-sessizlikte halüsinasyon görür: eğitim verisinin büyük bölümü toplanmış
-altyazılardır ve bunların pek çoğu sessiz bir kapanış karesine bindirilmiş
-çevirmen künyesiyle biter; sessiz ses de modele o künyeyi yazdırır. Türkçe
-kayıtlarda "Altyazı M.K." ya da bir kanalın sesli betimleme anonsu çıkar. Bu,
-kod çözücünün kendi eşiklerinin yakalayabileceği bir güven sorunu değildir:
-bu cümleler ezberlenmiştir ve gerçek konuşma kadar yüksek güvenle çözülür, üstelik
-bir halüsinasyon 30 saniyelik pencerenin tamamını doldurup içindeki konuşmayı
-da götürebilir. Algılayıcı önce çalışınca kod çözücünün gördüğü tek şey konuşma
-olur. Dosya yoksa dönüştürme eskisi gibi, algılayıcısız sürer.
-
-Konum: `%APPDATA%\Transcriptor\models` (Windows),
-`~/Library/Application Support/Transcriptor/models` (macOS),
-`~/.config/Transcriptor/models` (Linux). `TRANSCRIPTOR_MODELS_DIR` ile değiştirilir.
-
-Önceden indirmek için: `./scripts/fetch_models.sh` ya da
-`.\scripts\fetch_models.ps1`.
-
-**pyannote için HuggingFace token gerekmez** — kullanılan ONNX çıktısı açık
-erişimlidir.
-
-### Özetleyici modeli (GGUF)
-
-Gömülü llama.cpp bir GGUF dosyası bekler. En kolayı Ayarlar → Özetleyici →
-**Hazır model indir**: listeden bir model seçip **İndir** deyin, dosya modeller
-klasörüne inip otomatik olarak seçilir. Hiçbiri binary'ye gömülü değildir,
-indirme isteğe bağlıdır.
-
-| Model | Boyut | Not |
-| --- | --- | --- |
-| Qwen3.5 4B Instruct `Q4_K_M` | ~2.6 GB | Önerilen — kalite/boyut dengesi |
-| Qwen3.5 2B Instruct `Q4_K_M` | ~1.2 GB | 4 GB VRAM ya da salt CPU |
-| Qwen3.5 0.8B Instruct `Q4_K_M` | ~0.5 GB | En küçük, en kaba özet |
-| Gemma 4 E2B Instruct `Q4_K_M` | ~2.9 GB | Google Gemma 4, küçük sürüm |
-| Gemma 4 E4B Instruct `Q4_K_M` | ~4.6 GB | 8 GB VRAM ister |
-| Qwen2.5 7B Instruct `Q4_K_M` | ~4.4 GB | Eski varsayılan |
-
-Elle indirmeyi tercih ederseniz modeller klasörüne bir `.gguf` koyup Ayarlar →
-Özetleyici → **Tara** demeniz de yeterli.
-
-LM Studio'yu tercih ederseniz Ayarlar → Özetleyici → **Uzak sunucu** seçip
-`http://127.0.0.1:1234/v1` yazın.
-
-## Ses kaydı
-
-- **Windows:** WASAPI loopback — herhangi bir çıkış aygıtının sesi doğrudan
-  kaydedilir. Kaynak listesinde tüm hoparlörler görünür.
-- **Linux:** PipeWire/PulseAudio monitor kaynakları loopback olarak listelenir.
-- **macOS:** İşletim sistemi sistem sesini doğrudan kaydettirmez. Sanal bir
-  çıkış aygıtı gerekir:
-  ```bash
-  brew install blackhole-2ch
-  ```
-  Ardından Ses Ayarları'ndan çoklu çıkış aygıtı kurup kaynak olarak BlackHole'ü
-  seçin. Uygulama bunu algılar ve loopback olarak işaretler; kurulu değilse
-  arayüzde açıklayıcı bir uyarı çıkar. (Mikrofon kaydı her platformda çalışır.)
-
-Kaynak satırından ikinci bir **mikrofon** seçerseniz sistem sesine gerçek
-zamanlı karıştırılır; kazançlar ve tepe sınırlayıcı ayarlardan yönetilir.
-
-## VRAM yönetimi
-
-Modeller sırayla yüklenir: modelleri uygulama tuttuğu için STT
-başlamadan önce LLM ağırlıkları, özet başlamadan önce whisper ağırlıkları
-doğrudan bırakılır.
-Ayarlar → **VRAM'i sıraya koy** ile kapatılabilir.
-
-Uzun kayıtlar bağlam penceresine sığmazsa özetleyici otomatik olarak parça
-parça not çıkarıp sonra bunları birleştirir.
-
-## Yapılandırma
-
-`config.json`, modellerle aynı klasörün üstünde tutulur. Ortam değişkenleri:
-`TRANSCRIPTOR_HOST`, `TRANSCRIPTOR_PORT`, `TRANSCRIPTOR_OUTPUT_DIR`, `TRANSCRIPTOR_MODELS_DIR`, `TRANSCRIPTOR_LLM_BASE_URL`,
-`TRANSCRIPTOR_LLM_MODEL`, `TRANSCRIPTOR_LLM_MODEL_PATH`, `TRANSCRIPTOR_WHISPER_MODEL`, `TRANSCRIPTOR_DEVICE`,
-`TRANSCRIPTOR_NO_DIARIZE`, `TRANSCRIPTOR_LLAMA_VERBOSE`.
-
-## Bağımlılık sürümlerini yükseltmek
-
-Tüm sürümler `cmake/dependencies.cmake` başındaki `TRANSCRIPTOR_*_TAG` değişkenlerinde.
-Dikkat edilmesi gereken tek nokta: **llama.cpp ve whisper.cpp aynı ggml'i
-paylaşır.** llama.cpp önce çekilir ve `ggml` hedeflerini tanımlar; whisper.cpp
-mevcut `ggml` hedefini yeniden kullanır. İkisini birbirinden çok uzak tarihlere
-sabitlerseniz ggml API'si uyuşmaz. İkisini birlikte, yakın tarihli sürümlere
-yükseltin.
-
-llama.cpp'nin C API'si de sık değişir; `src/llm/llama_backend.cpp` mevcut
-`llama_model_load_from_file` / `llama_init_from_model` / `llama_sampler_chain`
-API'sini kullanır. Çok eski bir tag'e dönerseniz burası uyarlanmalıdır.
-
-**sherpa-onnx** gömülmek üzere tasarlanmamış: CMakeLists'i `CMAKE_SOURCE_DIR`'i
-kendi kökü sanıyor. `cmake/dependencies.cmake` bunu üç yamayla çözer —
-(1) `SOURCE_SUBDIR` hilesiyle önce indirip sonra elle `add_subdirectory`,
-(2) kendi `cmake/` klasörünü `CMAKE_MODULE_PATH`'e ekleme,
-(3) kaynak kökünü `include_directories`'e ekleme. Ayrıca alt bağımlılıkları
-CMake 4'ün reddettiği eski `cmake_minimum_required` sürümlerini bildirdiği için
-o alt ağaca `CMAKE_POLICY_VERSION_MINIMUM=3.5` verilir. Sürüm yükseltirken
-bunların hâlâ gerekli (ya da yeterli) olup olmadığını kontrol edin.
-
-Konuşmacı ayrımı sherpa-onnx'in **C** API'siyle yazıldı (`c-api.h`); C++
-sarmalayıcısı (`cxx-api.h`) diarization'ı kapsamıyor.
-
-## Proje yapısı
-
-```
-src/
-  main.cpp              Giriş noktası, --check, pencere/tarayıcı seçimi
-  config.*              JSON ayarlar (Settings)
-  device.*              GPU tespiti (ggml backend kayıt defteri üzerinden)
-  audio/                miniaudio: kaynak listesi, yakalama, kayıt/mixleme, dosya çözme
-  stt/whisper_stt.*     whisper.cpp sarmalayıcı, kelime zaman damgalı
-  diarize/diarizer.*    sherpa-onnx konuşmacı ayrımı
-  llm/                  şablonlar + gömülü llama.cpp + OpenAI uyumlu istemci
-  pipeline/processor.*  transcribe → diarize → konuşmacı eşleme
-  app/                  AppState, /api/* sunucusu, native pencere, tepsi, gömülü varlıklar
-  util/                 yollar, dışa aktarma, arşiv, dil, indirme, model kayıt defteri
-web/                    Arayüz (derleme sırasında binary'ye gömülür)
-  index.html            İşaretleme; çevrilecek metinler data-i18n ile etiketli
-  app.js                Tüm arayüz mantığı
-  i18n.js               en/tr sözlüğü ve dil uygulayıcı
-  style.css             Tema (aydınlık/karanlık), düzen
-```
-
-## Not şablonları
-
-Ayarlar → **Not şablonları** altından hazır şablonların sistem promptunu
-düzenleyebilir, her birine kalıcı bir bağlam ekleyebilir (örn. "Şirketimiz
-Acme; kararlara odaklan") ya da **+ Yeni şablon** ile kendi şablonunuzu
-yazabilirsiniz. Kendi şablonlarınız hazır olanların yanında menüde görünür ve
-`config.json` içinde `custom_templates` altında saklanır.
-
-## Arşiv
-
-**Arşiv** sekmesi, çıktı klasöründeki tüm oturum klasörlerini en yeniden eskiye
-listeler; seçtiğinizi gösterir: metin (konuşmacı ve zaman damgalarıyla, doğrudan
-`transcript.json`'dan), özet ve saklanmış sesin oynatıcısı. Hiçbir şey
-indekslenmez — veritabanı diskteki klasörün kendisidir; dışarıdan kopyaladığınız
-bir oturum listede belirir, sildiğiniz kaybolur.
-
-Ses çalarken metin onu takip eder: konuşulan satır vurgulanır ve ekranda
-tutulur; herhangi bir zaman damgasına tıklamak oynatıcıyı oraya götürür.
-Oynatma çubuğundaki son düğme bu takibi kapatır, böylece metni kendi hızınızda
-okuyabilirsiniz; tercihiniz hatırlanır.
-
-## Ayarlar
-
-Ayarlar genelden özele sıralanır. **Genel** (arayüz dili, görünüm, konuşma ve
-özet dili, Whisper modeli, konuşmacı ayrımı), **Çıktı & Otomasyon**,
-**Özetleyici** ve **Not şablonları** üstte durur; yalnızca ince ayar
-gerektiğinde önemli olan her şey — cihaz seçimi, model dosya yolları,
-kazançlar, ayrım eşiği, bağlam boyutu, GPU katmanları — en alttaki
-**Gelişmiş** başlığının altındadır.
-
-## Arayüz dili
-
-Ayarlar → **Genel** → **Arayüz dili**. Seçim `config.json`'daki `ui_language`
-alanına yazılır, ilk boyamada titremesin diye `localStorage`'da da tutulur;
-aydınlık/karanlık tema (`ui_theme`, `system` değerini de alır) aynı şekilde
-çalışır. Varsayılan İngilizce'dir. Özet dili (`summary_language`) ayrıdır:
-arayüz İngilizce, özetler Türkçe olabilir.
+- **[Derleme](https://github.com/shimadachi/transcriptor/wiki/Derleme)** — gereksinimler, preset'ler, hazır paketler, CUDA ve Vulkan notları, derleme seçenekleri
+- **[Çalıştırma](https://github.com/shimadachi/transcriptor/wiki/%C3%87al%C4%B1%C5%9Ft%C4%B1rma)** — komut satırı seçenekleri, sistem tepsisi, her platformda sistem sesini kaydetmek
+- **[Modeller](https://github.com/shimadachi/transcriptor/wiki/Modeller)** — konuşma, ses algılama, konuşmacı ve özetleyici modelleri, nerede durdukları, VRAM
+- **[Kullanım](https://github.com/shimadachi/transcriptor/wiki/Kullan%C4%B1m)** — not şablonları, Arşiv, Ayarlar, arayüz dili, yapılandırma
+- **[Geliştirme](https://github.com/shimadachi/transcriptor/wiki/Geli%C5%9Ftirme)** — bağımlılık sürümlerini yükseltmek, proje yapısı
 
 ## Lisans
 
