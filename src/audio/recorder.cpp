@@ -67,10 +67,13 @@ Recorder::~Recorder() {
     if (drain_.joinable()) drain_.join();
 }
 
+void Recorder::spool_to(const paths::fs::path& path) { spool_path_ = path; }
+
 void Recorder::start() {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         samples_.clear();
+        total_ = 0;
     }
     carry_[0].clear();
     carry_[1].clear();
@@ -89,6 +92,17 @@ void Recorder::start() {
             mic_capture_.reset();
         }
     }
+    // The spool is opened once the devices are, so a take that never starts
+    // leaves no empty file behind. A spool that cannot be opened is not fatal:
+    // spool_path_ is cleared, append() falls back to memory, and the reason
+    // stays on the WavSpool for spool_error() to report. Losing the file is
+    // bad; losing the recording because of it would be worse.
+    if (!spool_path_.empty()) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        spool_ = std::make_unique<WavSpool>();
+        if (!spool_->open(spool_path_, samplerate_)) spool_path_.clear();
+    }
+
     // From here, not from started_at_: opening a device can take a while, and
     // that is not a source going quiet.
     last_got_[0] = last_got_[1] = Clock::now();
@@ -220,8 +234,18 @@ bool Recorder::take_mixed(std::vector<float>* out, bool flush) {
 
 void Recorder::append(const std::vector<float>& block) {
     std::lock_guard<std::mutex> lock(mutex_);
-    const std::size_t offset = samples_.size();
-    samples_.insert(samples_.end(), block.begin(), block.end());
+    // total_, not samples_.size(): spooled, the buffer stays empty, and the
+    // tap's offset still has to say where in the take this block came in.
+    const std::size_t offset = static_cast<std::size_t>(total_);
+    if (spool_ && spool_->is_open()) {
+        // The error latches inside the spool and is reported once at the end.
+        // Carrying on is deliberate: the live preview and the meter are still
+        // worth having, and the user has to be told either way.
+        spool_->write(block);
+    } else {
+        samples_.insert(samples_.end(), block.begin(), block.end());
+    }
+    total_ += block.size();
     // Under the buffer's own lock, so set_tap() lands between two blocks: a
     // listener never sees half of one, or an offset the buffer has moved past.
     if (tap_ && !block.empty()) tap_(block, offset);
@@ -269,7 +293,34 @@ std::vector<float> Recorder::stop() {
     }
 
     std::lock_guard<std::mutex> lock(mutex_);
+    if (spool_ && spool_->is_open()) {
+        // finish() patches the length fields; its failure latches for
+        // spool_error(). Nothing is returned -- the take is the file.
+        spool_->finish();
+        return {};
+    }
     return std::move(samples_);
+}
+
+void Recorder::discard() {
+    stop_flag_.store(true);
+    if (drain_.joinable()) drain_.join();
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (spool_) spool_->discard();
+    spool_path_.clear();
+    samples_.clear();
+    samples_.shrink_to_fit();
+    total_ = 0;
+}
+
+std::string Recorder::spool_error() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return spool_ ? spool_->error() : std::string();
+}
+
+std::uint64_t Recorder::captured() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return total_;
 }
 
 double Recorder::elapsed() const {

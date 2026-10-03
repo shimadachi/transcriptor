@@ -193,9 +193,13 @@ private:
     // Returns false when the take was rejected outright -- audio too short to
     // process -- so an upload can answer with the error it just set instead of
     // reporting the rejection as a success.
+    // `already_saved` says the audio is already sitting where save_audio
+    // would have put it, because the take was spooled straight into the
+    // session folder. Re-encoding it from memory would cost a second full
+    // copy of a recording that is already on disk.
     bool begin(std::vector<float> audio, const paths::fs::path& original_file,
                const std::string& original_name, const std::string& device_error,
-               bool claimed);
+               bool claimed, bool already_saved = false);
 
     // Builds the live session for the settings in force, or an engine with no
     // decode when the live model is not on disk -- the caution in the studio
@@ -241,6 +245,22 @@ private:
 
     bool            any_save() const;
     paths::fs::path ensure_session_dir();
+
+    // Where a take about to start should be written as it is captured. The
+    // session folder's audio.wav when the audio is being kept, and a scratch
+    // file under the config directory otherwise -- a take nobody keeps needs
+    // the memory just as much as one they do. Empty when neither can be made,
+    // which leaves the recorder holding the take in memory the old way.
+    paths::fs::path spool_destination();
+
+    // The session folder's audio.wav, or empty when there is no folder yet.
+    // What tells a take spooled into place from one spooled to scratch.
+    paths::fs::path session_audio_path() const;
+
+    // Remove scratch spools an earlier run left behind -- a crash, a power
+    // cut. Only ones old enough that no running instance can still be writing
+    // to them, so a second window open right now is never robbed of its take.
+    static void sweep_spool_scratch();
     void            delete_session_dir();
     void            save_transcript();
 

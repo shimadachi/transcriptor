@@ -1,4 +1,5 @@
-// Regression tests for the recording lifecycle (R1, R4, G6, N6, V42-V48).
+// Regression tests for the recording lifecycle (R1, R4, G6, N6, R14,
+// V42-V48).
 //
 // This is where the expensive bugs live: everything here is about the moment a
 // take exists only in memory, and every bug in this area ended with a recording
@@ -293,6 +294,93 @@ void test_normal_take_is_kept_and_saved() {
     test::check("the device is closed once the take ends",
                 !fake_capture::any_running() && fake_capture::stops() == 1);
 }
+
+// R14: a take used to be accumulated into one std::vector<float> that grew for
+// as long as the recording ran -- 230 MB an hour at 16 kHz, and reallocated by
+// copying, so a long recording asked the host for several gigabytes at once
+// and took the whole machine into its pagefile. A user lost a five-hour
+// meeting that way. It is streamed to the session's audio.wav as it is
+// captured now, which is why it is already on disk long before Stop.
+void test_a_take_reaches_disk_while_it_is_still_recording() {
+    const paths::fs::path out = fresh_output_dir();
+    fake_capture::reset();
+    fake_capture::set_total_samples(kTakeSamples);
+
+    app::AppState state(test_settings(out));
+    state.start_recording(test_source(), {});
+    let_audio_arrive();
+
+    const paths::fs::path file = saved_audio_in(out);
+    test::check("R14 a take is on disk while it is still being recorded",
+                !file.empty(), paths::to_utf8(file));
+    test::check("R14 and already holds what has been captured so far",
+                size_of(file) > 44,
+                std::to_string(size_of(file)) + " bytes before Stop");
+
+    state.stop_and_process();
+    test::check("R14 Stop leaves the whole take where it was being written",
+                size_of(saved_audio_in(out)) == 44 + kTakeSamples * 2,
+                std::to_string(size_of(saved_audio_in(out))) + " bytes");
+    test::check("R14 and nothing is reported as unsaved",
+                state.state_json()["save_error"].is_null());
+}
+
+// Cancel deletes the session folder, and the take being written into it has to
+// go the same way -- it is the one file now that exists before Stop does.
+void test_cancel_removes_the_take_being_written() {
+    const paths::fs::path out = fresh_output_dir();
+    fake_capture::reset();
+    fake_capture::set_total_samples(kTakeSamples);
+
+    app::AppState state(test_settings(out));
+    state.start_recording(test_source(), {});
+    let_audio_arrive();
+    test::check("R14 the cancelled take was being written",
+                !saved_audio_in(out).empty());
+
+    state.cancel();
+    test::check("R14 Cancel takes the take being written with it",
+                saved_audio_in(out).empty(),
+                paths::to_utf8(saved_audio_in(out)));
+}
+
+// save_audio off still has to spool: the setting is about what the user is
+// left with, not about how a five-hour take is held while it is being made.
+// The audio goes to a scratch file instead -- which has to be gone again the
+// moment the take has been read back out of it.
+//
+// POSIX only, because it reads config_dir(), and only main()'s POSIX half
+// redirects that away from the machine's real settings folder.
+#ifndef _WIN32
+void test_a_take_nobody_keeps_leaves_no_file_behind() {
+    const paths::fs::path out = fresh_output_dir();
+    fake_capture::reset();
+    fake_capture::set_total_samples(kTakeSamples);
+
+    Settings settings = test_settings(out);
+    settings.save_audio = false;
+    app::AppState state(std::move(settings));
+    state.start_recording(test_source(), {});
+    let_audio_arrive();
+    state.stop_and_process();
+
+    test::check("R14 a take nobody asked to keep is not in the output folder",
+                saved_audio_in(out).empty(), paths::to_utf8(saved_audio_in(out)));
+
+    std::error_code ec;
+    int left = 0;
+    const paths::fs::path spool_dir = paths::config_dir() / "spool";
+    if (paths::fs::is_directory(spool_dir, ec)) {
+        for (const auto& entry : paths::fs::directory_iterator(spool_dir, ec)) {
+            if (entry.is_regular_file(ec)) ++left;
+        }
+    }
+    test::check("R14 and its scratch spool is deleted once it is read back",
+                left == 0, std::to_string(left) + " file(s) left behind");
+    test::check("R14 the take itself is still there to transcribe",
+                json_bool(state.state_json(), "has_audio"));
+}
+#endif  // _WIN32
 
 // V42: A device that dies mid-take used to take the whole recording with it,
 // because the error was reported and the samples returned alongside it were
@@ -602,12 +690,15 @@ int main(int argc, char** argv) {
     test_no_take_starts_during_shutdown();
     test_job_admission_is_refused_while_recording();
     test_normal_take_is_kept_and_saved();
+    test_a_take_reaches_disk_while_it_is_still_recording();
+    test_cancel_removes_the_take_being_written();
     test_device_failure_keeps_what_was_captured();
     test_failed_device_open_releases_the_claim();
     test_build_features_reach_their_code();
     test_empty_transcripts_are_recognized();
     test_a_directory_is_not_a_model_file();
 #ifndef _WIN32
+    test_a_take_nobody_keeps_leaves_no_file_behind();
     test_cancel_during_upload_decode();
     test_a_rerun_protects_the_folder_it_writes_into();
 #endif

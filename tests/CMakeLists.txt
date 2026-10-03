@@ -117,13 +117,32 @@ if(UNIX AND NOT APPLE)
     add_test(NAME cpu COMMAND test_cpu "${CMAKE_CURRENT_BINARY_DIR}/cpu_scratch")
 endif()
 
+# -- the take that lived in RAM (R14) ------------------------------------------
+# Streaming a recording to disk instead of growing a vector for hours. Two of
+# these watch the process's own RSS: one proves the spooled path stays flat,
+# and the other proves that probe can see the old behaviour, so the first is
+# not passing for free.
+transcriptor_test(test_spool
+    "${TESTS_SRC}/test_spool.cpp"
+    "${TESTS_SRC}/fake_capture.cpp"
+    "${APP_SRC}/audio/recorder.cpp"
+    "${APP_SRC}/audio/spool.cpp"
+    "${APP_SRC}/util/paths.cpp")
+find_package(Threads REQUIRED)
+target_link_libraries(test_spool PRIVATE Threads::Threads)
+add_test(NAME spool
+         COMMAND test_spool "${CMAKE_CURRENT_BINARY_DIR}/spool_scratch")
+set_tests_properties(spool PROPERTIES TIMEOUT 120)
+
 # -- mixing a microphone into system audio (V2) --------------------------------
 # The real Recorder against the stand-in capture, which can make one source
 # silent the way WASAPI loopback is while nothing plays.
 transcriptor_test(test_mixing
     "${TESTS_SRC}/test_mixing.cpp"
     "${TESTS_SRC}/fake_capture.cpp"
-    "${APP_SRC}/audio/recorder.cpp")
+    "${APP_SRC}/audio/recorder.cpp"
+    "${APP_SRC}/audio/spool.cpp"
+    "${APP_SRC}/util/paths.cpp")
 find_package(Threads REQUIRED)
 target_link_libraries(test_mixing PRIVATE Threads::Threads)
 add_test(NAME mixing COMMAND test_mixing)

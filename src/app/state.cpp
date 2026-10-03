@@ -6,6 +6,7 @@
 #include <stdexcept>
 
 #include "audio/decode.h"
+#include "audio/spool.h"
 #include "diarize/diarizer.h"
 #include "llm/templates.h"
 #include "util/export.h"
@@ -79,6 +80,9 @@ AppState::AppState(Settings settings)
       message_(phase_message("idle", settings_.ui_language)),
       summary_template_(settings_.summary_template) {
     lang::set(settings_.ui_language);
+    // A crash during a take leaves its scratch spool behind; nothing else ever
+    // will, so this is the only place that has to clear them.
+    sweep_spool_scratch();
     processor_ = std::make_unique<pipeline::OfflineProcessor>(settings_, device_);
     llm_ = llm::make_backend(settings_, device_);
     live_stt_ = std::make_unique<stt::LiveWhisper>();
@@ -114,8 +118,29 @@ void AppState::shutdown() {
     // device can take a moment) and write it out before the teardown below.
     if (recorder) {
         std::vector<float> audio = recorder->stop();
-        recorder.reset();
-        save_orphaned_take(audio);
+        const paths::fs::path spool = recorder->spool_path();
+        const std::string spool_err = recorder->spool_error();
+        if (spool.empty()) {
+            // Held in memory: the path this took before takes were spooled,
+            // and still the one a spool that could not be opened falls back to.
+            recorder.reset();
+            save_orphaned_take(audio);
+        } else if (spool == session_audio_path()) {
+            // Already written where save_audio would have put it. This is what
+            // the spool buys here: closing the window mid-take now costs the
+            // last block rather than a pass over the whole recording.
+            recorder.reset();
+            if (!spool_err.empty()) note_save_error(spool_err);
+        } else {
+            // Spooled to scratch, because the audio was not being kept or the
+            // session folder could not be made. Read it back and let
+            // save_orphaned_take() apply the setting as it always has.
+            std::string read_err;
+            audio::read_wav_f32(spool, &audio, &read_err);
+            recorder->discard();
+            recorder.reset();
+            save_orphaned_take(audio);
+        }
     }
 
     join_worker();
@@ -428,6 +453,12 @@ void AppState::start_recording(const audio::AudioSource& source,
     live_->clear();
     if (live) attach_live(recorder.get());
 
+    // Before start(), which is when the file is opened. An empty destination
+    // means nowhere would take it; the recorder then holds the take in memory
+    // and the user gets a recording rather than an error.
+    const paths::fs::path spool = spool_destination();
+    if (!spool.empty()) recorder->spool_to(spool);
+
     try {
         recorder->start();
     } catch (...) {
@@ -443,6 +474,7 @@ void AppState::start_recording(const audio::AudioSource& source,
     // opened rather than publish it into an app that is going away.
     if (shutting_down_.load()) {
         recorder->stop();
+        recorder->discard();   // nothing will ever read this take
         recorder.reset();
         live_->stop();
         recording_.store(false);
@@ -581,7 +613,8 @@ void AppState::cancel() {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (recording_.load() && recorder_) {
-            recorder_->stop();   // discard the audio — do NOT process
+            recorder_->stop();      // discard the audio — do NOT process
+            recorder_->discard();   // and the file it was being written to
             recorder_.reset();
         }
         // Its preview goes too: what the take said goes with the take.
@@ -660,7 +693,9 @@ void AppState::stop_and_process() {
 
     std::vector<float> audio = recorder->stop();
     const std::string err = recorder->error();
-    recorder.reset();
+    // Spooled, stop() returns nothing and the take is the file; see below.
+    const paths::fs::path spool = recorder->spool_path();
+    const std::string spool_err = recorder->spool_error();
     // stop() has handed the tail to the preview through its tap; let it finish
     // the last few seconds on its own thread. A cancel that ran underneath us
     // has already cleared it, and this then finds nothing to finish.
@@ -673,9 +708,39 @@ void AppState::stop_and_process() {
         // the take now would put a cancelled recording back on screen and write
         // it to disk. The generation is what tells the two apart.
         std::lock_guard<std::mutex> lifecycle(record_mutex_);
-        if (lifecycle_gen_.load() != gen) return;   // cancelled underneath us
+        if (lifecycle_gen_.load() != gen) {
+            // Cancelled underneath us. cancel() deleted the session folder,
+            // which takes a take spooled into it -- but a scratch spool sits
+            // outside that folder and would survive, so it goes from here.
+            recorder->discard();
+            return;
+        }
         recording_.store(false);
     }
+
+    // The take is on disk and has to come back to be transcribed. read_wav_f32
+    // sizes the buffer once, from the file, so this costs one allocation of
+    // exactly the recording's length -- not the doubling that made a long take
+    // freeze the machine in the first place.
+    const bool saved_in_place = !spool.empty() && spool == session_audio_path();
+    if (!spool.empty()) {
+        std::string read_err;
+        if (audio::read_wav_f32(spool, &audio, &read_err)) {
+            // A scratch spool has done its job once the audio is back: the
+            // user either asked for no copy or has one coming in the session
+            // folder, and either way this file is not it.
+            if (!saved_in_place) {
+                std::error_code ec;
+                paths::fs::remove(spool, ec);
+            }
+        } else {
+            note_save_error(read_err);
+        }
+    }
+    // Whatever went wrong writing it is the user's to know: the take they are
+    // about to see may be shorter than the one they recorded.
+    if (!spool_err.empty()) note_save_error(spool_err);
+    recorder.reset();
 
     // A device that dies mid-take -- an unplugged headset, a sink that went
     // away -- still leaves everything captured before it did, and stop()
@@ -684,7 +749,7 @@ void AppState::stop_and_process() {
     // Hand it to begin() instead, which saves it and holds it for Transcribe;
     // the error travels with it and becomes the status line.
     const bool claimed = claim_job();
-    begin(std::move(audio), {}, {}, err, claimed);
+    begin(std::move(audio), {}, {}, err, claimed, saved_in_place);
 }
 
 bool AppState::process_file(const paths::fs::path& tmp_path,
@@ -743,7 +808,8 @@ bool AppState::process_file(const paths::fs::path& tmp_path,
 
 bool AppState::begin(std::vector<float> audio, const paths::fs::path& original_file,
                      const std::string& original_name,
-                     const std::string& device_error, bool claimed) {
+                     const std::string& device_error, bool claimed,
+                     bool already_saved) {
     const Settings settings = settings_copy();
     // Whatever went wrong with the device outranks anything below it: it is
     // both the cause and the thing the user has to act on.
@@ -763,7 +829,7 @@ bool AppState::begin(std::vector<float> audio, const paths::fs::path& original_f
     }
 
     const paths::fs::path dir = ensure_session_dir();
-    if (!dir.empty() && settings.save_audio) {
+    if (!dir.empty() && settings.save_audio && !already_saved) {
         // Every one of these reports failure, and every one of them used to be
         // discarded: a full disk produced a "Saved →" row, a "Ready" phase and
         // an empty folder, and closing the app took the only copy with it.
@@ -926,6 +992,65 @@ void AppState::note_save_error(const std::string& message) {
 void AppState::clear_save_error() {
     std::lock_guard<std::mutex> lock(mutex_);
     save_error_.clear();
+}
+
+namespace {
+
+// Scratch spools live together under the config directory, so sweeping them is
+// one listing and never walks anywhere the user keeps things.
+paths::fs::path spool_scratch_dir() { return paths::config_dir() / "spool"; }
+
+// Old enough that no instance still running can be writing to it. A second
+// window open right now must never have its take deleted out from under it,
+// and there is no portable way to ask whether a file is open -- so age is the
+// test, and a day of a crashed run's leftovers is the price.
+constexpr std::chrono::hours kSpoolScratchKeep{24};
+
+}  // namespace
+
+void AppState::sweep_spool_scratch() {
+    std::error_code ec;
+    const paths::fs::path dir = spool_scratch_dir();
+    if (!paths::fs::is_directory(dir, ec)) return;
+    const auto now = paths::fs::file_time_type::clock::now();
+    for (const auto& entry : paths::fs::directory_iterator(dir, ec)) {
+        if (ec) break;
+        std::error_code each;
+        if (!entry.is_regular_file(each) || each) continue;
+        const auto when = paths::fs::last_write_time(entry.path(), each);
+        if (each || now - when < kSpoolScratchKeep) continue;
+        paths::fs::remove(entry.path(), each);
+    }
+}
+
+paths::fs::path AppState::session_audio_path() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (session_dir_.empty()) return {};
+    return session_dir_ / "audio.wav";
+}
+
+paths::fs::path AppState::spool_destination() {
+    // The audio is being kept: spool straight into the session folder, under
+    // the name save_audio would have written anyway. Stop then costs no second
+    // pass over the recording -- it is already where it belongs.
+    if (settings_copy().save_audio) {
+        const paths::fs::path dir = ensure_session_dir();
+        if (!dir.empty()) return dir / "audio.wav";
+        // ensure_session_dir() has already told the user why; fall through,
+        // because a take with nowhere to live still must not live in memory.
+    }
+
+    // Not being kept, or nowhere to keep it. The recording still has to go
+    // somewhere other than RAM: the setting is about what the user ends up
+    // with, not about how a five-hour take is held while it is made. This file
+    // is deleted the moment the audio has been read back.
+    std::error_code ec;
+    const paths::fs::path dir = spool_scratch_dir();
+    paths::fs::create_directories(dir, ec);
+    if (ec) return {};
+    const auto now = std::chrono::system_clock::now().time_since_epoch();
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+    return dir / ("take-" + std::to_string(ms) + ".wav");
 }
 
 paths::fs::path AppState::ensure_session_dir() {

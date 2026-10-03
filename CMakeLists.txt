@@ -60,6 +60,7 @@ set(TRANSCRIPTOR_CORE_SOURCES
     src/util/models.cpp
     src/audio/sources.cpp
     src/audio/recorder.cpp
+    src/audio/spool.cpp
     src/audio/decode.cpp
     src/audio/miniaudio_impl.c
     src/stt/whisper_stt.cpp
