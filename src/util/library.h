@@ -57,12 +57,17 @@ std::vector<Variant> summary_variants(const fs::path& dir);
 // True for a plain directory name: no separators, no "..", nothing exotic.
 bool valid_id(const std::string& id);
 
-// `output_dir`/`id`, but only when `id` is valid and the directory really sits
-// inside the output folder. Empty path when it does not.
+// `output_dir`/`id`, but only when `id` is valid, the directory really sits
+// inside the output folder, and it is a session by the same test list()
+// applies. Empty path when it is not.
 fs::path resolve(const std::string& output_dir, const std::string& id);
 
 // Newest first. A missing or unreadable output folder yields an empty list
 // rather than an error — an empty library is the normal first-run state.
+//
+// A folder counts as a session when it holds something only this app writes
+// (a transcript, a summary, audio.wav), or media under the timestamped name a
+// take is given. Media alone under any other name is someone else's folder.
 std::vector<Entry> list(const std::string& output_dir);
 
 // Fills in one entry from a session directory that is known to exist.

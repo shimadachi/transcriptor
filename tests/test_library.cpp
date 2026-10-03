@@ -187,6 +187,43 @@ void test_an_upload_in_any_format_is_listed() {
           library::content_type_for("interview.aiff") == "audio/aiff");
 }
 
+// V29: the library took every subfolder of the output folder that held a media
+// file to be a recording. With the output folder pointed somewhere shared --
+// Documents, Music -- an album or a folder of videos was listed, and Delete
+// removed it whole.
+void test_a_folder_of_someone_elses_media_is_not_a_session() {
+    const library::fs::path root = g_scratch / "shared";
+    std::error_code ec;
+    const auto make = [&](const std::string& id, const std::string& file) {
+        const library::fs::path dir = root / paths::from_utf8(id);
+        library::fs::create_directories(dir, ec);
+        touch(dir / paths::from_utf8(file));
+    };
+    make("Holiday Songs", "01 - Opening.mp3");
+    make("Lecture videos", "week1.mp4");
+    // What the app makes, under the app's names or the user's.
+    make("2026-10-03_09-00-00", "talk.mp3");      // an upload kept as it came
+    make("2026-10-03_09-00-00_2", "audio.wav");   // two takes in one second
+    make("Board meeting", "audio.wav");           // a take renamed by hand
+    make("Interview", "transcript.txt");
+
+    const auto sessions = library::list(paths::to_utf8(root));
+    std::string ids;
+    for (const library::Entry& e : sessions) ids += "[" + e.id + "]";
+    check("V29 only the four sessions are listed", sessions.size() == 4, ids);
+    check("V29 an album is not a session", ids.find("Holiday Songs") == std::string::npos, ids);
+    check("V29 nor a folder of videos", ids.find("Lecture videos") == std::string::npos, ids);
+
+    // Delete, the player and the re-runs all resolve the id first, so a folder
+    // the list hides cannot be reached by naming it either.
+    check("V29 an album cannot be resolved for deletion",
+          library::resolve(paths::to_utf8(root), "Holiday Songs").empty());
+    check("V29 a renamed take still resolves",
+          !library::resolve(paths::to_utf8(root), "Board meeting").empty());
+    check("V29 a timestamped upload still resolves",
+          !library::resolve(paths::to_utf8(root), "2026-10-03_09-00-00").empty());
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -205,5 +242,6 @@ int main(int argc, char** argv) {
     test_a_json_only_transcript_is_not_lost();
     test_a_session_of_only_named_versions_is_listed();
     test_an_upload_in_any_format_is_listed();
+    test_a_folder_of_someone_elses_media_is_not_a_session();
     return test::summary("library");
 }

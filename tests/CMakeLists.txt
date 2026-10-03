@@ -65,7 +65,7 @@ target_link_libraries(test_settings PRIVATE nlohmann_json::nlohmann_json)
 add_test(NAME settings
          COMMAND test_settings "${CMAKE_CURRENT_BINARY_DIR}/settings_scratch")
 
-# -- library versions ---------------------------------------------------------
+# -- library versions, and what counts as a session (V16, V20, V29) ------------
 transcriptor_test(test_library
     "${TESTS_SRC}/test_library.cpp"
     "${APP_SRC}/util/library.cpp"

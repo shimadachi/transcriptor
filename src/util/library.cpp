@@ -72,6 +72,35 @@ std::string snippet(const std::string& text, std::size_t limit = 180) {
     return flat.substr(0, cut) + "…";
 }
 
+// What exporter::new_session_dir() names a folder: "YYYY-MM-DD_HH-MM-SS", with
+// "_N" after it when two takes start within the same second.
+bool session_stamp(const std::string& id) {
+    static const char kShape[] = "dddd-dd-dd_dd-dd-dd";
+    constexpr std::size_t n = sizeof(kShape) - 1;
+    const auto digit = [](char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; };
+    if (id.size() < n) return false;
+    for (std::size_t i = 0; i < n; ++i) {
+        if (kShape[i] == 'd' ? !digit(id[i]) : id[i] != kShape[i]) return false;
+    }
+    if (id.size() == n) return true;
+    if (id[n] != '_' || id.size() == n + 1 || id.size() > n + 3) return false;
+    return std::all_of(id.begin() + static_cast<std::ptrdiff_t>(n) + 1, id.end(), digit);
+}
+
+// Whether a folder in the output folder is a session, and so something Delete
+// may remove whole. A media file alone does not make one: pointed at a folder
+// that is shared with other things -- Documents, Music -- the library listed
+// every subfolder holding an mp3 or a video as a recording, and Delete then
+// took the whole folder. What does make one is something only this app writes
+// (a transcript, a summary, its own audio.wav), or the timestamped name it
+// gives each take, which keeps a take saved as audio alone, an upload in any
+// format included.
+bool looks_like_session(const std::string& id, bool has_transcript, bool has_summary,
+                        const std::string& audio) {
+    if (has_transcript || has_summary || audio == "audio.wav") return true;
+    return !audio.empty() && session_stamp(id);
+}
+
 }  // namespace
 
 bool valid_id(const std::string& id) {
@@ -206,6 +235,14 @@ fs::path resolve(const std::string& output_dir, const std::string& id) {
     // path must still be a direct child of the output folder.
     if (dir.parent_path() != root) return {};
     if (!fs::is_directory(dir, ec)) return {};
+    // The same test list() applies. Every route that acts on a session comes
+    // through here -- Delete above all -- so a folder the list would not show
+    // cannot be reached by naming it either.
+    if (!looks_like_session(paths::to_utf8(dir.filename()),
+                            !transcript_variants(dir).empty(),
+                            !summary_variants(dir).empty(), find_audio(dir))) {
+        return {};
+    }
     return dir;
 }
 
@@ -302,8 +339,7 @@ std::vector<Entry> list(const std::string& output_dir) {
         const std::string id = paths::to_utf8(entry.path().filename());
         if (!valid_id(id) || id[0] == '.') continue;
         Entry e = describe(entry.path());
-        // A folder with none of the three artifacts is not a session.
-        if (!e.has_transcript && !e.has_summary && e.audio.empty()) continue;
+        if (!looks_like_session(id, e.has_transcript, e.has_summary, e.audio)) continue;
         out.push_back(std::move(e));
     }
 
