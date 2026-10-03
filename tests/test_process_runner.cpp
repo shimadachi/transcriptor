@@ -7,15 +7,23 @@
 //
 // R11 is the same defect on the Windows path, which cannot run here; the
 // continuous-output case below is its POSIX twin and guards the shared shape.
+//
+// V40: a download runs with no deadline, so curl has to give up on a transfer
+// that has stopped moving. It was never told to: a connection that went quiet
+// after connecting waited for ever, and only Cancel ended it.
 
 #include "util/net.h"
 
 #include <chrono>
+#include <cstdlib>
 #include <string>
 #include <thread>
 #include <vector>
 
+#include <unistd.h>
+
 #include "check.h"
+#include "util/paths.h"
 
 using namespace transcriptor;
 
@@ -111,6 +119,34 @@ int main() {
         const net::ProcResult r = net::run({"sh", "-c", "echo nope"}, 5.0, &cancel);
         test::check("a cancel raised before the start never runs the child",
                     r.cancelled && r.output.empty());
+    }
+
+    // V40: what curl is told. Stalling a real transfer would make this test as
+    // slow as the limit it is checking, so a stand-in curl records its own
+    // command line instead.
+    {
+        const paths::fs::path dir = paths::fs::temp_directory_path() /
+                                    ("transcriptor-v40-" + std::to_string(::getpid()));
+        std::error_code ec;
+        paths::fs::create_directories(dir, ec);
+        const paths::fs::path args = dir / "args";
+        paths::write_file(dir / "curl",
+                          "#!/bin/sh\nprintf '%s\\n' \"$@\" > '" +
+                              paths::to_utf8(args) + "'\nexit 22\n");
+        paths::fs::permissions(dir / "curl", paths::fs::perms::owner_all, ec);
+        const char* p = std::getenv("PATH");
+        const std::string saved = p ? p : "";
+        setenv("PATH", (paths::to_utf8(dir) + ":" + saved).c_str(), 1);
+        net::download("https://example.invalid/model.bin", dir / "model.bin");
+        setenv("PATH", saved.c_str(), 1);
+
+        std::string got;
+        paths::read_file(args, &got);
+        test::check("V40 a download gives up on a transfer that has stopped moving",
+                    got.find("--speed-time\n") != std::string::npos &&
+                        got.find("--speed-limit\n") != std::string::npos,
+                    got.empty() ? "curl was not run" : "");
+        paths::fs::remove_all(dir, ec);
     }
 
     return test::summary("process runner");

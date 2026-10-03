@@ -416,8 +416,14 @@ DownloadResult download(const std::string& url, const paths::fs::path& dest,
         });
     }
 
+    // No overall deadline -- a large model on a slow line takes as long as it
+    // takes -- but a transfer that has stopped moving gives up: under a byte a
+    // second for a minute is a stall, not a slow link. Without it a connection
+    // that went quiet after connecting waited for ever, and only Cancel ended
+    // it; curl counts the stall as a timeout, which --retry tries again.
     ProcResult r = run({"curl", "-fL", "--retry", "3", "--retry-delay", "2",
-                        "--connect-timeout", "20", "-sS",
+                        "--connect-timeout", "20",
+                        "--speed-limit", "1", "--speed-time", "60", "-sS",
                         "-o", paths::to_utf8(tmp), url},
                        0, cancel);
 

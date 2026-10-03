@@ -96,7 +96,7 @@ if(UNIX)
     add_test(NAME write_failure
              COMMAND test_write_failure "${CMAKE_CURRENT_BINARY_DIR}/write_scratch")
 
-    # -- child process runner (R11, R12) --------------------------------------
+    # -- child process runner, and downloads that stall (R11, R12, V40) -------
     # Drives real /bin/sh children; the Windows half of this code cannot run here.
     transcriptor_test(test_process_runner
         "${TESTS_SRC}/test_process_runner.cpp"
