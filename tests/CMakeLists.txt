@@ -166,7 +166,12 @@ target_compile_definitions(test_recording_lifecycle PRIVATE
 add_test(NAME recording_lifecycle
          COMMAND test_recording_lifecycle
                  "${CMAKE_CURRENT_BINARY_DIR}/recording_scratch")
-set_tests_properties(recording_lifecycle PROPERTIES TIMEOUT 120)
+# Labelled "app", like every test that links transcriptor_core: with it comes
+# ggml's GPU backend, which on the CUDA presets needs the NVIDIA driver to load
+# at all. CI leaves the label out on the Windows CUDA runner, which has no
+# driver to give it (see the Test step in .github/workflows/_build.yml), so a
+# new test linking the core needs the label to be left out with them.
+set_tests_properties(recording_lifecycle PROPERTIES TIMEOUT 120 LABELS app)
 
 # -- keeping the live transcript (V55, V56) ------------------------------------
 # The real LiveTranscriber against a stand-in engine. It stamps its lines with
@@ -177,7 +182,7 @@ transcriptor_test(test_live
     "${TESTS_SRC}/fake_capture.cpp")
 target_link_libraries(test_live PRIVATE transcriptor_core)
 add_test(NAME live COMMAND test_live)
-set_tests_properties(live PROPERTIES TIMEOUT 60)
+set_tests_properties(live PROPERTIES TIMEOUT 60 LABELS app)
 
 # -- the HTTP API (V3, V7, V12, V18, V23, V30, V34, V38) -----------------------
 # What the page is told, read through the real Server over a loopback socket.
@@ -190,7 +195,7 @@ if(UNIX)
         "${TESTS_SRC}/fake_capture.cpp")
     target_link_libraries(test_api PRIVATE transcriptor_core)
     add_test(NAME api COMMAND test_api "${CMAKE_CURRENT_BINARY_DIR}/api_scratch")
-    set_tests_properties(api PROPERTIES TIMEOUT 120)
+    set_tests_properties(api PROPERTIES TIMEOUT 120 LABELS app)
 endif()
 
 # -- browser recording UI (R3, R10, R13, G1, G2, G3) --------------------------

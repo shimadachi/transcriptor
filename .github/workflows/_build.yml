@@ -162,9 +162,10 @@ jobs:
       #
       # The CUDA presets have the same shape of problem with libcuda.so.1, and
       # no equivalent way out: that library belongs to the driver, and a runner
-      # has the toolkit but no NVIDIA card to install one. Only the lifecycle
-      # test links transcriptor_core, so it is the only one that pulls in
-      # ggml-cuda and dies in the loader before main(). The toolkit ships a stub
+      # has the toolkit but no NVIDIA card to install one. The tests labelled
+      # "app" in tests/CMakeLists.txt link transcriptor_core, so they are the
+      # ones that pull in ggml-cuda and die in the loader before main(). The
+      # toolkit ships a stub
       # for exactly this -- it resolves every driver symbol and fails every call
       # -- and failing calls are all the tests need: they set device "cpu" and
       # load no model, so nothing asks the stub for a GPU. It is shipped under
@@ -173,19 +174,20 @@ jobs:
       #
       # Windows gets no such reprieve. The stub is a Linux-only part of the
       # toolkit -- nvcuda.dll belongs to the driver, is not redistributable, and
-      # has no import-library equivalent to borrow -- so on win-cuda that one
-      # test cannot start at all, and reports 0xc0000135 with nothing to say for
-      # itself. Excluded there rather than left red: every other preset runs it,
-      # win-msvc and win-vulkan included, so the lifecycle stays covered on
-      # Windows and under CUDA, just not on both at once. Anchored so the
-      # pattern cannot quietly grow to swallow a second test.
+      # has no import-library equivalent to borrow -- so on win-cuda those
+      # tests cannot start at all, and report 0xc0000135 with nothing to say
+      # for themselves. Excluded there rather than left red: every other preset
+      # runs them, win-msvc and win-vulkan included, so they stay covered on
+      # Windows and under CUDA, just not on both at once. Left out by label, not
+      # by name: a name list here went stale the day the live test joined the
+      # lifecycle test in linking the app, and red-lit win-cuda for it.
       - name: Test
         shell: bash
         run: |
           exclude=()
           if [ "$RUNNER_OS" = "Windows" ] && [ "${{ inputs.cuda }}" = "true" ]; then
-            echo "Skipping recording_lifecycle: no nvcuda.dll on this runner."
-            exclude=(-E '^recording_lifecycle$')
+            echo "Skipping the tests that link the app: no nvcuda.dll on this runner."
+            exclude=(-LE '^app$')
           fi
           if [ "$RUNNER_OS" = "Linux" ] && [ "${{ inputs.cuda }}" = "true" ]; then
             stub=$(find "${CUDA_PATH:-/usr/local/cuda}" -name libcuda.so -path '*stubs*' \
