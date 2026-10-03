@@ -146,8 +146,19 @@ bool AppState::claim_job() {
     // it. The HTTP routes check this too, but not atomically with the claim, so
     // a request that passed its check just before a recording started could
     // still get here. stop_and_process() lowers the flag before it claims.
-    if (recording_.load()) return false;
+    //
+    // Claim first, then look, because start_recording() does the same the
+    // other way round: each raises its own flag and then reads the other's, so
+    // at least one of the two always sees the other and backs off. Looking
+    // first and claiming after let both through when they interleaved -- a job
+    // running under a take that had just cleared its session, and the take's
+    // start then joining that job's thread, holding Record, Stop and Cancel
+    // for as long as the transcription ran.
     if (processing_.exchange(true)) return false;
+    if (recording_.load()) {
+        processing_.store(false);
+        return false;
+    }
 
     // The last job's cancellation is cleared here, where the slot is taken --
     // not in start_job(), which for an upload does not run until the file has
@@ -373,7 +384,9 @@ void AppState::start_recording(const audio::AudioSource& source,
         throw BusyError(L("Already recording.", "Zaten kayıtta."));
     }
     // A job still holds the pipeline; the recording it is working on must not
-    // be cleared out from under it.
+    // be cleared out from under it. Read only after recording_ is raised:
+    // claim_job() mirrors this order, and the pair is what keeps the two out
+    // of each other's way.
     if (processing_.load()) {
         recording_.store(false);
         throw BusyError(L("A job is already running.", "İşlem sürüyor."));
