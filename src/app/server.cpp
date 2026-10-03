@@ -173,6 +173,26 @@ bool valid_template_id(const std::string& id) {
     return !llm::is_template(id);   // never shadow a built-in
 }
 
+// What a link in a summary may be before it is handed to the OS. The model
+// wrote it, so it is untrusted: http, https or mailto only -- the schemes that
+// just navigate -- and printable ASCII with no spaces or quotes, which is how
+// the page serializes any URL it has parsed. Windows passes it to whatever
+// handles the scheme, often on a command line, where a quote or a space could
+// end the argument and start another.
+bool openable_link(const std::string& url) {
+    if (url.empty() || url.size() > 2048) return false;
+    const auto starts = [&url](const char* p) { return url.rfind(p, 0) == 0; };
+    if (!starts("http://") && !starts("https://") && !starts("mailto:")) return false;
+    for (char c : url) {
+        const auto u = static_cast<unsigned char>(c);
+        if (u <= 0x20 || u >= 0x7F || c == '"' || c == '\\' || c == '`' ||
+            c == '<' || c == '>') {
+            return false;
+        }
+    }
+    return true;
+}
+
 json source_json(const audio::AudioSource& s) {
     return {{"id", s.id}, {"label", s.label()}, {"is_loopback", s.is_loopback}};
 }
@@ -508,6 +528,20 @@ bool Server::start() {
                                       httplib::Response& res) {
         send_json(res, json{{"ok", open_in_browser(kReleasesUrl)},
                             {"url", kReleasesUrl}});
+    });
+
+    // A link in a summary. The native window drops target="_blank", so a click
+    // on one did nothing at all; the page asks for it here instead, the way the
+    // update banner does -- but this URL comes from the page, so it is held to
+    // openable_link() before the OS sees it.
+    svr.Post("/api/open_link", [](const httplib::Request& req,
+                                  httplib::Response& res) {
+        const std::string url = get_string(parse_body(req), "url");
+        if (!openable_link(url)) {
+            return send_error(res, L("That link cannot be opened.",
+                                     "Bu bağlantı açılamaz."));
+        }
+        send_json(res, json{{"ok", open_in_browser(url)}, {"url", url}});
     });
 
     // -- library (past sessions in the output folder) -----------------------

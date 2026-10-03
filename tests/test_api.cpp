@@ -32,6 +32,10 @@
 // V34: a model download could still be started once the app had begun to shut
 // down -- main() stops the server only afterwards -- clearing the cancellation
 // shutdown() had raised and assigning the thread handle it was joining.
+//
+// V38: a link in a summary did nothing in the native window, which drops
+// target="_blank". The page now asks the server to open it -- and since the
+// URL is the model's, the server must refuse anything but a plain web link.
 
 #include <chrono>
 #include <cstdio>
@@ -409,6 +413,52 @@ void test_no_download_starts_once_the_app_is_closing() {
     test::check("V34 and nothing is running", !state.model_download_json().value("active", true));
 }
 
+void test_only_plain_links_are_opened() {
+    const paths::fs::path dir = fresh_dir();
+#ifdef __APPLE__
+    const char* opener = "open";
+#else
+    const char* opener = "xdg-open";
+#endif
+    // The opener runs detached, so it leaves what it was given in a file.
+    const paths::fs::path got = dir / "opened";
+    const FakeTool fake(dir, opener, "printf '%s' \"$1\" > '" + paths::to_utf8(got) + "'\n");
+
+    app::AppState state(test_settings(dir / "out"));
+    app::Server server(&state, "127.0.0.1", 0);
+    if (!server.start()) {
+        test::check("V38 the server starts", false);
+        return;
+    }
+    httplib::Client client("127.0.0.1", server.port());
+    const httplib::Headers headers = {{"X-Transcriptor-Token", page_token(client)}};
+    const auto ask = [&](const std::string& url) {
+        const auto res = client.Post("/api/open_link", headers,
+                                     nlohmann::json{{"url", url}}.dump(),
+                                     "application/json");
+        return res ? res->status : 0;
+    };
+
+    for (const char* bad : {"javascript:alert(1)", "data:text/html,hi",
+                            "file:///etc/passwd", "https://example.com/a b",
+                            "https://example.com/\" --new-window", "https://exämple.com/",
+                            "C:\\Windows\\notepad.exe", ""}) {
+        test::check((std::string("V38 refused: ") + bad).c_str(), ask(bad) == 400);
+    }
+    std::error_code ec;
+    test::check("V38 nothing refused reached the opener", !paths::fs::exists(got, ec));
+
+    const std::string link = "https://example.com/plan?step=2#notes";
+    test::check("V38 a plain web link is accepted", ask(link) == 200);
+    std::string opened;
+    for (int i = 0; i < 100 && !paths::read_file(got, &opened); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    test::check("V38 and handed to the browser exactly as sent", opened == link, opened);
+    test::check("V38 mailto is a link too", ask("mailto:team@example.com") == 200);
+    server.stop();
+}
+
 void test_utf8_cuts() {
     const std::string s = "a\xC5\x9F" "b";   // "aşb"
     test::check("V3 a cut from the front backs off to a character boundary",
@@ -448,6 +498,7 @@ int main(int argc, char** argv) {
     test_a_summary_cut_at_the_limit_says_so();
     test_a_transcription_stays_off_the_network();
     test_no_download_starts_once_the_app_is_closing();
+    test_only_plain_links_are_opened();
 
     return test::summary("api");
 }

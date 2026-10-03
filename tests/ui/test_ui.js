@@ -19,6 +19,7 @@
 //   V26 the studio's Stop discarded a run that finished as it was being stopped
 //   V30 a transcription went online for the voice detector; the studio is now
 //       where an install without it fetches it, on request
+//   V38 a link in a summary did nothing in the native window
 
 const path = require('path');
 const {createEnv} = require('./harness');
@@ -888,6 +889,42 @@ async function run() {
     check('V30 nor before there is a speech model to use it with',
           !env.els.diarHint.innerHTML.includes('note.vadMissing'),
           env.els.diarHint.innerHTML);
+  }
+
+  // ---------------------------------------------------------------- V38 ----
+  // The native window drops target="_blank", so the page has to hand a link
+  // to the server, which opens it in the real browser.
+  for (const where of ['summary', 'libSummary']) {
+    const env = createEnv(ROOT);
+    let prevented = false;
+    const a = {href: 'https://example.com/plan?step=2'};
+    env.peek(`$('${where}')`).fire('click', {
+      target: {closest: sel => (sel === 'a[href]' ? a : null)},
+      preventDefault: () => { prevented = true; },
+    });
+    await env.settle();
+    check(`V38 a link in the ${where} goes to the server to be opened`,
+          prevented && env.server.links.length === 1 && env.server.links[0].url === a.href,
+          JSON.stringify(env.server.links));
+    check(`V38 and the page does not open it as well`, env.server.opened.length === 0);
+  }
+  {
+    // A server that cannot open it leaves the page's own attempt, which is
+    // what works in a browser tab.
+    const env = createEnv(ROOT);
+    env.server.linkReply = {ok: false};
+    const a = {href: 'https://example.com/'};
+    env.peek("$('summary')").fire('click', {target: {closest: () => a}, preventDefault: () => {}});
+    await env.settle();
+    check('V38 a link the server could not open falls back to the page',
+          env.server.opened.length === 1 && env.server.opened[0] === a.href);
+  }
+  {
+    // A click anywhere else in a summary is just a click.
+    const env = createEnv(ROOT);
+    env.peek("$('summary')").fire('click', {target: {closest: () => null}, preventDefault: () => {}});
+    await env.settle();
+    check('V38 a click that is not on a link opens nothing', env.server.links.length === 0);
   }
 
   console.log(failures ? `\nui: ${failures} check(s) FAILED`

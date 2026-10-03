@@ -118,6 +118,9 @@ function createEnv(root, opts) {
     library: {sessions: []},
     requests: [],
     downloads: [],         // the body of each POST /api/model/download
+    links: [],             // the body of each POST /api/open_link
+    linkReply: {ok: true},
+    opened: [],            // every window.open() the page fell back to
   };
 
   const media = {stopped: 0, ctxClosed: 0, failAt: null, recorders: []};
@@ -153,6 +156,10 @@ function createEnv(root, opts) {
       server.cancels.push({state: JSON.parse(JSON.stringify(server.state)),
                            body: JSON.parse((opts && opts.body) || '{}')});
       return {json: async () => server.cancelReply};
+    }
+    if (url === '/api/open_link') {
+      server.links.push(JSON.parse((opts && opts.body) || '{}'));
+      return {json: async () => server.linkReply};
     }
     if (url === '/api/model/download') {
       server.downloads.push(JSON.parse((opts && opts.body) || '{}'));
@@ -230,6 +237,7 @@ function createEnv(root, opts) {
     window: {
       matchMedia: null, MediaRecorder: MediaRecorderMock,
       AudioContext: AudioContextMock, addEventListener: () => {},
+      open: (url) => { server.opened.push(url); },
     },
     MediaRecorder: MediaRecorderMock, AudioContext: AudioContextMock,
     Blob: class {

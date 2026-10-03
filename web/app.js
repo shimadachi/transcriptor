@@ -699,6 +699,21 @@ function renderSummary(text, el, emptyText) {
   if (text) el.innerHTML = mdToHtml(text);
   else el.innerHTML = '<span class="empty">' + esc(emptyText || '—') + '</span>';
 }
+// A link in a summary opens in the real browser. The native window drops
+// target="_blank", so a click on one did nothing at all; the server hands it
+// over instead, as it does for the update banner. href, the property, is the
+// URL as the page parsed it: absolute and plain ASCII, which is what the
+// server will accept. Delegated, because the summary is re-rendered whole.
+function openSummaryLink(e) {
+  const a = e.target && e.target.closest && e.target.closest('a[href]');
+  if (!a) return;
+  e.preventDefault();
+  const url = a.href;
+  const fallback = () => window.open(url, '_blank', 'noopener');
+  post('/api/open_link', {url}).then(r => { if (!r || !r.ok) fallback(); }, fallback);
+}
+$('summary').addEventListener('click', openSummaryLink);
+$('libSummary').addEventListener('click', openSummaryLink);
 
 // ---- actions ----
 $('recBtn').onclick = async () => {
