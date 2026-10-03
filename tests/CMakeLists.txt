@@ -23,7 +23,7 @@ transcriptor_test(test_chunking
 target_link_libraries(test_chunking PRIVATE nlohmann_json::nlohmann_json)
 add_test(NAME chunking COMMAND test_chunking)
 
-# -- reasoning budget ---------------------------------------------------------
+# -- reasoning budget (R1, V5, V36) -------------------------------------------
 transcriptor_test(test_reasoning
     "${TESTS_SRC}/test_reasoning.cpp"
     "${APP_SRC}/llm/reasoning.cpp")

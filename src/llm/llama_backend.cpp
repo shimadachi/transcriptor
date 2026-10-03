@@ -715,7 +715,12 @@ private:
         // neither can eat the other's. An overrun inside <think> is closed for
         // the model rather than left to run the stream out -- which is what
         // "the model used the whole answer budget on reasoning" used to be.
-        ReasoningBudget budget(allow_thinking, think_budget, max_answer);
+        //
+        // A template that opens the block itself (render() closes it when this
+        // pass must not think) leaves the model reasoning from its first token
+        // with no tag of its own, and the budget has to know it started there.
+        const bool opened = allow_thinking && ends_open_think(prompt);
+        ReasoningBudget budget(allow_thinking, think_budget, max_answer, opened);
         const double total_budget = think_budget + max_answer;
         int produced = 0;
 
@@ -802,6 +807,9 @@ private:
         // string: a thinking model's <think> block is not an answer, and the
         // chunked path feeds these straight back in as the notes to merge.
         const bool had_text = !trim(out).empty();
+        // The tag the template put in the prompt goes back in front, so a block
+        // that never closed is still taken off rather than saved as the summary.
+        if (opened) out.insert(0, "<think>");
         out = strip_reasoning(out);
         if (out.empty()) {
             // All reasoning and no answer: the token budget ran out inside the

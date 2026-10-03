@@ -171,6 +171,35 @@ void a_closing_tag_alone_still_ends_the_reasoning() {
               "The notes");
 }
 
+// V36: some chat templates open <think> in the prompt, so the model reasons
+// from its first token with no tag of its own. The budget waited for a tag
+// that never came, took the reasoning for an answer that had begun straight
+// away, and charged it to the answer budget -- and a block that ran the answer
+// budget out was then saved as the summary, chain of thought and all.
+void a_block_the_prompt_opened_is_still_reasoning() {
+    ReasoningBudget budget(/*allow_thinking=*/true, /*think=*/4, /*answer=*/3,
+                           /*opened=*/true);
+    Run r = drive(budget, {"Let", "me", "weigh", "this", "and", "more", "and"});
+    check("V36 reasoning with no tag of its own is charged to the think budget",
+          r.think_used == 4, "think_used=" + std::to_string(r.think_used));
+    check("V36 and is closed for the model when it overruns", r.forced == 1,
+          "forced=" + std::to_string(r.forced));
+    check("V36 leaving the answer its whole budget", r.answer_used == 3 && r.stopped,
+          "answer_used=" + std::to_string(r.answer_used));
+
+    ReasoningBudget closed(true, /*think=*/10, /*answer=*/5, /*opened=*/true);
+    Run c = drive(closed, {"weighing", "it", "</think>", "The", "notes"});
+    check("V36 the model's own closing tag still ends it",
+          c.think_used == 3 && c.answer_used == 2 && c.forced == 0,
+          "think_used=" + std::to_string(c.think_used) +
+              " answer_used=" + std::to_string(c.answer_used));
+
+    // The generator puts the template's tag back before stripping, so a block
+    // that never closed comes off rather than standing in for the summary.
+    check("V36 an unclosed block the prompt opened leaves no summary behind",
+          strip_reasoning("<think>" + std::string("Let me weigh the decisions")).empty());
+}
+
 }  // namespace
 
 int main() {
@@ -182,5 +211,6 @@ int main() {
     a_finished_answer_owes_nothing();
     whole_blocks_come_off_the_answer();
     a_closing_tag_alone_still_ends_the_reasoning();
+    a_block_the_prompt_opened_is_still_reasoning();
     return test::summary("reasoning");
 }

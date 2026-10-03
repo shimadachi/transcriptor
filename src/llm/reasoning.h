@@ -42,7 +42,13 @@ public:
     // allow_thinking == false means the prompt was prefilled with an empty
     // <think></think> pair, so the model is already past reasoning and every
     // token counts against the answer.
-    ReasoningBudget(bool allow_thinking, int think_budget, int answer_budget);
+    //
+    // `opened` says the prompt itself ends inside an open <think>: some chat
+    // templates open the block for the model, which then starts reasoning with
+    // no tag of its own. Without it, that reasoning read as an answer that had
+    // begun straight away and was charged to the answer budget.
+    ReasoningBudget(bool allow_thinking, int think_budget, int answer_budget,
+                    bool opened = false);
 
     ReasoningStep feed(const std::string& piece);
 

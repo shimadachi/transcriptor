@@ -86,9 +86,10 @@ std::string strip_reasoning(const std::string& text) {
 }
 
 ReasoningBudget::ReasoningBudget(bool allow_thinking, int think_budget,
-                                 int answer_budget)
-    : state_(allow_thinking && think_budget > 0 ? State::Undecided
-                                                : State::Answering),
+                                 int answer_budget, bool opened)
+    : state_(!(allow_thinking && think_budget > 0) ? State::Answering
+             : opened                              ? State::Thinking
+                                                   : State::Undecided),
       think_budget_(std::max(0, think_budget)),
       answer_budget_(std::max(1, answer_budget)) {}
 
