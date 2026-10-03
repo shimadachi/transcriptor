@@ -6,6 +6,12 @@
 # Tag the release commit `X.Y.Z` (matching project(VERSION) in CMakeLists.txt)
 # and push the tag; everything below follows from that.
 #
+# A tag with a suffix -- `X.Y.Z-rc.1`, `X.Y.Z-beta.2` -- is a pre-release: the
+# same builds, published as a GitHub pre-release and never as the latest
+# release. The app's update banner asks GitHub for /releases/latest, which
+# never returns a pre-release, so nobody is offered one; and its notes run from
+# the last plain X.Y.Z tag, as the final release's will.
+#
 # The packages used to travel as artifacts, from the builds to a job that
 # downloaded them and attached them here. Eight of them are about 1.2 GB, the
 # two CUDA ones being 1.1 GB of that, against an artifact allowance of 500 MB
@@ -16,7 +22,7 @@ name: release
 
 on:
   push:
-    tags: ['[0-9]+.[0-9]+.[0-9]+']
+    tags: ['[0-9]+.[0-9]+.[0-9]+', '[0-9]+.[0-9]+.[0-9]+-*']
   # Re-run a release by dispatching this workflow with a tag selected as the ref.
   workflow_dispatch:
 
@@ -45,13 +51,28 @@ jobs:
         with:
           fetch-depth: 0   # the notes below log against the previous tag
 
+      # The packages are named, and the app reports itself, by project(VERSION)
+      # -- not by the tag. A tag on a commit whose version was not bumped would
+      # publish last release's version number under this release's name.
+      - name: Check the version
+        run: |
+          tag="${{ github.ref_name }}"
+          version=$(grep -m1 -oE '^ +VERSION [0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt | awk '{print $2}')
+          if [ "${tag%%-*}" != "$version" ]; then
+            echo "::error::Tag $tag does not match project(VERSION $version) in CMakeLists.txt."
+            exit 1
+          fi
+
       # Nothing here lands through a pull request, so --generate-notes has no
       # titles to list and prints the compare link alone. The commit subjects
       # are the changelog; GitHub turns the trailing short SHA into a link.
       - name: Write release notes
         run: |
           tag="${{ github.ref_name }}"
-          prev=$(git describe --tags --abbrev=0 --match '[0-9]*.[0-9]*.[0-9]*' "${tag}^" 2>/dev/null || true)
+          # The last plain release, never a pre-release: an rc's notes, and
+          # the final release's after it, both cover everything since then.
+          prev=$(git describe --tags --abbrev=0 --match '[0-9]*.[0-9]*.[0-9]*' \
+                   --exclude '*-*' "${tag}^" 2>/dev/null || true)
 
           # No previous tag on the first release: log the whole history.
           if [ -n "$prev" ]; then range="${prev}..${tag}"; else range="$tag"; fi
@@ -76,11 +97,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="${{ github.ref_name }}"
+          pre=()
+          case "$tag" in *-*) pre=(--prerelease) ;; esac
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "Release $tag already exists; reusing it."
-            gh release edit "$tag" --notes-file notes.md
+            gh release edit "$tag" --notes-file notes.md "${pre[@]}"
           else
-            gh release create "$tag" --draft --verify-tag \
+            gh release create "$tag" --draft --verify-tag "${pre[@]}" \
               --title "Transcriptor $tag" --notes-file notes.md
           fi
 
@@ -179,4 +202,9 @@ jobs:
           tag="${{ github.ref_name }}"
           gh release view "$tag" --json assets \
             --jq '.assets[] | "\(.name)  \(.size)"'
-          gh release edit "$tag" --draft=false
+          # Said again here, not trusted from the draft: a pre-release that
+          # went out as the latest release is one every installed copy offers.
+          case "$tag" in
+            *-*) gh release edit "$tag" --draft=false --prerelease --latest=false ;;
+            *)   gh release edit "$tag" --draft=false ;;
+          esac
