@@ -129,13 +129,15 @@ matching CUDA or Vulkan driver.
 `-DCMAKE_CUDA_COMPILER=/path/to/nvcc`).
 
 **Running** a CUDA build needs the [CUDA
-Toolkit](https://developer.nvidia.com/cuda-downloads) installed, version 12.x.
-The package does not carry `cudart` / `cublas` / `cublasLt`: those come with
-the toolkit rather than with the driver, and cuBLAS alone is most of a
-gigabyte, which made the CUDA download about ten times the size of every other
-one. Without the toolkit the binary does not start, and says which library it
-wanted: `libcudart.so.12: cannot open shared object file`, or `cudart64_12.dll
-was not found`. A toolkit of a different major version reports the same thing.
+Toolkit](https://developer.nvidia.com/cuda-downloads) installed, version 13.x,
+an NVIDIA driver 580 or newer, and a Turing card or newer (RTX 20xx, GTX 16xx
+and up). The package does not carry `cudart` / `cublas` / `cublasLt`: those
+come with the toolkit rather than with the driver, and cuBLAS alone is most of
+a gigabyte, which made the CUDA download about ten times the size of every
+other one. Without the toolkit the binary does not start, and says which
+library it wanted: `libcudart.so.13: cannot open shared object file`, or
+`cudart64_13.dll was not found`. A 12.x toolkit reports the same thing — its
+libraries carry a different major version, and 12.x is no longer supported.
 
 Worth knowing before you pick a download: the Vulkan build also runs on NVIDIA
 cards, since the driver ships a Vulkan implementation, and it needs nothing
@@ -150,23 +152,22 @@ large kernel, across 126 CUDA files.
 
 | Architecture | Cards | Shipped as |
 |---|---|---|
-| Pascal | GTX 10xx | native SASS + PTX |
-| Turing | RTX 20xx, GTX 16xx | native SASS |
+| Turing | RTX 20xx, GTX 16xx | native SASS + PTX |
 | Ampere | RTX 30xx | native SASS |
 | Ada | RTX 40xx | native SASS |
 | Blackwell | RTX 50xx | native SASS |
-| anything else | V100, A100, H100, future GPUs | PTX, JIT-compiled on first run |
+| anything else | A100, H100, future GPUs | PTX, JIT-compiled on first run |
 
 Every consumer card in that table runs code compiled ahead of time, so there is
-no first-launch JIT stall. The Pascal entry also carries PTX, which the driver
+no first-launch JIT stall. The Turing entry also carries PTX, which the driver
 can JIT for any newer GPU that is not listed explicitly — that is what keeps
 datacenter parts and future hardware working.
 
-This is why CI pins its CUDA toolkit to **12.9.2**, and the window is narrow in
-both directions: CUDA 13 removed Pascal outright (asking it for `compute_61` is
-a hard `nvcc fatal`, not a warning), while Blackwell SASS needs 12.8 or newer.
-Staying on 12.x also keeps the driver floor at 525+ rather than the 580+ that
-13.x would demand of end users.
+CI builds with CUDA **13.3.1**, and CUDA 13 is what sets the floor: it removed
+Maxwell, Pascal and Volta outright, so GTX 9xx and 10xx, Titan V and V100 have
+no CUDA build — the Vulkan build runs on them. The cards with native code need
+a 580+ driver; the ones that JIT the PTX need a driver at least as new as the
+13.3 toolkit.
 
 Building with `TRANSCRIPTOR_NATIVE=ON` replaces the list with `native` — one
 architecture, the build machine's. Much faster to build, unusable elsewhere.

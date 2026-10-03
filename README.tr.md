@@ -130,13 +130,15 @@ CUDA presetini **derlemek** için `nvcc` PATH'te olmalı (ya da
 `-DCMAKE_CUDA_COMPILER=/nvcc/yolu`).
 
 CUDA yapısını **çalıştırmak** için [CUDA
-Toolkit](https://developer.nvidia.com/cuda-downloads) 12.x kurulu olmalıdır.
-Paket `cudart` / `cublas` / `cublasLt` kütüphanelerini taşımaz: bunlar
-sürücüyle değil toolkit'le gelir ve tek başına cuBLAS neredeyse bir gigabayt
-tutuyor, bu da CUDA indirmesini diğerlerinin yaklaşık on katı yapıyordu.
-Toolkit yoksa uygulama hiç açılmaz ve hangi kütüphaneyi aradığını söyler:
-`libcudart.so.12: cannot open shared object file` ya da `cudart64_12.dll was
-not found`. Farklı ana sürümde bir toolkit de aynı hatayı verir.
+Toolkit](https://developer.nvidia.com/cuda-downloads) 13.x kurulu olmalı,
+NVIDIA sürücüsü 580 veya üstü olmalı ve kart Turing ya da daha yeni olmalıdır
+(RTX 20xx, GTX 16xx ve üstü). Paket `cudart` / `cublas` / `cublasLt`
+kütüphanelerini taşımaz: bunlar sürücüyle değil toolkit'le gelir ve tek başına
+cuBLAS neredeyse bir gigabayt tutuyor, bu da CUDA indirmesini diğerlerinin
+yaklaşık on katı yapıyordu. Toolkit yoksa uygulama hiç açılmaz ve hangi
+kütüphaneyi aradığını söyler: `libcudart.so.13: cannot open shared object
+file` ya da `cudart64_13.dll was not found`. 12.x toolkit de aynı hatayı verir
+— kütüphaneleri farklı bir ana sürüm taşır ve 12.x artık desteklenmiyor.
 
 İndireceğiniz paketi seçmeden önce: Vulkan yapısı NVIDIA kartlarında da
 çalışır, çünkü Vulkan uygulamasını sürücünün kendisi getirir ve o sürücünün
@@ -153,23 +155,22 @@ saniye.
 
 | Mimari | Kartlar | Nasıl gönderiliyor |
 |---|---|---|
-| Pascal | GTX 10xx | yerel SASS + PTX |
-| Turing | RTX 20xx, GTX 16xx | yerel SASS |
+| Turing | RTX 20xx, GTX 16xx | yerel SASS + PTX |
 | Ampere | RTX 30xx | yerel SASS |
 | Ada | RTX 40xx | yerel SASS |
 | Blackwell | RTX 50xx | yerel SASS |
-| diğer her şey | V100, A100, H100, gelecekteki GPU'lar | PTX, ilk çalıştırmada JIT |
+| diğer her şey | A100, H100, gelecekteki GPU'lar | PTX, ilk çalıştırmada JIT |
 
 Tablodaki her tüketici kartı önceden derlenmiş kod çalıştırır; ilk açılışta
-JIT beklemesi olmaz. Pascal satırı ayrıca PTX taşır ve sürücü bunu listede
+JIT beklemesi olmaz. Turing satırı ayrıca PTX taşır ve sürücü bunu listede
 açıkça yer almayan daha yeni GPU'lar için derleyebilir — veri merkezi
 kartlarını ve gelecekteki donanımı çalışır tutan şey budur.
 
-CI'nin CUDA toolkit'ini **12.9.2**'ye sabitlemesinin sebebi budur ve aralık
-iki yönden de dardır: CUDA 13 Pascal'ı tamamen kaldırdı (ondan `compute_61`
-istemek bir uyarı değil, doğrudan `nvcc fatal` hatasıdır), Blackwell SASS ise
-12.8 veya üstünü ister. 12.x'te kalmak ayrıca sürücü tabanını 525+ seviyesinde
-tutar; 13.x son kullanıcıdan 580+ isterdi.
+CI, CUDA **13.3.1** ile derler ve tabanı CUDA 13 belirler: Maxwell, Pascal ve
+Volta'yı tamamen kaldırdı, bu yüzden GTX 9xx ve 10xx, Titan V ve V100 için CUDA
+yapısı yoktur — bu kartlarda Vulkan yapısı çalışır. Yerel kodu olan kartlar
+580+ sürücü ister; PTX'i JIT ile derleyenler ise en az 13.3 toolkit'i kadar
+yeni bir sürücü ister.
 
 `TRANSCRIPTOR_NATIVE=ON` ile derlerseniz liste yerini `native`'e bırakır: tek
 mimari, derlemeyi yapan makineninki. Derlemesi çok daha hızlıdır, başka yerde

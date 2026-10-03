@@ -42,8 +42,7 @@ set(GGML_OPENMP OFF CACHE BOOL "" FORCE)   # avoids a libomp runtime dependency
 # largest kernel (mmvq.cu): ~16s of shared frontend plus ~31s and ~0.8 MB of
 # fatbin per architecture, so the count is very nearly the whole build cost.
 #
-#   61          Pascal    GTX 10xx      SASS + the PTX fallback below
-#   75-real     Turing    RTX 20xx, GTX 16xx
+#   75          Turing    RTX 20xx, GTX 16xx   SASS + the PTX fallback below
 #   86-real     Ampere    RTX 30xx
 #   89-real     Ada       RTX 40xx
 #   120a-real   Blackwell RTX 50xx
@@ -52,39 +51,39 @@ set(GGML_OPENMP OFF CACHE BOOL "" FORCE)   # avoids a libomp runtime dependency
 # JIT-compiles on first launch (cached afterwards, but the first run stalls);
 # a bare entry ships both. Every consumer card above therefore starts without
 # JIT, and the one bare entry — deliberately the *lowest*, since PTX only JITs
-# forward — is the catch-all that keeps anything unlisted working: V100, A100,
-# H100, and whatever comes after Blackwell.
+# forward — is the catch-all that keeps anything unlisted working: A100, H100,
+# and whatever comes after Blackwell.
 #
 # Measured per architecture on mmvq.cu, which is why this shape and not PTX for
 # the older cards: -virtual 95.8s, -real 106.4s, bare 117.9s. SASS costs ~11%
 # over PTX and is *smaller*, so trading JIT away for native code is nearly free.
-if(TRANSCRIPTOR_CUDA AND NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+#
+# Turing is the floor because CUDA 13 is: it removed Maxwell, Pascal and Volta
+# outright, so GTX 9xx/10xx, Titan V and V100 have no CUDA build. The Vulkan
+# build runs on them through the driver alone.
+if(TRANSCRIPTOR_CUDA)
     find_package(CUDAToolkit QUIET)
-    if(CUDAToolkit_FOUND)
-        if(TRANSCRIPTOR_NATIVE)
-            # Same bargain as the CPU baseline: fastest to build and to run,
-            # for the machine doing the building only.
-            set(_tr_cuda_archs "native")
-        else()
-            set(_tr_cuda_archs "")
-            # CUDA 13 removed Maxwell, Pascal and Volta. Asking it for
-            # compute_61 is not a warning but a hard stop:
-            #   nvcc fatal : Unsupported gpu architecture 'compute_61'
-            # So GTX 10xx support and the CI toolkit pin stand or fall
-            # together; see the CUDA step in .github/workflows/_build.yml.
-            if(CUDAToolkit_VERSION VERSION_LESS "13")
-                list(APPEND _tr_cuda_archs 61 75-real)
-            else()
-                list(APPEND _tr_cuda_archs 75)   # Turing inherits the PTX duty
-            endif()
-            list(APPEND _tr_cuda_archs 86-real 89-real)
-            if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "12.8")
-                list(APPEND _tr_cuda_archs 120a-real)
-            endif()
-        endif()
-        set(CMAKE_CUDA_ARCHITECTURES "${_tr_cuda_archs}" CACHE STRING
-            "CUDA architectures to generate device code for")
+    # The package links cudart and cuBLAS by their CUDA 13 names (see
+    # cmake/package.cmake), and the READMEs tell users to install 13. A build
+    # made with 12.x would ask for libraries nobody was told to install.
+    if(CUDAToolkit_FOUND AND CUDAToolkit_VERSION VERSION_LESS "13")
+        message(FATAL_ERROR
+            "The CUDA build needs CUDA Toolkit 13 or newer; found "
+            "${CUDAToolkit_VERSION} (${CUDAToolkit_BIN_DIR}). CUDA 12.x is no "
+            "longer supported. Install 13.x, or build a Vulkan preset instead.")
     endif()
+endif()
+
+if(TRANSCRIPTOR_CUDA AND NOT DEFINED CMAKE_CUDA_ARCHITECTURES AND CUDAToolkit_FOUND)
+    if(TRANSCRIPTOR_NATIVE)
+        # Same bargain as the CPU baseline: fastest to build and to run, for
+        # the machine doing the building only.
+        set(_tr_cuda_archs "native")
+    else()
+        set(_tr_cuda_archs 75 86-real 89-real 120a-real)
+    endif()
+    set(CMAKE_CUDA_ARCHITECTURES "${_tr_cuda_archs}" CACHE STRING
+        "CUDA architectures to generate device code for")
 endif()
 
 # A CPU baseline the packages can actually run on. ggml defaults GGML_NATIVE to

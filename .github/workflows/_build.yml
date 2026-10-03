@@ -56,27 +56,28 @@ jobs:
       # "cuda-" prefix the sub-packages input applies — hence the second list.
       # visual_studio_integration is what lets CMake identify nvcc on Windows.
       #
-      # The toolkit version is pinned, and the window is narrow. CUDA 13 removed
-      # Pascal, Maxwell and Volta outright — building 61-virtual there is a hard
-      # "nvcc fatal : Unsupported gpu architecture", so 13.x would silently drop
-      # every GTX 10xx user. Blackwell SASS, meanwhile, needs 12.8 or newer.
-      # Only 12.8/12.9 satisfies both, and v0.2.19 could not reach it: it tops
-      # out at 12.6.2 and defaulted to 12.6.1, so RTX 50xx was falling back to
-      # JIT. Hence the action bump alongside the pin.
+      # CUDA 13 split the C runtime headers (crt/host_config.h and friends) and
+      # NVVM (cicc, which compiles the device code) out of nvcc. apt pulls both
+      # in as dependencies of cuda-nvcc; the Windows network installer has no
+      # dependencies, so it has to be asked for "crt" and "nvvm" by name, or
+      # nvcc is there and cannot compile a single kernel. "thrust" is the CCCL
+      # headers, CUB among them, which ggml's sorting kernels include: 12.9
+      # brought them along unasked, and CUDA 13 moved them to include/cccl.
       #
-      # Staying on 12.x also keeps what users need modest: the package links
-      # the 12.x runtime, which they install with any 12.x toolkit and which
-      # runs on a 525+ driver thanks to CUDA minor version compatibility,
-      # where 13.x would demand 580+.
+      # 13.x is the only line supported: the package links cudart and cuBLAS 13
+      # by name, and cmake/dependencies.cmake refuses an older toolkit. 13.3.1
+      # is the newest this action knows, and what the pinned llama.cpp tag
+      # builds its own Windows CUDA release with. CUDA 13 also sets the floor
+      # for users: Turing and newer, on a 580+ driver.
       - name: CUDA toolkit
         if: inputs.cuda
         uses: Jimver/cuda-toolkit@v0.2.36
         with:
-          cuda: '12.9.2'
+          cuda: '13.3.1'
           method: network
           sub-packages: >-
             ${{ runner.os == 'Windows'
-                && '["nvcc", "cudart", "cublas", "cublas_dev", "visual_studio_integration"]'
+                && '["nvcc", "crt", "nvvm", "cudart", "cublas", "cublas_dev", "thrust", "visual_studio_integration"]'
                 || '["nvcc", "cudart", "cccl"]' }}
           non-cuda-sub-packages: >-
             ${{ runner.os == 'Windows' && '[]' || '["libcublas", "libcublas-dev"]' }}

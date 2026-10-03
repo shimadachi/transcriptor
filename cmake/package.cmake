@@ -73,8 +73,8 @@ endif()
 # So the toolkit is a requirement of the CUDA build rather than part of it, and
 # both READMEs say so beside the download. Where it is missing the binary does
 # not start at all, and says which library it wanted before main() runs:
-#   libcudart.so.12: cannot open shared object file: No such file or directory
-#   The code execution cannot proceed because cudart64_12.dll was not found
+#   libcudart.so.13: cannot open shared object file: No such file or directory
+#   The code execution cannot proceed because cudart64_13.dll was not found
 # Anyone who would rather not install it has two builds that need nothing:
 # Vulkan runs on the same NVIDIA cards through the driver's own loader, and the
 # CPU build runs anywhere.
