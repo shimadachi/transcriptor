@@ -173,6 +173,61 @@ void a_preview_that_skipped_ahead_is_not_kept() {
                 why.find("fell behind") != std::string::npos, why);
 }
 
+// V56: a skip kept force_commit's worth of audio whatever the backlog limit
+// was, and cut the rest -- so with a backlog shorter than that, the cut was
+// asked for less than nothing, wrapped round to an enormous count, and erased
+// far past the end of the buffer. The case above only reaches it when the
+// first decode comes back before ten seconds have arrived, which the macOS
+// and Windows runners managed and the Linux ones did not. Here the first
+// decode takes its one-second window and is held there until four seconds
+// wait behind it -- over the two-second backlog, short of the ten it used to
+// keep -- so it happens every time. Held, not raced: a decode that only began
+// after finish() would be the tail pass, which takes everything and never
+// skips.
+void a_skip_never_cuts_more_than_is_buffered() {
+    pipeline::LiveTuning tuning;
+    tuning.max_backlog = 2.0;   // shorter than force_commit's 10 s
+    LiveTranscriber live(tuning);
+    std::atomic<bool> taken{false}, go{false};
+    LiveEngine e = engine();
+    const auto decode = e.decode;
+    e.decode = [&taken, &go, decode](const std::vector<float>& audio,
+                                     const std::atomic<bool>* abort) {
+        taken.store(true);
+        while (!go.load() && !(abort && abort->load())) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return decode(audio, abort);
+    };
+    live.begin(e, kRate);
+    const std::size_t first = feed(live, 0, 1.0);
+    for (int ms = 0; !taken.load() && ms < 5000; ++ms) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    test::check("V56 the first window is taken before the rest arrives", taken.load());
+    const std::size_t take = feed(live, first, 3.0);
+    go.store(true);
+    finish(live);
+
+    const double end = static_cast<double>(take) / kRate;
+    bool in_take = true;
+    std::string stray;
+    const nlohmann::json text = live.text_json(0);   // held: the loop reads into it
+    for (const auto& l : text["lines"]) {
+        const double s = l["start"].get<double>(), t = l["end"].get<double>();
+        if (s < 0.0 || t < s || t > end + 0.01) {
+            in_take = false;
+            stray = std::to_string(s) + " - " + std::to_string(t);
+        }
+    }
+    test::check("V56 a skip with a short backlog keeps every line inside the take",
+                in_take, stray);
+    bool kept = true;
+    const std::string why = missing(live, take, &kept);
+    test::check("V56 and still says it fell behind",
+                !kept && why.find("fell behind") != std::string::npos, why);
+}
+
 void a_take_recorded_with_live_off_has_nothing_to_explain() {
     LiveTranscriber live;
     bool kept = true;
@@ -205,6 +260,7 @@ int main() {
     a_preview_that_failed_is_not_kept();
     a_preview_stopped_before_it_finished_is_not_kept();
     a_preview_that_skipped_ahead_is_not_kept();
+    a_skip_never_cuts_more_than_is_buffered();
     a_take_recorded_with_live_off_has_nothing_to_explain();
     a_new_take_starts_with_a_clean_record();
     return test::summary("live");

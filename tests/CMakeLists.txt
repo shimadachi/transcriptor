@@ -168,7 +168,7 @@ add_test(NAME recording_lifecycle
                  "${CMAKE_CURRENT_BINARY_DIR}/recording_scratch")
 set_tests_properties(recording_lifecycle PROPERTIES TIMEOUT 120)
 
-# -- keeping the live transcript (V55) -----------------------------------------
+# -- keeping the live transcript (V55, V56) ------------------------------------
 # The real LiveTranscriber against a stand-in engine. It stamps its lines with
 # the pipeline's timestamps, so it links the application the way the lifecycle
 # test does -- the stand-in capture included, in the device's place.

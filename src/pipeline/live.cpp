@@ -294,7 +294,14 @@ void LiveTranscriber::apply_locked(std::vector<stt::TranscriptSegment> segs,
     const std::size_t backlog = samples(tuning_.max_backlog, samplerate_);
     const bool skip = buf_.size() > backlog;
     if (skip) {
-        const std::size_t keep = samples(tuning_.force_commit, samplerate_);
+        // What is kept is the start of the next window -- but never more than
+        // the backlog allows, which is less than is buffered by definition of
+        // a skip. Keeping force_commit's worth outright underflowed the cut
+        // below whenever the backlog was the shorter of the two: it erased far
+        // past the end of the buffer, which crashed outright on macOS and
+        // Windows and quietly wrecked the buffer on Linux.
+        const std::size_t keep =
+            std::min(samples(tuning_.force_commit, samplerate_), backlog);
         const double at = static_cast<double>(buf_start_) / samplerate_;
         if (!partial_.empty()) {
             lines_.push_back({partial_start_, partial_end_, partial_});
