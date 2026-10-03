@@ -27,13 +27,14 @@ void presentation_leaves_the_engines_alone() {
     Settings after = before;
     after.summary_template = "standup";
     after.ui_theme = "dark";
+    after.tray = "off";
     after.ui_language = "tr";
     after.summary_language = "tr";
     after.output_dir = "/somewhere/else";
     after.save_audio = !before.save_audio;
     after.auto_summarize = !before.auto_summarize;
     after.custom_templates["custom-1"] = CustomTemplate{"Call", "Summarize the call.", ""};
-    test::check("V7 a template, theme, language or folder change keeps the engines",
+    test::check("V7 a template, theme, tray, language or folder change keeps the engines",
                 before.same_engines(after));
 }
 

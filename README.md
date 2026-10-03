@@ -191,6 +191,17 @@ Run the binary and a window opens. From a console:
 ./transcriptor --port 5005
 ```
 
+On Windows and Linux the app also sits in the system tray. Minimizing the
+window hides it there; click the icon to bring it back, or right-click it to
+start, stop or pause a recording without opening the window. Closing the window
+still quits. Settings → General → System tray chooses how much of this you
+want: minimize to the tray (the default), keep the icon but minimize to the
+taskbar, or no tray icon at all. On Linux the icon needs a panel that shows StatusNotifierItems —
+KDE Plasma does, GNOME needs the AppIndicator extension — and under Wayland,
+where an app is never told it was minimized, "Hide to tray" in the icon's menu
+does the hiding instead. Where no panel can show the icon, minimizing works as
+it always has.
+
 ## Models
 
 No model is bundled. The speech model is chosen and downloaded by hand in
@@ -367,7 +378,7 @@ src/
   diarize/diarizer.*    sherpa-onnx speaker separation
   llm/                  templates + embedded llama.cpp + OpenAI-compatible client
   pipeline/processor.*  transcribe → diarize → speaker attribution
-  app/                  AppState, the /api/* server, native window, embedded assets
+  app/                  AppState, the /api/* server, native window, tray, embedded assets
   util/                 paths, export, library, language, downloads, model registry
 web/                    Interface (compiled into the binary at build time)
   index.html            Markup; translatable strings tagged with data-i18n

@@ -195,6 +195,17 @@ Binary'yi çalıştırın; pencere açılır. Konsoldan:
 ./transcriptor --port 5005
 ```
 
+Windows ve Linux'ta uygulama sistem tepsisinde de durur. Pencereyi simge
+durumuna küçültmek onu tepsiye gizler; geri getirmek için simgeye tıklayın, ya
+da pencereyi açmadan kaydı başlatmak, durdurmak veya duraklatmak için sağ
+tıklayın. Pencereyi kapatmak yine uygulamadan çıkar. Ayarlar → Genel → Sistem
+tepsisi bunun ne kadarını istediğinizi seçer: tepsiye küçült (varsayılan),
+simge tepside kalsın ama görev çubuğuna küçült, ya da tepside hiç simge olmasın. Linux'ta simge için
+StatusNotifierItem gösteren bir panel gerekir — KDE Plasma gösterir, GNOME'da
+AppIndicator eklentisi gerekir — ve uygulamaya küçültüldüğünün hiç
+bildirilmediği Wayland'da gizlemeyi simgenin menüsündeki "Tepsiye gizle" yapar.
+Simgeyi gösterecek bir panel yoksa küçültme her zamanki gibi çalışır.
+
 ## Modeller
 
 Hiçbir model binary'ye gömülü değildir. Konuşma modeli Ayarlar → Genel'den
@@ -330,7 +341,7 @@ src/
   diarize/diarizer.*    sherpa-onnx konuşmacı ayrımı
   llm/                  şablonlar + gömülü llama.cpp + OpenAI uyumlu istemci
   pipeline/processor.*  transcribe → diarize → konuşmacı eşleme
-  app/                  AppState, /api/* sunucusu, native pencere, gömülü varlıklar
+  app/                  AppState, /api/* sunucusu, native pencere, tepsi, gömülü varlıklar
   util/                 yollar, dışa aktarma, arşiv, dil, indirme, model kayıt defteri
 web/                    Arayüz (derleme sırasında binary'ye gömülür)
   index.html            İşaretleme; çevrilecek metinler data-i18n ile etiketli

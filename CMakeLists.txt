@@ -42,6 +42,25 @@ transcriptor_embed_assets(
     ROOT        "${CMAKE_CURRENT_SOURCE_DIR}/web"
     OUTPUT      "${CMAKE_CURRENT_BINARY_DIR}/generated/assets_generated.cpp")
 
+# The Linux tray icon: the same picture the installed launcher uses, compiled in
+# for the same reason the UI is, and sent to the panel as pixels by
+# src/app/tray.cpp. Windows draws its tray icon from the .ico resource, and
+# macOS has no tray.
+if(TRANSCRIPTOR_WEBVIEW AND NOT WIN32 AND NOT APPLE)
+    set(_tray_png "${CMAKE_CURRENT_SOURCE_DIR}/assets/logo-256.png")
+    file(READ "${_tray_png}" _tray_hex HEX)
+    string(REGEX REPLACE "(..)" "0x\\1," _tray_bytes "${_tray_hex}")
+    # CONFIGURE only rewrites the file when the bytes change, so a reconfigure
+    # does not rebuild tray.cpp for nothing.
+    file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/tray_icon.h"
+         CONTENT "// Generated from assets/logo-256.png by CMakeLists.txt -- do not edit.
+#pragma once
+static const unsigned char kTrayIconPng[] = {
+${_tray_bytes}};
+" @ONLY)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_tray_png}")
+endif()
+
 # ---------------------------------------------------------------------------
 # The application
 # ---------------------------------------------------------------------------
@@ -77,7 +96,8 @@ set(TRANSCRIPTOR_CORE_SOURCES
     src/pipeline/live.cpp
     src/app/state.cpp
     src/app/server.cpp
-    src/app/shell.cpp)
+    src/app/shell.cpp
+    src/app/tray.cpp)
 
 add_library(transcriptor_core OBJECT ${TRANSCRIPTOR_CORE_SOURCES})
 

@@ -145,6 +145,7 @@ public:
 
     bool            recording() const { return recording_.load(); }
     bool            processing() const { return processing_.load(); }
+    bool            paused() const;
     std::string     phase() const;
     std::string     message() const;
     paths::fs::path session_dir() const;

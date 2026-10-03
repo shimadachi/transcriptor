@@ -6,13 +6,22 @@
 // has no webview or the platform runtime is missing.
 #pragma once
 
+#include <functional>
 #include <string>
+
+#include "app/tray.h"
 
 namespace transcriptor::app {
 
 // Blocks until the window closes. Returns false if no window could be created
 // (the caller then keeps the server alive for the browser fallback).
-bool run_window(const std::string& url, const std::string& title);
+//
+// `recorder` tells the tray menu what the app's own recorder is doing. It is
+// called on the window's thread, about once a second and whenever the menu
+// opens. A take the page records itself is added to it in here, since only the
+// page knows about one of those.
+bool run_window(const std::string& url, const std::string& title,
+                std::function<TrayStatus()> recorder = {});
 
 // Best-effort: hand the URL to the OS default browser.
 bool open_in_browser(const std::string& url);

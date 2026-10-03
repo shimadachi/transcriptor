@@ -418,6 +418,7 @@ function updateMicMixVisibility() {
 
 // ---- state poll ----
 async function poll() {
+  syncTray();
   let s;
   try { s = await api('/api/state'); } catch { return; }
 
@@ -739,6 +740,44 @@ $('pauseBtn').onclick = async () => {
   if (browserRec) { toggleBrowserPause(); return; }
   const paused = $('pauseBtn').classList.contains('on');
   await post(paused ? '/api/record/resume' : '/api/record/pause');
+};
+
+// ---- tray ----
+// The tray menu (src/app/tray.cpp) asks the app's recorder for its state, but a
+// take recorded here in the page is invisible to it, so the page reports one as
+// it starts, pauses and ends. Only changes are sent: this runs on every poll.
+// window.trayReport and window.trayShow exist only in the native window.
+let traySent = '';
+function syncTray() {
+  if (typeof window.trayReport !== 'function') return;
+  const take = {rec: browserRec, paused: browserPaused,
+                busy: browserStarting || browserUploading};
+  const key = JSON.stringify(take);
+  if (key === traySent) return;
+  traySent = key;
+  window.trayReport(take).catch(() => { traySent = ''; });
+}
+
+// The tray's Start/Stop and Pause. They press this page's own buttons, so a
+// take started from the tray records from the source picked here and is held to
+// the same rules as a click: a disabled button stays unpressed.
+window.trayAction = async (what) => {
+  // A window hidden in the tray has its timers throttled. Act on the state as
+  // it is now, not as the last poll left it.
+  await poll();
+  const btn = $(what === 'pause' ? 'pauseBtn' : 'recBtn');
+  if (!btn || btn.disabled) return;
+  const starting = what === 'record' && !$('recWrap').classList.contains('on');
+  // A capture recorded in the page has to begin in the page: the screen picker
+  // only opens for a real click, and a permission prompt in a hidden window
+  // would wait there with nobody to answer it.
+  if (starting && $('source').value.startsWith('browser:')) {
+    if (typeof window.trayShow === 'function') window.trayShow();
+    toast(t('toast.trayPressRecord'));
+    return;
+  }
+  btn.click();
+  syncTray();
 };
 // Cancel is three actions wearing one button, and each gives up something
 // different. A single "are you sure?" would be worth nothing here, so the
@@ -1500,6 +1539,10 @@ function showClthrNote() {
 async function openSettings() {
   const s = await api('/api/settings');
   $('s_theme').value = s.ui_theme || themePref;
+  // Set either way, since the save sends it back; shown only where the native
+  // window has a tray, which is where it binds trayReport.
+  $('s_tray').value = s.tray || 'minimize';
+  $('trayField').hidden = typeof window.trayReport !== 'function';
   fillDeviceList(s.devices, s.device);
   // Built from the catalog, so the sizes and the "already here" marks are
   // current every time the panel opens. The placeholder is what a fresh
@@ -1569,7 +1612,7 @@ async function openSettings() {
   setupTplEditor(s);
   $('s_uilang').value = s.ui_language || LANG;
   ['s_device','s_model','s_livemodel','s_language','s_llmmodel','s_sumlang','s_llmbackend',
-   's_llmdl','s_uilang','s_theme'].forEach(refreshSelect);
+   's_llmdl','s_uilang','s_theme','s_tray'].forEach(refreshSelect);
   // Assigned, not added: openSettings() runs on every open, and addEventListener
   // would stack another copy of the handler each time.
   $('s_language').onchange = showClthrNote;
@@ -1736,6 +1779,7 @@ $('saveSettings').onclick = async () => {
     summary_language: $('s_sumlang').value,
     ui_language: $('s_uilang').value,
     ui_theme: $('s_theme').value,
+    tray: $('s_tray').value,
     system_gain: parseFloat($('s_sysgain').value),
     mic_gain: parseFloat($('s_micgain').value),
   });
@@ -1747,6 +1791,10 @@ $('saveSettings').onclick = async () => {
   // Already persisted by the POST above, so only apply them locally.
   if ($('s_uilang').value !== LANG) setLang($('s_uilang').value, false);
   if ($('s_theme').value !== themePref) applyTheme($('s_theme').value, false);
+  // The tray picks a new choice up on its next tick; a report now makes that
+  // immediate, since each one has it read the settings again.
+  traySent = '';
+  syncTray();
   // Switching the check off takes the banner down now rather than at the next
   // launch; switching it on looks straight away, so the setting visibly does
   // something either way.

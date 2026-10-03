@@ -499,6 +499,11 @@ void AppState::resume_recording() {
     if (recorder_ && recording_.load()) recorder_->resume();
 }
 
+bool AppState::paused() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return recorder_ && recorder_->paused();
+}
+
 // ---------------------------------------------------------------------------
 // Live transcript
 // ---------------------------------------------------------------------------

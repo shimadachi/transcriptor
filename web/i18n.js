@@ -236,6 +236,9 @@ const STR = {
   'toast.pendingDropped': {en: 'Recording discarded', tr: 'Kayıt silindi'},
   'toast.resolvePending': {en: 'A recording is still waiting to be uploaded — retry, save or discard it first',
                            tr: 'Yüklenmeyi bekleyen bir kayıt var — önce yeniden deneyin, kaydedin ya da silin'},
+  // Start pressed in the tray menu with a browser source picked.
+  'toast.trayPressRecord': {en: 'A browser source has to be started from here — press the record button',
+                            tr: 'Tarayıcı kaynağı buradan başlatılmalı — kayıt düğmesine basın'},
 
   // -- a recording the server has not accepted yet --------------------------
   'pending.k':        {en: 'Not uploaded →', tr: 'Yüklenemedi →'},
@@ -289,6 +292,11 @@ const STR = {
   'set.themeSystem':{en: 'Follow the system', tr: 'Sistemi izle'},
   'set.themeLight': {en: 'Light', tr: 'Aydınlık'},
   'set.themeDark':  {en: 'Dark', tr: 'Karanlık'},
+  'set.tray':         {en: 'System tray', tr: 'Sistem tepsisi'},
+  'set.trayMinimize': {en: 'Minimize to the tray', tr: 'Tepsiye küçült'},
+  'set.trayIcon':     {en: 'Icon in the tray, minimize to the taskbar',
+                       tr: 'Tepside simge, görev çubuğuna küçült'},
+  'set.trayOff':      {en: 'No tray icon', tr: 'Tepside simge yok'},
   'set.lang':       {en: 'Spoken language', tr: 'Konuşma dili'},
   'set.autoDetect': {en: 'Auto-detect', tr: 'Otomatik algıla'},
   'set.sumLang':    {en: 'Summary language', tr: 'Özet dili'},

@@ -37,7 +37,7 @@ void get(const nlohmann::json& j, const char* key, T* out) {
 // later errs on the side of taking effect.
 nlohmann::json engine_view(const Settings& s) {
     nlohmann::json j = s.to_json();
-    for (const char* key : {"ui_language", "ui_theme", "summary_language",
+    for (const char* key : {"ui_language", "ui_theme", "tray", "summary_language",
                             "summary_template", "template_overrides",
                             "custom_templates", "output_dir", "save_audio",
                             "save_transcript", "save_summary", "auto_transcribe",
@@ -111,6 +111,7 @@ nlohmann::json Settings::to_json() const {
 
         {"ui_language", ui_language},
         {"ui_theme", ui_theme},
+        {"tray", tray},
         {"summary_language", summary_language},
         {"summary_template", summary_template},
         {"template_overrides", ov},
@@ -174,6 +175,8 @@ void Settings::from_json(const nlohmann::json& j) {
     if (ui_language != "tr") ui_language = "en";
     get(j, "ui_theme", &ui_theme);
     if (ui_theme != "light" && ui_theme != "dark") ui_theme = "system";
+    get(j, "tray", &tray);
+    if (tray != "icon" && tray != "off") tray = "minimize";
     get(j, "summary_language", &summary_language);
     get(j, "summary_template", &summary_template);
 

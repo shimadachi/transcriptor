@@ -92,6 +92,10 @@ struct Settings {
 
     std::string ui_language      = "en";   // interface chrome: "en" or "tr"
     std::string ui_theme         = "system";  // "system" / "light" / "dark"
+    // The notification-area icon (app/tray.h): "minimize" hides the window in
+    // the tray when it is minimized, "icon" keeps the icon and its menu but
+    // minimizes to the taskbar as usual, "off" shows no icon at all.
+    std::string tray             = "minimize";
     std::string summary_language = "en";
     std::string summary_template = "meeting";
     std::map<std::string, TemplateOverride> template_overrides;

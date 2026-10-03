@@ -927,6 +927,7 @@ bool Server::start() {
 
             {"ui_language", s.ui_language},
             {"ui_theme", s.ui_theme},
+            {"tray", s.tray},
             {"summary_language", s.summary_language},
             {"summary_template", s.summary_template},
             {"templates", templates},
@@ -1030,6 +1031,8 @@ bool Server::start() {
         if (s.ui_language != "tr") s.ui_language = "en";
         str("ui_theme", &s.ui_theme);
         if (s.ui_theme != "light" && s.ui_theme != "dark") s.ui_theme = "system";
+        str("tray", &s.tray);
+        if (s.tray != "icon" && s.tray != "off") s.tray = "minimize";
         str("summary_language", &s.summary_language);
         str("summary_template", &s.summary_template);
         str("output_dir", &s.output_dir);

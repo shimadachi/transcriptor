@@ -376,6 +376,14 @@
             <option value="light" data-i18n="set.themeLight">Light</option>
             <option value="dark" data-i18n="set.themeDark">Dark</option>
           </select></div>
+        <!-- Only where there is a tray to put an icon in: the native window on
+             Windows and Linux. openSettings() unhides it. -->
+        <div class="field" id="trayField" hidden><label for="s_tray" data-i18n="set.tray">System tray</label>
+          <select id="s_tray">
+            <option value="minimize" data-i18n="set.trayMinimize">Minimize to the tray</option>
+            <option value="icon" data-i18n="set.trayIcon">Icon in the tray, minimize to the taskbar</option>
+            <option value="off" data-i18n="set.trayOff">No tray icon</option>
+          </select></div>
         <div class="field"><label for="s_language" data-i18n="set.lang">Spoken language</label>
           <select id="s_language"><option value="en">English</option>
             <option value="tr">Türkçe</option>

@@ -217,7 +217,15 @@ int run(const std::vector<std::string>& args) {
     if (!opts.no_window) {
         windowed = app::run_window(
             url, L("Transcriptor · audio · text · summary",
-                   "Transcriptor · ses · metin · özet"));
+                   "Transcriptor · ses · metin · özet"),
+            [&state] {
+                app::TrayStatus s;
+                s.recording = state.recording();
+                s.paused = s.recording && state.paused();
+                s.can_record = !state.processing();
+                s.mode = app::tray_mode(state.settings_copy().tray);
+                return s;
+            });
     }
 
     if (!windowed) {

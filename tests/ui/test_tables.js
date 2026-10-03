@@ -286,6 +286,66 @@ for (const [name, t] of THEMES) {
   }
 }
 
+// -- the tray's calls into the page --------------------------------------------
+// The tray menu drives the page by name: src/app/shell.cpp evaluates
+// window.trayAction('record' | 'pause') and binds trayReport and trayShow for
+// the page to call. Both sides check before calling, so a rename on either one
+// throws nothing anywhere -- the tray's menu just stops doing anything.
+{
+  const shell = read('src/app/shell.cpp');
+  const app = read('web/app.js');
+  const actions = [...shell.matchAll(/window\.trayAction\('(\w+)'\)/g)].map(m => m[1]);
+  const bindings = [...shell.matchAll(/window\.bind\("(\w+)"/g)].map(m => m[1]);
+  const handler = app.match(/window\.trayAction = async \(what\) => \{[\s\S]*?\n\};/);
+  check('shell.cpp still sends the tray actions', actions.length > 0, actions.join(', '));
+  check('shell.cpp still binds the calls the page makes', bindings.length > 0,
+        bindings.join(', '));
+  check('web/app.js still defines window.trayAction', handler !== null);
+  for (const a of actions) {
+    check(`window.trayAction tells '${a}' apart`,
+          Boolean(handler && handler[0].includes(`what === '${a}'`)));
+  }
+  for (const b of bindings) {
+    check(`web/app.js calls window.${b}`, app.includes(`window.${b}(`));
+  }
+  const e = STR && STR['toast.trayPressRecord'];
+  check('the tray\'s "start it here" toast is translated in both languages',
+        Boolean(e && e.en && e.tr));
+}
+
+// -- the tray setting's choices -----------------------------------------------
+// The settings menu offers them, config.json and the settings POST each keep
+// only the values they recognise, and the tray reads one back. A choice the
+// C++ does not know is quietly saved as the default: the menu would show it
+// picked and the tray would go on doing something else.
+{
+  const menu = html.match(/<select id="s_tray">([\s\S]*?)<\/select>/);
+  const offered = menu ? [...menu[1].matchAll(/value="([^"]*)"/g)].map(m => m[1]) : [];
+  const rule = /if \((\w+(?:\.\w+)?) != "(\w+)" && \1 != "(\w+)"\) \1 = "(\w+)";/;
+  const kept = src => {
+    const line = read(src).split('\n').find(l => rule.test(l) && /\btray\b/.test(l));
+    const m = line && rule.exec(line);
+    return m ? [m[2], m[3], m[4]].sort() : [];
+  };
+  const tray = read('src/app/tray.cpp');
+  const parsed = ['icon', 'off'].filter(v => tray.includes(`setting == "${v}"`));
+  check('Settings → System tray still offers its choices', offered.length > 0,
+        offered.join(', '));
+  for (const src of ['src/config.cpp', 'src/app/server.cpp']) {
+    check(`${src} keeps exactly the choices the menu offers`,
+          kept(src).join() === [...offered].sort().join(),
+          `menu [${offered}] vs kept [${kept(src)}]`);
+  }
+  check('tray_mode() reads every non-default choice', parsed.length === 2,
+        parsed.join(', '));
+  if (menu && STR) {
+    for (const m of menu[1].matchAll(/data-i18n="([^"]+)"/g)) {
+      check(`${m[1]} is translated in both languages`,
+            Boolean(STR[m[1]] && STR[m[1]].en && STR[m[1]].tr));
+    }
+  }
+}
+
 console.log(failures === 0 ? '\ntables: all checks passed'
                            : `\ntables: ${failures} check(s) FAILED`);
 process.exit(failures === 0 ? 0 : 1);
