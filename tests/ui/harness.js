@@ -117,6 +117,7 @@ function createEnv(root, opts) {
     // What /api/library lists, and every URL the page asked for, in order.
     library: {sessions: []},
     requests: [],
+    downloads: [],         // the body of each POST /api/model/download
   };
 
   const media = {stopped: 0, ctxClosed: 0, failAt: null, recorders: []};
@@ -152,6 +153,10 @@ function createEnv(root, opts) {
       server.cancels.push({state: JSON.parse(JSON.stringify(server.state)),
                            body: JSON.parse((opts && opts.body) || '{}')});
       return {json: async () => server.cancelReply};
+    }
+    if (url === '/api/model/download') {
+      server.downloads.push(JSON.parse((opts && opts.body) || '{}'));
+      return {json: async () => ({ok: true})};
     }
     if (url === '/api/library') return {json: async () => server.library};
     if (url === '/api/sources') return {json: async () => ({sources: []})};

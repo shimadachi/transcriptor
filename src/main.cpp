@@ -138,8 +138,13 @@ int run_check(const Settings& settings) {
     std::printf("  Whisper (%s): %s\n",
                 settings.whisper_model.empty() ? "-" : settings.whisper_model.c_str(),
                 speech_missing.empty() ? ready : speech_missing.c_str());
+    // Not "will be downloaded": a transcription no longer fetches it, so it
+    // only arrives with a speech model or from the studio's caution.
     std::printf(L("  Voice detector     : %s\n", "  Konuşma algılayıcı : %s\n"),
-                models::vad_ready() ? ready : will_get);
+                models::vad_ready()
+                    ? ready
+                    : L("not downloaded (the studio offers it)",
+                        "indirilmemiş (stüdyo indirmeyi önerir)"));
     if (diarize::Diarizer::supported()) {
         std::printf(L("  Speaker separation : %s\n", "  Konuşmacı ayrımı : %s\n"),
                     !settings.enable_diarization

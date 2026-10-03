@@ -353,7 +353,8 @@ std::string ensure_whisper_model_file(const WhisperModelSpec& spec,
     // The detector rides along with the weights: it is a thousandth of their
     // size and the transcriber wants it every time. Its failure is not this
     // download's failure, though -- the speech model is there, transcription
-    // works without the detector, and the pipeline tries the fetch again.
+    // works without the detector, and the studio offers the detector on its own
+    // for as long as it is missing.
     ensure_vad_model(progress, cancel);
     return {};
 }

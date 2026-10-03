@@ -1380,6 +1380,10 @@ bool AppState::start_model_download(const std::string& kind,
     // The two speaker models are one thing to the person waiting for them, so
     // they are one download here — and they carry no catalog id.
     const bool diarize = (kind == "diarize");
+    // The voice detector has no catalog id either. It comes with any speech
+    // model, and on its own only from the studio's caution: a transcription
+    // never fetches it.
+    const bool vad = (kind == "vad");
     // The live transcript's model comes out of the same catalog as the
     // transcript's, and lands in the same place; only the setting it is
     // chosen for differs.
@@ -1388,11 +1392,11 @@ bool AppState::start_model_download(const std::string& kind,
         llm = models::llm_spec(model_id);
     } else if (kind == "whisper" || live) {
         stt = models::whisper_catalog_entry(model_id);
-    } else if (!diarize) {
+    } else if (!diarize && !vad) {
         if (error) *error = L("Unknown model kind: ", "Bilinmeyen model türü: ") + kind;
         return false;
     }
-    if (!diarize && !llm && !stt) {
+    if (!diarize && !vad && !llm && !stt) {
         if (error) *error = L("Unknown model: ", "Bilinmeyen model: ") + model_id;
         return false;
     }
@@ -1403,8 +1407,16 @@ bool AppState::start_model_download(const std::string& kind,
         }
         return false;
     }
+    if (vad && models::vad_ready()) {
+        if (error) {
+            *error = L("The voice detector is already downloaded.",
+                       "Konuşma algılayıcı zaten indirilmiş.");
+        }
+        return false;
+    }
     const std::string label = llm  ? llm->label
                             : stt  ? stt->label
+                            : vad  ? L("Voice detector", "Konuşma algılayıcı")
                                    : L("Speaker models", "Konuşmacı modelleri");
     // Built here rather than glued to the label at the end: the speaker pair is
     // plural, and "Speaker models is ready." is what gluing produced.
@@ -1425,7 +1437,7 @@ bool AppState::start_model_download(const std::string& kind,
     {
         std::lock_guard<std::mutex> lock(mutex_);
         dl_kind_     = kind;
-        dl_model_    = diarize ? kind : model_id;
+        dl_model_    = (diarize || vad) ? kind : model_id;
         dl_label_    = label;
         dl_message_  = lang::english() ? "Downloading " + label + "…"
                                        : label + " indiriliyor…";
@@ -1440,7 +1452,7 @@ bool AppState::start_model_download(const std::string& kind,
     const models::LlmModelSpec     llm_copy = llm ? *llm : models::LlmModelSpec{};
     const models::WhisperModelSpec stt_copy = stt ? *stt : models::WhisperModelSpec{};
 
-    download_thread_ = std::thread([this, is_llm, diarize, live, llm_copy, stt_copy,
+    download_thread_ = std::thread([this, is_llm, diarize, vad, live, llm_copy, stt_copy,
                                     ready] {
         auto progress = [this](const std::string& msg, double fraction) {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -1459,6 +1471,8 @@ bool AppState::start_model_download(const std::string& kind,
                 // afterwards -- the pipeline finds these by name.
                 err = models::ensure_diarization_models(settings_copy(), progress,
                                                         &dl_cancel_);
+            } else if (vad) {
+                err = models::ensure_vad_model(progress, &dl_cancel_);   // same
             } else if (is_llm) {
                 err  = models::ensure_llm_model(llm_copy, progress, &dl_cancel_);
                 file = models::llm_model_file(llm_copy);
@@ -1489,7 +1503,7 @@ bool AppState::start_model_download(const std::string& kind,
             next = settings_;
         }
 
-        if (err.empty() && !diarize) {
+        if (err.empty() && !diarize && !vad) {
             // Point the engine at what we just fetched, so the user does not
             // have to pick it again afterwards.
             if (is_llm) {
@@ -1596,6 +1610,9 @@ nlohmann::json AppState::state_json() const {
         {"diar_supported", diarize::Diarizer::supported()},
         {"diar_cached", models::diarization_ready(settings_)},
         {"stt_cached", models::whisper_ready(settings_)},
+        // The studio offers the voice detector while this is false; nothing
+        // else will fetch it.
+        {"vad_cached", models::vad_ready()},
         {"output_dir", session_dir_.empty()
                            ? nlohmann::json(nullptr)
                            : nlohmann::json(paths::to_utf8(session_dir_))},

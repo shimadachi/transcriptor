@@ -72,6 +72,8 @@ const STR = {
                        tr: '<b>Konuşmacı ayrımı modelleri henüz inmedi.</b> İlk kayıtta kendiliğinden inecek (≈ 75 MB) — şimdi indirmek için buraya tıklayın.'},
   'note.liveMissing': {en: '<b>Live transcript is on, but its model is not ready.</b> It has a model of its own — click here to pick one in Settings and fetch it.',
                        tr: '<b>Canlı metin açık, ama modeli hazır değil.</b> Kendine ait bir modeli var — Ayarlar\'dan birini seçip indirmek için buraya tıklayın.'},
+  'note.vadMissing':  {en: '<b>The voice detector is not downloaded.</b> Without it Whisper can write text nobody said over silence, and lose real words next to it — click here to fetch it (≈ 0.9 MB).',
+                       tr: '<b>Konuşma algılayıcı indirilmemiş.</b> O olmadan Whisper sessizliğin üzerine kimsenin söylemediği bir metin yazabilir ve yanındaki gerçek sözleri kaybedebilir — indirmek için buraya tıklayın (≈ 0,9 MB).'},
   'note.diarRetry':   {en: ' — click to try again.', tr: ' — yeniden denemek için tıklayın.'},
   'note.diarUnbuilt': {en: '<b>This build was compiled without speaker separation.</b> The transcript comes out unlabelled.',
                        tr: '<b>Bu sürüm konuşmacı ayrımı olmadan derlendi.</b> Metin etiketsiz üretilir.'},

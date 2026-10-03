@@ -160,7 +160,9 @@ public:
     // Downloads a catalog model into the models dir in the background and,
     // once it lands, points the settings at it. `kind` is "llm" (a GGUF for
     // the summarizer), "whisper" (speech weights) or "live" (speech weights
-    // for the live transcript, out of the same catalog). Returns false and fills
+    // for the live transcript, out of the same catalog); "diarize" and "vad"
+    // fetch the speaker models and the voice detector, which have no catalog
+    // id and point no setting anywhere. Returns false and fills
     // `error` when the kind or id is unknown, or a download is already
     // running — there is one slot, deliberately: two multi-gigabyte fetches
     // over one connection finish later than the same two in sequence.
@@ -375,7 +377,7 @@ private:
     std::string save_error_;   // guarded by mutex_
 
     // Summarizer model download, guarded by mutex_ except for the flag.
-    std::string dl_kind_;          // "llm" | "whisper" | "live" | "diarize", "" = never
+    std::string dl_kind_;          // "llm" | "whisper" | "live" | "diarize" | "vad", "" = never
     std::string dl_model_;         // catalog id, "" when never started
     std::string dl_label_;
     std::string dl_message_;

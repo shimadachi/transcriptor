@@ -161,13 +161,13 @@ ProcessResult OfflineProcessor::run(const std::vector<float>& audio, int sampler
     }
     throw_if_aborted();
 
-    // Under a megabyte, and the transcription is better for it every time, so
-    // it is fetched here as well as with the speech weights -- an install from
-    // before the detector existed has the weights already and would otherwise
-    // never pick it up. The error is deliberately dropped: a machine that is
-    // offline still gets its transcript, just without the detector in front.
-    models::ensure_vad_model(report("transcribe"), &dl_cancel_);
-    throw_if_aborted();
+    // The voice detector is used when it is on disk and never fetched from
+    // here. It used to be: every transcription on an install without it went
+    // to the network first -- unasked, in an app that promises to stay on the
+    // machine -- and on a network that drops traffic rather than refusing it,
+    // curl's retries held each run back by a minute and a half before a word
+    // was decoded. It arrives with the speech weights, and an install that
+    // predates it is offered it in the studio.
 
     // Swap the handle under the lock, then work through a raw pointer outside
     // it: transcribe() is minutes long and must not hold off a cancellation,

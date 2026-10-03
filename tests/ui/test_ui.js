@@ -17,6 +17,8 @@
 //   V23 a summary cut off at the maximum answer length was shown as finished
 //   V25 Tab walked out of the confirm dialog, and Space pressed what was behind it
 //   V26 the studio's Stop discarded a run that finished as it was being stopped
+//   V30 a transcription went online for the voice detector; the studio is now
+//       where an install without it fetches it, on request
 
 const path = require('path');
 const {createEnv} = require('./harness');
@@ -847,6 +849,45 @@ async function run() {
           String(readout()));
     check('V23 while the new version is still opened',
           itemAsked(env).includes('summary=short'), itemAsked(env));
+  }
+
+  // ---------------------------------------------------------------- V30 ----
+  // The transcription no longer fetches the voice detector, so an install
+  // without it has to be offered it -- and the offer has to fetch on request.
+  {
+    const env = createEnv(ROOT);
+    Object.assign(env.server.state, {stt_cached: true, vad_cached: false});
+    await env.app.poll();
+    await env.settle();
+    const hint = env.els.diarHint;
+    check('V30 a missing voice detector is offered in the studio',
+          hint.style.display === 'block' && hint.innerHTML.includes('note.vadMissing'),
+          hint.innerHTML);
+    const link = {dataset: {go: 'vad'}};
+    hint.fire('click', {target: {closest: () => link}, preventDefault: () => {}});
+    await env.settle();
+    check('V30 and the offer fetches it, and only it',
+          env.server.downloads.length === 1 && env.server.downloads[0].kind === 'vad',
+          JSON.stringify(env.server.downloads));
+  }
+  {
+    const env = createEnv(ROOT);
+    Object.assign(env.server.state, {stt_cached: true, vad_cached: true});
+    await env.app.poll();
+    await env.settle();
+    check('V30 nothing is offered once it is here',
+          !env.els.diarHint.innerHTML.includes('note.vadMissing'));
+  }
+  {
+    // Before a speech model exists, that model's caution comes first, and its
+    // download brings the detector along.
+    const env = createEnv(ROOT);
+    Object.assign(env.server.state, {stt_cached: false, vad_cached: false});
+    await env.app.poll();
+    await env.settle();
+    check('V30 nor before there is a speech model to use it with',
+          !env.els.diarHint.innerHTML.includes('note.vadMissing'),
+          env.els.diarHint.innerHTML);
   }
 
   console.log(failures ? `\nui: ${failures} check(s) FAILED`

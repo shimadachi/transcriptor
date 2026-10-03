@@ -23,6 +23,11 @@
 // V12: a stopped job ends on "idle" like any other, so the page could not tell
 // a stopped library re-run from a finished one; and the library's Stop must
 // never fall back to discarding the studio's take.
+//
+// V30: every transcription on an install without the voice detector went to
+// the network for it first, unasked -- in an app that says it stays on the
+// machine -- and on a network that drops traffic, curl's retries held each run
+// back by a minute and a half.
 
 #include <chrono>
 #include <cstdio>
@@ -81,22 +86,29 @@ bool valid_utf8(const std::string& s) {
     return true;
 }
 
-// An ffmpeg on PATH that runs `script` instead of decoding anything.
-struct FakeDecoder {
+// A program on PATH -- ffmpeg, curl -- that runs `script` instead.
+struct FakeTool {
     paths::fs::path bin;
     std::string     saved_path;
 
-    FakeDecoder(const paths::fs::path& dir, const std::string& script)
-        : bin(dir / "bin") {
+    FakeTool(const paths::fs::path& dir, const std::string& name,
+             const std::string& script)
+        : bin(dir / ("bin-" + name)) {
         std::error_code ec;
         paths::fs::create_directories(bin, ec);
-        paths::write_file(bin / "ffmpeg", "#!/bin/sh\n" + script);
-        paths::fs::permissions(bin / "ffmpeg", paths::fs::perms::owner_all, ec);
+        paths::write_file(bin / name, "#!/bin/sh\n" + script);
+        paths::fs::permissions(bin / name, paths::fs::perms::owner_all, ec);
         const char* p = std::getenv("PATH");
         saved_path = p ? p : "";
         setenv("PATH", (paths::to_utf8(bin) + ":" + saved_path).c_str(), 1);
     }
-    ~FakeDecoder() { setenv("PATH", saved_path.c_str(), 1); }
+    ~FakeTool() { setenv("PATH", saved_path.c_str(), 1); }
+};
+
+// An ffmpeg on PATH that runs `script` instead of decoding anything.
+struct FakeDecoder : FakeTool {
+    FakeDecoder(const paths::fs::path& dir, const std::string& script)
+        : FakeTool(dir, "ffmpeg", script) {}
 };
 
 // An upload the decoder chokes on, then what /api/state says about it.
@@ -341,6 +353,43 @@ void test_a_summary_cut_at_the_limit_says_so() {
                 whole.saved && !whole.cut_short && whole.message == "Done", whole.message);
 }
 
+void test_a_transcription_stays_off_the_network() {
+    const paths::fs::path dir = fresh_dir();
+    fake_capture::reset();
+    // A curl that only leaves a mark: any call at all is the bug.
+    const paths::fs::path mark = dir / "curl-ran";
+    const FakeTool curl(dir, "curl", "touch '" + paths::to_utf8(mark) + "'\nexit 6\n");
+
+    // A speech model "on disk" and no voice detector: the state an install
+    // from before the detector is in. The run itself fails on the fake model,
+    // which is fine -- the question is what it did before getting there.
+    Settings s = test_settings(dir / "out");
+    const paths::fs::path model = dir / "fake-whisper.bin";
+    paths::write_file(model, "not really a model");
+    s.whisper_model_path = paths::to_utf8(model);
+    const paths::fs::path wav = dir / "take.wav";
+    exporter::save_audio_wav(wav, std::vector<float>(32000, 0.1f), 16000);
+
+    app::AppState state(s);
+    std::string error;
+    const bool held = state.process_file(wav, "take.wav");
+    const bool started = held && state.start_transcribe(&error);
+    for (int i = 0; i < 500 && state.processing(); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    std::error_code ec;
+    test::check("V30 a transcription runs", started, error);
+    test::check("V30 and never goes to the network for the voice detector",
+                !paths::fs::exists(mark, ec));
+    test::check("V30 the page is told the detector is missing, to offer it",
+                state.state_json().value("vad_cached", true) == false);
+
+    // The offer is the one way it arrives now, so the kind has to be accepted.
+    test::check("V30 the detector can be fetched on request",
+                state.start_model_download("vad", "vad", &error), error);
+    state.shutdown();
+}
+
 void test_utf8_cuts() {
     const std::string s = "a\xC5\x9F" "b";   // "aşb"
     test::check("V3 a cut from the front backs off to a character boundary",
@@ -378,6 +427,7 @@ int main(int argc, char** argv) {
     test_stopping_a_job_never_discards_the_take();
     test_both_download_reports_agree();
     test_a_summary_cut_at_the_limit_says_so();
+    test_a_transcription_stays_off_the_network();
 
     return test::summary("api");
 }

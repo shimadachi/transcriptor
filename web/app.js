@@ -527,6 +527,22 @@ async function poll() {
     }
   }
   if (s.diarization_enabled && !s.diar_supported) notes.push(t('note.diarUnbuilt'));
+  // The voice detector is never fetched by a transcription, so this is how an
+  // install that predates it gets it. Only once a speech model is here: until
+  // then that model's own caution comes first, and its download brings the
+  // detector along.
+  if (s.stt_cached && s.vad_cached === false) {
+    if (dl.active && dl.kind === 'vad') {
+      const pct = dl.progress == null ? '' : pctText(dl.progress);
+      notes.push('<span class="caution busy">' +
+                 esc(dl.message || t('llm.downloading')) + pct + '</span>');
+    } else if (dl.kind === 'vad' && dl.error && !dl.cancelled) {
+      notes.push('<a class="caution err" data-go="vad">' + esc(dl.error) +
+                 t('note.diarRetry') + '</a>');
+    } else {
+      notes.push('<a class="caution" data-go="vad">' + t('note.vadMissing') + '</a>');
+    }
+  }
   if (notes.length) {
     hint.style.display = 'block';
     hint.innerHTML = notes.join('<br>');
@@ -1631,6 +1647,12 @@ $('diarHint').addEventListener('click', async (e) => {
   // The next poll picks the state up from /api/state and redraws the line.
   if (link.dataset.go === 'diar') {
     const r = await post('/api/model/download', {kind: 'diarize', id: 'diarize'});
+    if (r.error) toast(r.error);
+    return;
+  }
+  // The voice detector likewise: one file, nothing to choose.
+  if (link.dataset.go === 'vad') {
+    const r = await post('/api/model/download', {kind: 'vad', id: 'vad'});
     if (r.error) toast(r.error);
     return;
   }
