@@ -222,10 +222,15 @@ bool write_file(const fs::path& p, const std::string& data) {
 //
 // The list form exists for files that only mean anything together: transcript
 // .txt and .json are one result in two shapes, and replacing one of them while
-// the other keeps yesterday's text is its own kind of loss.
+// the other keeps yesterday's text is its own kind of loss. Staging covers a
+// write that fails; a rename that fails half way through the set -- on Windows,
+// a destination something else holds open -- would still leave the first file
+// replaced and the second not, so the old content of each is copied aside
+// first and put back if the set does not land whole.
 bool write_files(const std::vector<std::pair<fs::path, std::string>>& files) {
     std::error_code ec;
     std::vector<fs::path> staged;
+    std::vector<fs::path> kept(files.size());
     staged.reserve(files.size());
 
     // Every temp goes, whichever way this ends -- including the ones already
@@ -238,7 +243,7 @@ bool write_files(const std::vector<std::pair<fs::path, std::string>>& files) {
                 if (!p.empty()) fs::remove(p, e);
             }
         }
-    } sweep{staged};
+    } sweep_staged{staged}, sweep_kept{kept};
 
     for (const auto& [path, data] : files) {
         if (path.has_parent_path()) fs::create_directories(path.parent_path(), ec);
@@ -247,9 +252,40 @@ bool write_files(const std::vector<std::pair<fs::path, std::string>>& files) {
         if (!spill(tmp, data)) return false;
     }
 
+    // Copied, not moved: each destination stays where it is, whole, the whole
+    // time. A single file needs none of this -- its rename either happens or
+    // does not -- and something that is not a regular file has nothing to keep.
+    if (files.size() > 1) {
+        for (std::size_t i = 0; i < files.size(); ++i) {
+            if (!fs::is_regular_file(files[i].first, ec)) continue;
+            const fs::path copy = staging_name(files[i].first);
+            kept[i] = copy;
+            if (!fs::copy_file(files[i].first, copy,
+                               fs::copy_options::overwrite_existing, ec) || ec) {
+                return false;   // nothing has been replaced yet
+            }
+        }
+    }
+
     for (std::size_t i = 0; i < files.size(); ++i) {
         fs::rename(staged[i], files[i].first, ec);
-        if (ec) return false;
+        if (ec) {
+            // Put back what this set had already replaced. A file that did not
+            // exist before goes again, rather than stand there half a pair.
+            for (std::size_t j = 0; j < i; ++j) {
+                std::error_code e;
+                if (!kept[j].empty()) {
+                    // Cleared either way: back in place, or -- if even that
+                    // fails -- left beside it rather than swept, since it is
+                    // then the only copy of what was there.
+                    fs::rename(kept[j], files[j].first, e);
+                    kept[j].clear();
+                } else {
+                    fs::remove(files[j].first, e);
+                }
+            }
+            return false;
+        }
         staged[i].clear();   // it is the destination now; do not sweep it away
     }
     return true;

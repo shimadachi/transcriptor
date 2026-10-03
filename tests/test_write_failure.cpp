@@ -13,6 +13,8 @@
 // RLIMIT_FSIZE=0 makes every write fail while leaving the filesystem alone.
 //
 // V4 lives here too: a transcript lost because its JSON could not be written.
+//
+// V37: a pair whose second rename failed was left half replaced.
 
 #include "util/export.h"
 #include "util/paths.h"
@@ -142,6 +144,23 @@ int main(int argc, char** argv) {
                 contents(tx_txt) == "first pass\n", contents(tx_txt));
     test::check("a failed transcript replacement keeps the old json",
                 contents(tx_json) == old_json.dump(2), contents(tx_json));
+
+    // -- V37: a pair whose second half cannot be moved into place --------------
+    // Staging covers a write that fails. A rename that fails after the first
+    // one landed -- on Windows, a destination something else holds open --
+    // left the new text beside the old JSON. A directory where the JSON goes
+    // is the portable way to make that second rename fail.
+    const paths::fs::path held_txt  = dir / "held.txt";
+    const paths::fs::path held_json = dir / "held.json";
+    exporter::save_text(held_txt, "first pass\n");
+    paths::fs::create_directories(held_json / "in-use", ec);
+    const bool held_ok = exporter::save_transcript(
+        held_txt, "second pass\n", held_json, nlohmann::json{{"text", "second pass"}});
+    test::check("V37 a pair that cannot land whole reports failure", !held_ok);
+    test::check("V37 and puts back the half that had already landed",
+                contents(held_txt) == "first pass\n", contents(held_txt));
+    test::check("V37 leaving nothing staged behind",
+                stray_files(dir, "held.txt") == 0 && stray_files(dir, "held.json") == 0);
 
     // ...and the ordinary replacement still lands, both halves of it.
     const nlohmann::json new_json = {{"text", "second pass"}};

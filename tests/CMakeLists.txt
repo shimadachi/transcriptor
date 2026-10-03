@@ -85,7 +85,7 @@ add_test(NAME unicode_paths
          COMMAND test_unicode_paths "${CMAKE_CURRENT_BINARY_DIR}/unicode_paths_scratch")
 set_tests_properties(unicode_paths PROPERTIES TIMEOUT 60)
 
-# -- output writing (R2) ------------------------------------------------------
+# -- output writing (R2, V4, V37) ---------------------------------------------
 # RLIMIT_FSIZE is how the failure is provoked, so POSIX only.
 if(UNIX)
     transcriptor_test(test_write_failure
