@@ -16,13 +16,19 @@ namespace transcriptor::stt {
 // "Altyazı M.K.", "ALTYAZI: M.K." and "altyazi mk" all fold to "altyazimk".
 std::string fold(const std::string& s);
 
-// True when a folded key is a known credit line. Matched against the *whole* of
+// True when a folded key is a credit nobody says out loud: subtitle-site
+// credits and the audio-description disclaimer. Matched against the *whole* of
 // a segment (or of a trailing run of words), never as a substring of running
 // speech -- "Altyazıları açar mısın?" has to survive.
 bool is_credit(const std::string& key);
 
 // Takes the credits out of one decoded segment. Returns false when nothing is
 // left to keep, which is what a segment that was only ever a credit reduces to.
-bool strip_credits(TranscriptSegment& seg);
+//
+// `silence_removed` says the voice detector cut the silence out before the
+// decode. The video sign-offs Whisper also invents ("Thanks for watching",
+// "Abone olmayı unutmayın") are then left alone: it invents them over silence
+// it no longer sees, and people genuinely say them.
+bool strip_credits(TranscriptSegment& seg, bool silence_removed);
 
 }  // namespace transcriptor::stt

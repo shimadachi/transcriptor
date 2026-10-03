@@ -10,6 +10,12 @@
 // away from the decoder; that needs a model, a GPU and a recording, so what is
 // checked here is the filter standing behind it -- and, just as importantly,
 // that ordinary speech still gets through untouched.
+//
+// V32: the filter also took out the video sign-offs Whisper invents --
+// "Thanks for watching", "Abone olmayı unutmayın" -- whenever they made up a
+// segment or its last words, including when someone really said them. With
+// the voice detector in front, the decoder never sees the silence they are
+// invented over, so there they are speech and stay.
 
 #include "stt/credits.h"
 
@@ -42,25 +48,29 @@ TranscriptSegment segment(const std::vector<std::string>& words) {
     return seg;
 }
 
-void dropped(const char* what, const std::vector<std::string>& words) {
+// `silence_removed` as strip_credits() takes it; false is a decode that saw
+// the silence, which is what every credit was learned from.
+void dropped(const char* what, const std::vector<std::string>& words,
+             bool silence_removed = false) {
     TranscriptSegment seg = segment(words);
-    const bool kept = strip_credits(seg);
+    const bool kept = strip_credits(seg, silence_removed);
     test::check(what, !kept, kept ? "kept: " + seg.text : "");
 }
 
-void kept_whole(const char* what, const std::vector<std::string>& words) {
+void kept_whole(const char* what, const std::vector<std::string>& words,
+                bool silence_removed = false) {
     TranscriptSegment seg = segment(words);
     const std::string before = seg.text;
-    const bool kept = strip_credits(seg);
+    const bool kept = strip_credits(seg, silence_removed);
     const bool ok = kept && seg.text == before;
     test::check(what, ok,
                 ok ? "" : kept ? "became: " + seg.text : "dropped entirely");
 }
 
 void trimmed_to(const char* what, const std::vector<std::string>& words,
-                const std::string& want) {
+                const std::string& want, bool silence_removed = false) {
     TranscriptSegment seg = segment(words);
-    const bool kept = strip_credits(seg);
+    const bool kept = strip_credits(seg, silence_removed);
     const bool ok = kept && seg.text == want;
     test::check(what, ok,
                 ok ? "" : kept ? "got: " + seg.text : "dropped entirely");
@@ -118,6 +128,29 @@ int main() {
 
     kept_whole("thanks in the middle of a meeting",
                {"Teşekkürler,", "sonra", "konuşuruz."});
+
+    // -- V32: sign-offs people really say -------------------------------------
+    // Behind the voice detector the decoder never sees the silence these are
+    // invented over, so a sign-off there was said.
+    kept_whole("V32 a talk's closing line survives the detector",
+               {"Thanks", "for", "watching."}, /*silence_removed=*/true);
+    kept_whole("V32 so does one at the end of a sentence",
+               {"That", "is", "all", "for", "today.", "Thanks", "for", "watching."},
+               /*silence_removed=*/true);
+    kept_whole("V32 and the Turkish one",
+               {"Abone", "olmayı", "unutmayın."}, /*silence_removed=*/true);
+    // Without it the decoder did see silence, and they are dropped as before.
+    dropped("V32 a sign-off over silence is still dropped",
+            {"Thanks", "for", "watching."});
+    trimmed_to("V32 and still trimmed off the end of speech",
+               {"Görüşmek", "üzere.", "Abone", "olmayı", "unutmayın."},
+               "Görüşmek üzere.");
+    // A credit nobody says goes either way.
+    dropped("V32 a written credit goes even behind the detector",
+            {"Altyazı", "M.K."}, /*silence_removed=*/true);
+    trimmed_to("V32 and is trimmed off speech behind it too",
+               {"Görüşmek", "üzere", "arkadaşlar.", "Altyazı", "M.K."},
+               "Görüşmek üzere arkadaşlar.", /*silence_removed=*/true);
 
     return test::summary("credits");
 }

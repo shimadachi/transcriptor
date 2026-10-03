@@ -97,8 +97,9 @@ bool abort_callback(void* user_data) {
 
 // The decoded segments, words rebuilt from the tokens and credits taken out.
 // Shared by both transcribers, so the preview and the finished transcript are
-// filtered the same way.
-std::vector<TranscriptSegment> read_segments(whisper_context* ctx) {
+// filtered the same way. `silence_removed`: the voice detector ran in front of
+// this decode -- see strip_credits().
+std::vector<TranscriptSegment> read_segments(whisper_context* ctx, bool silence_removed) {
     std::vector<TranscriptSegment> out;
     const int n_segments = whisper_full_n_segments(ctx);
     out.reserve(static_cast<std::size_t>(n_segments));
@@ -155,7 +156,7 @@ std::vector<TranscriptSegment> read_segments(whisper_context* ctx) {
 
         // A segment that is nothing but a hallucinated credit goes entirely;
         // one tacked onto the end of real speech loses just the tail.
-        if (!strip_credits(seg)) continue;
+        if (!strip_credits(seg, silence_removed)) continue;
 
         out.push_back(std::move(seg));
     }
@@ -324,7 +325,8 @@ std::vector<TranscriptSegment> WhisperTranscriber::transcribe(
                                  std::to_string(rc) + ").");
     }
 
-    std::vector<TranscriptSegment> out = read_segments(impl_->ctx);
+    // wparams.vad, not use_vad: a detector that failed was retried without.
+    std::vector<TranscriptSegment> out = read_segments(impl_->ctx, wparams.vad);
 
     if (progress) progress("", 1.0);
     return out;
@@ -507,7 +509,7 @@ std::vector<TranscriptSegment> LiveWhisper::transcribe(
                                  std::to_string(rc) + ").");
     }
 
-    std::vector<TranscriptSegment> out = read_segments(impl_->ctx);
+    std::vector<TranscriptSegment> out = read_segments(impl_->ctx, wparams.vad);
     if (language.empty() && impl_->detected.empty() && !out.empty()) {
         const char* code = whisper_lang_str(whisper_full_lang_id(impl_->ctx));
         if (code) impl_->detected = code;

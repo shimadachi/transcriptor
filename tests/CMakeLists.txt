@@ -29,7 +29,7 @@ transcriptor_test(test_reasoning
     "${APP_SRC}/llm/reasoning.cpp")
 add_test(NAME reasoning COMMAND test_reasoning)
 
-# -- hallucinated subtitle / audio-description credits ------------------------
+# -- hallucinated subtitle / audio-description credits (V32) ------------------
 transcriptor_test(test_credits
     "${TESTS_SRC}/test_credits.cpp"
     "${APP_SRC}/stt/credits.cpp")

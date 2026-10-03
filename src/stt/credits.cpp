@@ -22,28 +22,41 @@ std::string trim(const std::string& s) {
 // than eight because the audio-description disclaimer below is nine on its own.
 constexpr std::size_t kMaxTailWords = 12;
 
-// Whole lines, matched exactly.
-bool exact_credit(const std::string& key) {
+// Whole lines, matched exactly: credits that only ever exist as text on a
+// screen. Nobody says "Altyazı M.K." out loud, so wherever it turns up it was
+// invented.
+bool written_credit(const std::string& key) {
     static const std::unordered_set<std::string> kCredits = {
         // Turkish
         "altyazimk",
         "altyazimkcom",
         "altyaziauthor",
-        "aboneolmayiunutmayin",
-        "kanalimaaboneolmayiunutmayin",
-        "videoyubegendiyseniz",
         // Seen on its own, cut short of the full disclaimer below.
         "bubolumunbetimlemesi",
         // English / generic subtitle-site credits
         "subtitlesbytheamaraorgcommunity",
         "subtitlesbyamaraorg",
         "amaraorg",
+    };
+    return kCredits.count(key) > 0;
+}
+
+// The sign-offs of the videos Whisper learned from. It invents them over
+// silence just as it invents the credits -- but unlike the credits, people
+// really say them, at the end of a talk, a lesson or a stream recorded through
+// the speakers. Taken out only when the decoder was handed silence; see
+// strip_credits().
+bool spoken_signoff(const std::string& key) {
+    static const std::unordered_set<std::string> kSignoffs = {
+        "aboneolmayiunutmayin",
+        "kanalimaaboneolmayiunutmayin",
+        "videoyubegendiyseniz",
         "thanksforwatching",
         "thankyouforwatching",
         "pleasesubscribe",
         "subscribetomychannel",
     };
-    return kCredits.count(key) > 0;
+    return kSignoffs.count(key) > 0;
 }
 
 bool starts_with(const std::string& s, const std::string& p) {
@@ -99,7 +112,7 @@ void resync_from_words(TranscriptSegment& seg) {
 // Whisper often appends the credit to real speech in one segment, e.g.
 // "...görüşmek üzere. Altyazı M.K." -- trim just the trailing words so the
 // real text survives.
-void trim_trailing_credit(TranscriptSegment& seg) {
+void trim_trailing_credit(TranscriptSegment& seg, bool silence_removed) {
     // Needs at least one word left over; a lone credit word is the whole-segment
     // case, already handled by the caller.
     if (seg.words.size() < 2) return;
@@ -108,7 +121,7 @@ void trim_trailing_credit(TranscriptSegment& seg) {
     std::string tail;
     for (std::size_t n = 1; n <= max_tail; ++n) {
         tail = fold(seg.words[seg.words.size() - n].text) + tail;
-        if (is_credit(tail)) {
+        if (is_credit(tail) || (!silence_removed && spoken_signoff(tail))) {
             seg.words.erase(seg.words.end() - static_cast<std::ptrdiff_t>(n),
                             seg.words.end());
             resync_from_words(seg);
@@ -160,14 +173,20 @@ std::string fold(const std::string& s) {
 
 bool is_credit(const std::string& key) {
     if (key.empty()) return false;
-    return exact_credit(key) || is_description_credit(key);
+    return written_credit(key) || is_description_credit(key);
 }
 
-bool strip_credits(TranscriptSegment& seg) {
+bool strip_credits(TranscriptSegment& seg, bool silence_removed) {
+    const std::string key = fold(seg.text);
     // A segment that is nothing but a credit is pure hallucination.
-    if (is_credit(fold(seg.text))) return false;
+    if (is_credit(key)) return false;
+    // A sign-off is only taken to be one when the decoder saw silence. With the
+    // voice detector in front it never does, and this used to delete the line
+    // regardless: "Thanks for watching" at the end of a recorded talk was
+    // dropped from the transcript with nothing left to show it had been said.
+    if (!silence_removed && spoken_signoff(key)) return false;
     // ...and a credit tacked onto the end of real speech loses just the tail.
-    trim_trailing_credit(seg);
+    trim_trailing_credit(seg, silence_removed);
     return !seg.text.empty();
 }
 
