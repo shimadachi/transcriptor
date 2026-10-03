@@ -139,12 +139,14 @@ std::vector<Turn> Diarizer::diarize(const std::vector<float>& audio, int sampler
                        "Konuşmacı modelleri yükleniyor…"), -1.0);
         }
 
-        // onnxruntime's execution providers are its own list, not ggml's: the
-        // only GPU one this build ships is CUDA, so a Vulkan or Metal device
-        // still diarizes on the CPU rather than asking for a provider that
-        // isn't there.
-        const char* provider =
-            (device_.use_gpu() && device_.backend == "CUDA") ? "cuda" : "cpu";
+        // The CPU, whatever ggml runs on. onnxruntime's execution providers are
+        // its own list, and this build has no GPU one at all: sherpa fetches
+        // the CPU runtime unless SHERPA_ONNX_ENABLE_GPU is set, and it is not
+        // -- the GPU runtime would bring cuDNN with it, the same weight the CUDA
+        // package stopped carrying. Asking for "cuda" on a CUDA device fell
+        // back to the CPU anyway, after a "Please compile with
+        // -DSHERPA_ONNX_ENABLE_GPU=ON" for each of the two models.
+        const char* provider = "cpu";
 
         SherpaOnnxOfflineSpeakerDiarizationConfig config{};
         config.segmentation.pyannote.model = seg.c_str();
