@@ -56,7 +56,7 @@ add_test(NAME attribute COMMAND test_attribute)
 transcriptor_test(test_device_choice "${TESTS_SRC}/test_device_choice.cpp")
 add_test(NAME device_choice COMMAND test_device_choice)
 
-# -- adopting and keeping settings (V7, V11) -----------------------------------
+# -- adopting and keeping settings (V7, V11, V57) ------------------------------
 transcriptor_test(test_settings
     "${TESTS_SRC}/test_settings.cpp"
     "${APP_SRC}/config.cpp"

@@ -1,4 +1,4 @@
-// Regression tests for how settings are adopted and kept (V7, V11).
+// Regression tests for how settings are adopted and kept (V7, V11, V57).
 //
 // V7: every settings save rebuilt the transcriber and the summarizer, freeing
 // whatever models they had loaded -- including the one-field saves the studio's
@@ -8,6 +8,11 @@
 //
 // V11: environment overrides and --port are for one run, but the next save of
 // anything wrote them into config.json, where they stayed.
+//
+// V57: the spoken language defaulted to English. Whisper held to a language
+// nobody spoke writes the speech out in that language anyway, so a fresh
+// install got every recording in anything else wrong until someone found the
+// setting.
 
 #include <cstdlib>
 #include <fstream>
@@ -45,6 +50,24 @@ void rebuilds(const char* what, Change change) {
     change(after);
     test::check((std::string("V7 changing ") + what + " rebuilds the engines").c_str(),
                 !before.same_engines(after));
+}
+
+void the_spoken_language_is_detected_by_default() {
+    const Settings fresh;
+    test::check("V57 a fresh install detects the spoken language",
+                fresh.language.empty(), fresh.language);
+
+    Settings unnamed;
+    unnamed.from_json(nlohmann::json{{"port", 5005}});
+    test::check("V57 so does a config file that never named one",
+                unnamed.language.empty(), unnamed.language);
+
+    // Not migrated: a saved "en" may be a choice, and nothing tells it apart
+    // from the old default written back by an unrelated save.
+    Settings pinned;
+    pinned.from_json(nlohmann::json{{"language", "en"}});
+    test::check("V57 a language already saved stays pinned",
+                pinned.language == "en", pinned.language);
 }
 
 #ifndef _WIN32
@@ -108,6 +131,7 @@ int main(int argc, char** argv) {
     rebuilds("the context size", [](Settings& s) { s.llm_ctx = 8192; });
     rebuilds("the server URL", [](Settings& s) { s.llm_base_url = "http://h:1/v1"; });
     rebuilds("thinking", [](Settings& s) { s.llm_thinking = true; });
+    the_spoken_language_is_detected_by_default();
 #ifndef _WIN32
     if (argc > 1) {
         namespace fs = transcriptor::paths::fs;

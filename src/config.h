@@ -40,7 +40,11 @@ struct Settings {
     // old one made the first recording quietly pull 3 GB down mid-transcribe.
     std::string whisper_model;                // a models::whisper_catalog() id
     std::string whisper_model_path;           // explicit .bin; empty = managed
-    std::string language      = "en";         // "" = auto-detect
+    // Detected from the audio unless the user pins one. Held to a language
+    // nobody spoke, whisper does not fail: it writes the speech out in the
+    // language it was told, translated or garbled, so an English default got
+    // every recording in another language wrong without a word of warning.
+    std::string language;                     // "" = auto-detect
     std::string device        = "auto";       // auto/cuda/cpu
     std::string compute_type  = "auto";       // kept for UI parity (quantization)
     int         stt_threads   = 0;            // 0 = physical cores, up to 8
