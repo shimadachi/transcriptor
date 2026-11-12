@@ -55,9 +55,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The two macOS majors the tap exists on, as far as hosted runners go.
-        # Both are Apple Silicon, and both build the same preset.
-        os: [macos-14, macos-15]
+        # The macOS majors hosted runners still offer; the tap's own first
+        # release, 14, has been retired from them. Both are Apple Silicon, and
+        # both build the same preset.
+        os: [macos-15, macos-26]
 
     steps:
       - uses: actions/checkout@v4

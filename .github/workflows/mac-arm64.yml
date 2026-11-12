@@ -13,4 +13,4 @@ jobs:
     uses: ./.github/workflows/_build.yml
     with:
       preset: mac-arm64
-      os: macos-14
+      os: macos-15

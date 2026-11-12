@@ -138,7 +138,7 @@ jobs:
     uses: ./.github/workflows/_build.yml
     with:
       preset: mac-arm64
-      os: macos-14
+      os: macos-15
       release_tag: ${{ github.ref_name }}
 
   mac-x64:
