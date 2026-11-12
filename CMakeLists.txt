@@ -10,8 +10,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # One file is Objective-C++: the macOS system-audio tap is described by an
 # Objective-C object, so src/audio/system_tap_mac.mm cannot be plain C++.
+#
+# Objective-C is enabled with it, although nothing here is written in it: with
+# only OBJCXX on, CMake hands every .m file to the Objective-C++ compiler too,
+# and ggml's Metal backend -- plain Objective-C, full of implicit void*
+# conversions -- does not survive being compiled as C++.
 if(APPLE)
-    enable_language(OBJCXX)
+    enable_language(OBJC OBJCXX)
     set(CMAKE_OBJCXX_STANDARD 17)
     set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
 endif()
