@@ -48,6 +48,10 @@ void set_source_stream(const std::string& source_id, double silent_for,
 // before it is still handed back.
 void set_error(const std::string& message);
 
+// What notice() reports: a stream that is up and hearing nothing, with a
+// reason. Empty, the default, is a stream with nothing to say.
+void set_notice(const std::string& message);
+
 int  starts();        // devices opened
 int  stops();         // devices closed
 bool any_running();   // a device still open is a leaked one

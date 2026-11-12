@@ -13,6 +13,9 @@ struct ResolvedDevice {
     ma_device_type type = ma_device_type_capture;  // or ma_device_type_loopback
     ma_uint32      channels = 2;
     bool           use_default_id = false;         // pass NULL for the device id
+    // The macOS system-audio tap: not a miniaudio device at all, so `id` and
+    // `type` mean nothing and capture.cpp opens it through SystemTap instead.
+    bool           system_tap = false;
     std::string    name;
 };
 

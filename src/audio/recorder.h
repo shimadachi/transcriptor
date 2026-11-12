@@ -88,6 +88,9 @@ public:
     // system-only instead of failing the recording.
     std::string error() const;
 
+    // The primary stream's notice, if it has one: see AudioCapture::notice().
+    std::string notice() const;
+
     // Every block the take keeps, as it is kept -- gain applied, mixed, and
     // nothing from while it was paused: exactly what stop() will return. The
     // offset is where the block starts in the take, in samples, so a listener

@@ -331,4 +331,6 @@ double Recorder::elapsed() const {
 
 std::string Recorder::error() const { return capture_->error(); }
 
+std::string Recorder::notice() const { return capture_->notice(); }
+
 }  // namespace transcriptor::audio

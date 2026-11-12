@@ -891,6 +891,33 @@ async function run() {
           env.els.diarHint.innerHTML);
   }
 
+  // ----------------------------------------------------------------- M1 ----
+  // A macOS system-audio take the OS is withholding audio from is silent and
+  // reports no error. The server's notice is the only sign of it, so it has to
+  // be on screen while the take runs -- as text, not as markup.
+  {
+    const env = createEnv(ROOT);
+    Object.assign(env.server.state, {stt_cached: true, vad_cached: true, recording: true,
+                                     record_notice: 'No system audio <yet>.'});
+    await env.app.poll();
+    await env.settle();
+    const hint = env.els.diarHint;
+    check('M1 a take hearing nothing says so in the studio',
+          hint.style.display === 'block' && hint.innerHTML.includes('No system audio'),
+          hint.innerHTML);
+    check('M1 and the notice is shown as text',
+          hint.innerHTML.includes('&lt;yet&gt;') && !hint.innerHTML.includes('<yet>'),
+          hint.innerHTML);
+
+    env.server.state.record_notice = '';
+    await env.app.poll();
+    await env.settle();
+    // With nothing left to say the whole row is hidden, text and all.
+    check('M1 it goes once audio arrives',
+          hint.style.display === 'none' || !hint.innerHTML.includes('No system audio'),
+          hint.style.display + ' ' + hint.innerHTML);
+  }
+
   // ---------------------------------------------------------------- V38 ----
   // The native window drops target="_blank", so the page has to hand a link
   // to the server, which opens it in the real browser.

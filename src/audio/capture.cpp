@@ -8,6 +8,7 @@
 #include <thread>
 
 #include "audio/device_registry.h"
+#include "audio/system_tap.h"
 #include "util/lang.h"
 
 namespace transcriptor::audio {
@@ -16,12 +17,27 @@ namespace {
 // ~30 s of 16 kHz mono. The recorder drains far more often than this; the cap
 // only exists so a stalled consumer cannot grow the queue without bound.
 constexpr std::size_t kMaxQueuedSamples = 16000 * 30;
+
+#ifdef TRANSCRIPTOR_HAVE_SYSTEM_TAP
+// How long a tap may deliver nothing but zeros before the user is told. Long
+// enough that pressing Record a moment before the call starts says nothing.
+constexpr double kSilentTapSeconds = 10.0;
+#endif
 }  // namespace
 
 struct AudioCapture::Impl {
     ma_device         device{};
     bool              device_ready = false;
     std::atomic<bool> started{false};
+#ifdef TRANSCRIPTOR_HAVE_SYSTEM_TAP
+    // Set instead of `device` when the source is the macOS system-audio tap.
+    std::unique_ptr<SystemTap> tap;
+    // For notice(). A tap whose permission could not be read may be delivering
+    // the silence of a refusal, so it is watched for a first non-zero sample.
+    std::atomic<bool> tap_watched{false};
+    std::atomic<bool> tap_heard{false};
+    std::chrono::steady_clock::time_point tap_started{};
+#endif
 
     std::mutex         mutex;
     std::deque<float>  queue;
@@ -73,6 +89,42 @@ void AudioCapture::start() {
     if (!resolve_device(source_.id, &dev)) {
         throw std::runtime_error(L("Audio source not found: ",
                                    "Ses kaynağı bulunamadı: ") + source_.name);
+    }
+
+    if (dev.system_tap) {
+#ifdef TRANSCRIPTOR_HAVE_SYSTEM_TAP
+        // The callbacks hold a bare Impl*: the tap is a member of that Impl,
+        // and has stopped calling by the time it is destroyed.
+        Impl* impl = impl_.get();
+        auto tap = std::make_unique<SystemTap>();
+        tap->start(
+            samplerate_,
+            [impl](const float* samples, std::size_t count) {
+                if (!impl->tap_heard.load(std::memory_order_relaxed)) {
+                    for (std::size_t i = 0; i < count; ++i) {
+                        if (samples[i] != 0.0f) {
+                            impl->tap_heard.store(true);
+                            break;
+                        }
+                    }
+                }
+                impl->push(samples, count);
+            },
+            [impl](const std::string& message) {
+                if (impl->started.load()) impl->set_error(message);
+            });
+        // With the permission known to be granted, silence is only silence.
+        impl_->tap_watched.store(tap->permission() != TapPermission::Granted);
+        impl_->tap_heard.store(false);
+        impl_->tap_started = std::chrono::steady_clock::now();
+        impl_->tap = std::move(tap);
+        impl_->device_ready = true;
+        impl_->started.store(true);
+        return;
+#else
+        throw std::runtime_error(L("Audio source not found: ",
+                                   "Ses kaynağı bulunamadı: ") + source_.name);
+#endif
     }
 
     ma_device_config cfg = ma_device_config_init(dev.type);
@@ -127,6 +179,17 @@ void AudioCapture::stop() {
     std::promise<void> closed;
     std::future<void> done = closed.get_future();
     std::thread([impl, p = std::move(closed)]() mutable {
+#ifdef TRANSCRIPTOR_HAVE_SYSTEM_TAP
+        if (impl->tap) {
+            // Core Audio's stop waits on the HAL the same way, so the tap gets
+            // the same treatment as a device rather than the benefit of the
+            // doubt.
+            impl->tap->stop();
+            impl->tap.reset();
+            p.set_value();
+            return;
+        }
+#endif
         ma_device_uninit(&impl->device);
         p.set_value();
     }).detach();
@@ -147,6 +210,25 @@ bool AudioCapture::running() const { return impl_ && impl_->started.load(); }
 std::string AudioCapture::error() const {
     std::lock_guard<std::mutex> lock(impl_->mutex);
     return impl_->error;
+}
+
+std::string AudioCapture::notice() const {
+#ifdef TRANSCRIPTOR_HAVE_SYSTEM_TAP
+    if (impl_->started.load() && impl_->tap_watched.load() && !impl_->tap_heard.load()) {
+        const std::chrono::duration<double> silent =
+            std::chrono::steady_clock::now() - impl_->tap_started;
+        if (silent.count() >= kSilentTapSeconds) {
+            // Both causes, because from in here they are the same thing.
+            return L("No system audio has arrived yet. If something is playing, macOS may "
+                     "be blocking it: check System Settings → Privacy & Security → Screen "
+                     "& System Audio Recording.",
+                     "Henüz sistem sesi gelmedi. Bir şey çalıyorsa macOS engelliyor "
+                     "olabilir: Sistem Ayarları → Gizlilik ve Güvenlik → Ekran ve Sistem "
+                     "Sesi Kaydı bölümünü denetleyin.");
+        }
+    }
+#endif
+    return {};
 }
 
 }  // namespace transcriptor::audio

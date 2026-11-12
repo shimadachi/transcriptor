@@ -3,8 +3,10 @@
 // Per-platform enumeration:
 //   * Windows (WASAPI) — every playback device is offered as a loopback source.
 //   * Linux (PulseAudio/PipeWire) — "monitor" capture devices are the loopbacks.
-//   * macOS (CoreAudio) — the OS has no loopback; a virtual device such as
-//     BlackHole is detected and marked as one. See macos_loopback_hint().
+//   * macOS (CoreAudio) — there is no loopback device. From macOS 14.2 the
+//     system mix is offered through a process tap (see system_tap.h); before
+//     that only a virtual device such as BlackHole can stand in, and it is
+//     detected and marked as a loopback. See macos_loopback_hint().
 #pragma once
 
 #include <optional>
@@ -33,8 +35,9 @@ std::optional<AudioSource> default_loopback_source();
 
 std::optional<AudioSource> find_source(const std::string& id);
 
-// Non-empty on macOS when no loopback device exists: a short instruction the UI
-// can show instead of silently recording nothing.
+// Non-empty on a macOS too old for the system-audio tap, when no loopback
+// device exists either: a short instruction the UI can show instead of silently
+// recording nothing.
 std::string macos_loopback_hint();
 
 }  // namespace transcriptor::audio

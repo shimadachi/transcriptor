@@ -1,0 +1,119 @@
+# The macOS system-audio tap, run against a real macOS.
+#
+# The per-preset builds prove the tap compiles and links; they cannot prove it
+# records, because tests/test_system_audio_mac.cpp skips itself unless asked --
+# it plays a tone and needs a privacy permission. This workflow asks. It builds
+# only that test and the converter test, so it takes minutes, not the half hour
+# a full preset does.
+#
+# What a hosted runner can and cannot show:
+#   * that Core Audio accepts the tap, builds the device around it, calls back
+#     with audio at the right rate, stops, and does it all a second time --
+#     required, and a failure here is a real failure;
+#   * that the tone played is the tone recorded -- reported, and required only
+#     when the run is dispatched with require_signal. A runner has nobody to
+#     answer the System Audio Recording prompt and may have no output device to
+#     play into; the grant step below tries to settle the first and prints what
+#     it found. Until a dispatched run has shown the signal arriving on these
+#     runners, a silent recording here says nothing about the code.
+# The permission prompt itself, and the app asking for it by name, can only be
+# seen by a person at a Mac.
+name: mac-system-audio
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/audio/**'
+      - 'tests/test_system_audio_mac.cpp'
+      - 'tests/test_tap_convert.cpp'
+      - 'tests/CMakeLists.txt'
+      - '.github/workflows/mac-system-audio.yml'
+  pull_request:
+    paths:
+      - 'src/audio/**'
+      - 'tests/test_system_audio_mac.cpp'
+      - 'tests/test_tap_convert.cpp'
+      - 'tests/CMakeLists.txt'
+      - '.github/workflows/mac-system-audio.yml'
+  workflow_dispatch:
+    inputs:
+      require_signal:
+        description: 'Fail unless the played tone is heard in the recording'
+        type: boolean
+        default: false
+      debug_shell:
+        description: 'On failure, hold the runner open with an SSH shell (tmate)'
+        type: boolean
+        default: false
+
+jobs:
+  tap:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        # The two macOS majors the tap exists on, as far as hosted runners go.
+        # Both are Apple Silicon, and both build the same preset.
+        os: [macos-14, macos-15]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: macOS deps
+        run: brew install ninja
+
+      - name: What this runner is
+        run: |
+          sw_vers
+          xcodebuild -version
+          echo "--- audio devices"
+          system_profiler SPAudioDataType || true
+
+      - name: Configure
+        run: cmake --preset mac-arm64
+
+      # Two targets, not the application: neither links llama, whisper or the
+      # webview, so nothing heavy is compiled for them.
+      - name: Build the tap tests
+        run: cmake --build --preset mac-arm64 --target test_tap_convert test_system_audio_mac
+
+      - name: Converter test
+        run: build/mac-arm64/tests/test_tap_convert
+
+      # System Audio Recording is a TCC permission and the prompt has nobody to
+      # click it here. The runner image already carries a microphone grant for
+      # each process a job can run under; this gives the same processes the
+      # audio-capture service by copying those rows, which avoids spelling out a
+      # column list that differs between macOS versions. Best effort: where the
+      # database refuses the write, the test below still runs and reports
+      # silence.
+      - name: Grant System Audio Recording to the runner
+        continue-on-error: true
+        run: |
+          sql="CREATE TEMP TABLE grant_rows AS
+                 SELECT * FROM access WHERE service = 'kTCCServiceMicrophone';
+               UPDATE grant_rows SET service = 'kTCCServiceAudioCapture';
+               INSERT OR REPLACE INTO access SELECT * FROM grant_rows;
+               SELECT service, client FROM access
+                WHERE service = 'kTCCServiceAudioCapture';"
+          echo "--- system database"
+          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "$sql" || true
+          echo "--- user database"
+          sqlite3 "$HOME/Library/Application Support/com.apple.TCC/TCC.db" "$sql" || true
+
+      # Run directly rather than through ctest: a skip is exit 77, which ctest
+      # reports as success, and in this workflow not running is the failure.
+      - name: System audio test
+        env:
+          TRANSCRIPTOR_TEST_SYSTEM_AUDIO: ${{ inputs.require_signal && 'signal' || '1' }}
+        run: build/mac-arm64/tests/test_system_audio_mac
+
+      - name: Debug shell
+        if: failure() && inputs.debug_shell
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 30
+        with:
+          limit-access-to-actor: true
