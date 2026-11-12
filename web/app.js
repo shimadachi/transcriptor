@@ -504,6 +504,11 @@ async function poll() {
   // no choice attached, so that one just fetches them and reports here.
   const hint = $('diarHint');
   const notes = [];
+  // First, and while it can still be fixed: the take is running and nothing is
+  // reaching it. The text comes from the server already in the UI language.
+  if (!browserRec && s.record_notice) {
+    notes.push('<span class="caution warn">' + esc(s.record_notice) + '</span>');
+  }
   const dl = s.model_download || {};
   if (!s.stt_cached) {
     notes.push('<a href="#settings" class="caution" data-go="stt">' +

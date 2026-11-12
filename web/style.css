@@ -564,6 +564,9 @@ input[type=checkbox]:disabled, input[type=radio]:disabled {
 /* Mid-download: the same line, no longer an invitation to press it. */
 .hint .caution.busy { display: inline-block; padding: 2px 0 2px 10px;
   border-left: 2px solid var(--ok); color: var(--ink-dim); }
+/* Something is wrong right now and there is nothing here to press. */
+.hint .caution.warn { display: inline-block; padding: 2px 0 2px 10px;
+  border-left: 2px solid var(--rec); color: var(--rec-2); }
 .hint a.caution.err { border-left-color: var(--rec); color: var(--rec-2); }
 .hint a.caution.err::after { content: ""; }
 .hint code { color: var(--ink-dim); }

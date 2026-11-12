@@ -20,7 +20,9 @@
   <key>NSMicrophoneUsageDescription</key>
   <string>Toplantı ve ses kayıtlarını yerel olarak metne dökmek için mikrofon ve ses giriş aygıtlarına erişilir. Ses bu bilgisayardan çıkmaz.</string>
 
-  <!-- Only used if you later route system audio through screen capture. -->
+  <!-- What the "System Audio Recording" prompt shows (macOS 14.2+), asked the
+       first time the system-audio source is recorded. Without this key the
+       tap is created without complaint and then delivers nothing but silence. -->
   <key>NSAudioCaptureUsageDescription</key>
   <string>Sistem sesini yerel olarak kaydedip metne dökmek için kullanılır.</string>
 

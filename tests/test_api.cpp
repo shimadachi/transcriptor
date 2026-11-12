@@ -471,6 +471,43 @@ void test_utf8_cuts() {
 
 }  // namespace
 
+void test_a_take_hearing_nothing_says_so() {
+    // M1. A macOS system-audio tap the OS is withholding audio from delivers
+    // silence and no error, so the only thing that can tell the user is the
+    // capture's notice -- and it has to reach the page while the take is still
+    // running, not wait in the recorder for a Stop.
+    const paths::fs::path dir = fresh_dir();
+    fake_capture::reset();
+    fake_capture::set_total_samples(16000);
+
+    app::AppState state(test_settings(dir / "out"));
+    const audio::AudioSource source{"tap:system", "System audio", true, 2, true};
+
+    test::check("M1 an idle app has no notice",
+                state.state_json().value("record_notice", std::string("absent")).empty());
+
+    state.start_recording(source, std::nullopt);
+    test::check("M1 nor does a take with nothing wrong",
+                state.state_json().value("record_notice", std::string("absent")).empty());
+
+    fake_capture::set_notice("No system audio has arrived yet.");
+    test::check("M1 a take hearing nothing tells the page why",
+                state.state_json().value("record_notice", std::string()) ==
+                    "No system audio has arrived yet.",
+                state.state_json().value("record_notice", std::string("absent")));
+
+    fake_capture::set_notice("");
+    test::check("M1 and stops telling it once audio arrives",
+                state.state_json().value("record_notice", std::string("absent")).empty());
+
+    // The stand-in keeps reporting it; the take is what has ended.
+    fake_capture::set_notice("No system audio has arrived yet.");
+    state.stop_and_process();
+    test::check("M1 the notice ends with the take",
+                state.state_json().value("record_notice", std::string("absent")).empty());
+    fake_capture::reset();
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::printf("usage: test_api <scratch-dir>\n");
@@ -499,6 +536,7 @@ int main(int argc, char** argv) {
     test_a_transcription_stays_off_the_network();
     test_no_download_starts_once_the_app_is_closing();
     test_only_plain_links_are_opened();
+    test_a_take_hearing_nothing_says_so();
 
     return test::summary("api");
 }

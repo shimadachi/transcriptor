@@ -1822,6 +1822,9 @@ nlohmann::json AppState::state_json() const {
         {"cuda", device_.gpu_available},
         {"elapsed", std::round(elapsed * 10.0) / 10.0},
         {"level", std::round(level * 10000.0) / 10000.0},
+        // A take that is running but hearing nothing, with a reason the user
+        // can act on while there is still a meeting left to record.
+        {"record_notice", recorder_ && is_recording ? recorder_->notice() : std::string()},
         {"has_audio", pending_audio_ && !pending_audio_->empty()},
         {"has_result", result_.has_value()},
         {"has_summary", summary_.has_value()},

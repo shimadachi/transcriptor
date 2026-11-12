@@ -30,6 +30,7 @@ struct Control {
     std::function<void()> stop_hook;
     std::string           start_failure;
     std::string           error;
+    std::string           notice;
     std::size_t           total_samples = 0;
     std::map<std::string, std::size_t> source_samples;
     std::map<std::string, Stream>      streams;
@@ -55,6 +56,7 @@ void reset() {
     c.stop_hook  = nullptr;
     c.start_failure.clear();
     c.error.clear();
+    c.notice.clear();
     c.total_samples = 0;
     c.source_samples.clear();
     c.streams.clear();
@@ -102,6 +104,12 @@ void set_error(const std::string& message) {
     Control& c = control();
     std::lock_guard<std::mutex> lock(c.mutex);
     c.error = message;
+}
+
+void set_notice(const std::string& message) {
+    Control& c = control();
+    std::lock_guard<std::mutex> lock(c.mutex);
+    c.notice = message;
 }
 
 int starts() {
@@ -229,6 +237,12 @@ std::string AudioCapture::error() const {
     Control& c = control();
     std::lock_guard<std::mutex> lock(c.mutex);
     return c.error;
+}
+
+std::string AudioCapture::notice() const {
+    Control& c = control();
+    std::lock_guard<std::mutex> lock(c.mutex);
+    return c.notice;
 }
 
 }  // namespace transcriptor::audio

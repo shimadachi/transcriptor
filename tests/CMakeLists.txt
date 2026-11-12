@@ -148,6 +148,51 @@ target_link_libraries(test_mixing PRIVATE Threads::Threads)
 add_test(NAME mixing COMMAND test_mixing)
 set_tests_properties(mixing PROPERTIES TIMEOUT 60)
 
+# -- system audio on macOS: converting what a tap delivers (M1) ----------------
+# The tap is the one source this app resamples itself, and the conversion is
+# plain arithmetic, so it is checked on every platform rather than only where a
+# tap exists. miniaudio is compiled without its device backends for this, so the
+# test needs no audio library to link.
+transcriptor_test(test_tap_convert
+    "${TESTS_SRC}/test_tap_convert.cpp"
+    "${TESTS_SRC}/miniaudio_dsp.c"
+    "${APP_SRC}/audio/tap_convert.cpp")
+target_include_directories(test_tap_convert PRIVATE "${miniaudio_SOURCE_DIR}")
+if(UNIX)
+    target_link_libraries(test_tap_convert PRIVATE m)
+endif()
+add_test(NAME tap_convert COMMAND test_tap_convert)
+
+# -- system audio on macOS: the tap itself, against the real OS (M1) -----------
+# The real capture, the real source list and the real tap -- nothing stood in
+# for. It plays a tone and needs a permission only a person can grant, so it
+# skips itself (exit 77) unless TRANSCRIPTOR_TEST_SYSTEM_AUDIO is set; see the
+# top of the test for the modes. Built on every macOS run all the same: that the
+# Objective-C++ compiles and links against the SDK is most of what CI can say
+# about it. .github/workflows/mac-system-audio.yml is where it is run.
+if(APPLE)
+    transcriptor_test(test_system_audio_mac
+        "${TESTS_SRC}/test_system_audio_mac.cpp"
+        "${APP_SRC}/audio/capture.cpp"
+        "${APP_SRC}/audio/sources.cpp"
+        "${APP_SRC}/audio/tap_convert.cpp"
+        "${APP_SRC}/audio/system_tap_mac.mm"
+        "${APP_SRC}/audio/miniaudio_impl.c")
+    # Source properties are per directory, so the one in the top-level file
+    # does not reach this target.
+    set_source_files_properties("${APP_SRC}/audio/system_tap_mac.mm" PROPERTIES
+        COMPILE_OPTIONS "-fobjc-arc")
+    target_include_directories(test_system_audio_mac PRIVATE "${miniaudio_SOURCE_DIR}")
+    find_package(Threads REQUIRED)
+    target_link_libraries(test_system_audio_mac PRIVATE
+        Threads::Threads
+        "-framework CoreAudio" "-framework CoreFoundation" "-framework AudioToolbox"
+        "-framework AudioUnit" "-framework Foundation")
+    add_test(NAME system_audio_mac COMMAND test_system_audio_mac)
+    set_tests_properties(system_audio_mac PROPERTIES
+        TIMEOUT 120 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+endif()
+
 # -- recording lifecycle (R1, R4, G6, N6, V42-V48) ----------------------------
 # The one test that links the application itself, because these bugs are in how
 # AppState, the Recorder and the worker thread fit together. Only the audio

@@ -6,6 +6,7 @@
 #include <stdexcept>
 
 #include "audio/device_registry.h"
+#include "audio/system_tap.h"
 #include "util/lang.h"
 
 namespace transcriptor::audio {
@@ -18,6 +19,7 @@ struct Entry {
     ma_uint32      channels = 2;
     bool           is_loopback = false;
     bool           is_default = false;
+    bool           system_tap = false;
     std::string    name;
 };
 
@@ -97,6 +99,20 @@ std::vector<AudioSource> enumerate_locked() {
     (void)playback;
     (void)playback_count;
 #endif
+
+    // macOS: the system mix itself, where the OS can provide it. Listed first
+    // and as the default, ahead of any BlackHole-style device -- those stay in
+    // the list below, so a setup that was routed through one keeps working.
+    if (system_tap_available()) {
+        Entry e;
+        e.is_loopback = true;
+        e.is_default  = true;
+        e.system_tap  = true;
+        e.name        = L("System audio", "Sistem sesi");
+
+        registry[kSystemTapSourceId] = e;
+        loopbacks.push_back({kSystemTapSourceId, e.name, true, 2, true});
+    }
 
     for (ma_uint32 i = 0; i < capture_count; ++i) {
         Entry e;
@@ -200,14 +216,18 @@ std::string macos_loopback_hint() {
     } catch (const std::exception&) {
         return {};
     }
-    return L("macOS cannot record system audio directly. Install a virtual "
-             "output device (e.g. BlackHole: `brew install blackhole-2ch`), "
-             "route the sound into it and pick it as the source — or use the "
-             "\"🎙 Browser\" entries in the source menu.",
-             "macOS sistem sesini doğrudan kaydedemez. Sanal bir çıkış aygıtı "
-             "kurun (ör. BlackHole: `brew install blackhole-2ch`), sesi ona "
-             "yönlendirin ve kaynak olarak seçin — ya da kaynak menüsünden "
-             "\"🎙 Tarayıcı\" seçeneklerini kullanın.");
+    // Only reached before macOS 14.2: from there on the system-audio tap is
+    // always in the list, and it is a loopback.
+    return L("This version of macOS cannot record system audio directly "
+             "(14.2 and newer can). Install a virtual output device (e.g. "
+             "BlackHole: `brew install blackhole-2ch`), route the sound into "
+             "it and pick it as the source — or use the \"🎙 Browser\" "
+             "entries in the source menu.",
+             "macOS'in bu sürümü sistem sesini doğrudan kaydedemez (14.2 ve "
+             "üstü kaydedebilir). Sanal bir çıkış aygıtı kurun (ör. BlackHole: "
+             "`brew install blackhole-2ch`), sesi ona yönlendirin ve kaynak "
+             "olarak seçin — ya da kaynak menüsünden \"🎙 Tarayıcı\" "
+             "seçeneklerini kullanın.");
 #else
     return {};
 #endif
@@ -228,6 +248,7 @@ bool resolve_device(const std::string& source_id, ResolvedDevice* out) {
     out->channels = it->second.channels;
     out->name     = it->second.name;
     out->use_default_id = false;
+    out->system_tap     = it->second.system_tap;
     return true;
 }
 

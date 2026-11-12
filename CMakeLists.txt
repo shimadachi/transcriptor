@@ -7,6 +7,19 @@ project(transcriptor
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# One file is Objective-C++: the macOS system-audio tap is described by an
+# Objective-C object, so src/audio/system_tap_mac.mm cannot be plain C++.
+#
+# Objective-C is enabled with it, although nothing here is written in it: with
+# only OBJCXX on, CMake hands every .m file to the Objective-C++ compiler too,
+# and ggml's Metal backend -- plain Objective-C, full of implicit void*
+# conversions -- does not survive being compiled as C++.
+if(APPLE)
+    enable_language(OBJC OBJCXX)
+    set(CMAKE_OBJCXX_STANDARD 17)
+    set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
+endif()
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
@@ -78,6 +91,7 @@ set(TRANSCRIPTOR_CORE_SOURCES
     src/util/net.cpp
     src/util/models.cpp
     src/audio/sources.cpp
+    src/audio/tap_convert.cpp
     src/audio/recorder.cpp
     src/audio/spool.cpp
     src/audio/decode.cpp
@@ -118,6 +132,15 @@ target_compile_definitions(transcriptor_core PUBLIC
 set(TRANSCRIPTOR_SOURCES
     src/main.cpp
     src/audio/capture.cpp)
+
+# The macOS system-audio tap is part of the real audio device, so it sits
+# outside the object library with it. ARC is on for this file alone: it is the
+# only one holding Objective-C objects, and every other source is C or C++.
+if(APPLE)
+    list(APPEND TRANSCRIPTOR_SOURCES src/audio/system_tap_mac.mm)
+    set_source_files_properties(src/audio/system_tap_mac.mm PROPERTIES
+        COMPILE_OPTIONS "-fobjc-arc")
+endif()
 
 if(WIN32)
     # GUI subsystem: no console window behind the app.

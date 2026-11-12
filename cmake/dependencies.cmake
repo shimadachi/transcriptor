@@ -295,8 +295,11 @@ elseif(APPLE)
     find_library(COREFOUNDATION CoreFoundation)
     find_library(AUDIOTOOLBOX AudioToolbox)
     find_library(AUDIOUNIT AudioUnit)
+    # Foundation for the system-audio tap (src/audio/system_tap_mac.mm). The
+    # webview brings it in on its own, but a build without one must link too.
+    find_library(FOUNDATION Foundation)
     target_link_libraries(transcriptor_deps INTERFACE
-        ${COREAUDIO} ${COREFOUNDATION} ${AUDIOTOOLBOX} ${AUDIOUNIT})
+        ${COREAUDIO} ${COREFOUNDATION} ${AUDIOTOOLBOX} ${AUDIOUNIT} ${FOUNDATION})
 else()
     target_link_libraries(transcriptor_deps INTERFACE ${CMAKE_DL_LIBS} m)
 endif()

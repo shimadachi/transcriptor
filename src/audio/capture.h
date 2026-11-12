@@ -33,6 +33,12 @@ public:
     // Non-empty once the stream has failed; the recorder surfaces this.
     std::string error() const;
 
+    // Non-empty while the stream is up but has delivered nothing a recording
+    // could use, and there is a likely reason the user can do something about.
+    // Not a failure: the take carries on, and this clears itself if audio
+    // starts arriving.
+    std::string notice() const;
+
     const AudioSource& source() const { return source_; }
 
 private:
