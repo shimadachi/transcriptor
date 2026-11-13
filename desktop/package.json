@@ -1,0 +1,24 @@
+{
+  "name": "transcriptor-desktop",
+  "productName": "Transcriptor",
+  "version": "0.3.0",
+  "private": true,
+  "description": "The Transcriptor window: an Electron shell and React UI over the local C++ engine",
+  "license": "MIT",
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "build": "vite build",
+    "start": "vite build && electron .",
+    "electron": "electron ."
+  },
+  "dependencies": {
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "6.3.0",
+    "electron": "45.3.1",
+    "vite": "8.3.8"
+  }
+}

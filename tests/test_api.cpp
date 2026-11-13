@@ -119,6 +119,12 @@ struct FakeDecoder : FakeTool {
         : FakeTool(dir, "ffmpeg", script) {}
 };
 
+// What the desktop app sends with every request: this run's token, which the
+// engine hands to whoever started it.
+httplib::Headers app_headers(const app::Server& server) {
+    return {{"X-Transcriptor-Token", server.token()}};
+}
+
 // An upload the decoder chokes on, then what /api/state says about it.
 struct StateAfterFailedDecode {
     int         status = 0;
@@ -141,7 +147,7 @@ StateAfterFailedDecode decode_failure(const std::string& ffmpeg_says) {
     state.process_file(upload, "broken.m4a");
 
     httplib::Client client("127.0.0.1", server.port());
-    if (auto res = client.Get("/api/state")) {
+    if (auto res = client.Get("/api/state", app_headers(server))) {
         out.status = res->status;
         const auto j = nlohmann::json::parse(res->body, nullptr, false);
         if (j.is_object() && j.contains("message") && j["message"].is_string()) {
@@ -176,15 +182,43 @@ void test_status_survives_text_that_is_not_utf8() {
                 r.message.find("engellendi") != std::string::npos, r.message);
 }
 
-// The page's own token, which every POST has to carry.
-std::string page_token(httplib::Client& client) {
-    const auto res = client.Get("/");
-    if (!res) return {};
-    const std::string key = "name=\"csrf-token\" content=\"";
-    const auto at = res->body.find(key);
-    if (at == std::string::npos) return {};
-    const auto from = at + key.size();
-    return res->body.substr(from, res->body.find('"', from) - from);
+// E1: the engine has one client, the app that started it, and nothing else on
+// the machine may read through it. GET used to be answered for anyone who
+// could reach loopback, because the page's <audio> element could not send a
+// header; with the window's requests going through the app that reason went
+// away, and transcripts, settings and recordings stopped being readable by
+// every local process.
+void test_nothing_is_answered_without_the_token() {
+    const paths::fs::path dir = fresh_dir();
+    app::AppState state(test_settings(dir / "out"));
+    app::Server server(&state, "127.0.0.1", 0);
+    if (!server.start()) {
+        test::check("E1 the server starts", false);
+        return;
+    }
+    httplib::Client client("127.0.0.1", server.port());
+    for (const std::string path : {"/api/state", "/api/settings", "/api/library"}) {
+        const auto bare = client.Get(path);
+        test::check(("E1 " + path + " is refused without the token").c_str(),
+                    bare && bare->status == 403,
+                    bare ? "HTTP " + std::to_string(bare->status) : "no answer");
+        const auto wrong =
+            client.Get(path, httplib::Headers{{"X-Transcriptor-Token", "0000"}});
+        test::check(("E1 " + path + " is refused with a wrong one").c_str(),
+                    wrong && wrong->status == 403,
+                    wrong ? "HTTP " + std::to_string(wrong->status) : "no answer");
+        const auto ok = client.Get(path, app_headers(server));
+        test::check(("E1 " + path + " is answered with it").c_str(),
+                    ok && ok->status == 200,
+                    ok ? "HTTP " + std::to_string(ok->status) : "no answer");
+    }
+    // The page that used to live at the root is gone, and with it the one
+    // place the token could be read by asking.
+    const auto root = client.Get("/", app_headers(server));
+    test::check("E1 there is no page at the root any more",
+                root && root->status == 404,
+                root ? "HTTP " + std::to_string(root->status) : "no answer");
+    server.stop();
 }
 
 void test_a_one_field_save_keeps_a_missing_device() {
@@ -198,7 +232,7 @@ void test_a_one_field_save_keeps_a_missing_device() {
         return;
     }
     httplib::Client client("127.0.0.1", server.port());
-    const httplib::Headers headers = {{"X-Transcriptor-Token", page_token(client)}};
+    const httplib::Headers headers = app_headers(server);
     const auto res = client.Post("/api/settings", headers,
                                  R"({"summary_template": "standup"})",
                                  "application/json");
@@ -248,7 +282,7 @@ void test_stopping_a_job_never_discards_the_take() {
         return;
     }
     httplib::Client client("127.0.0.1", server.port());
-    const httplib::Headers headers = {{"X-Transcriptor-Token", page_token(client)}};
+    const httplib::Headers headers = app_headers(server);
 
     // No job is running: the library's Stop arrives just after its run ended.
     auto res = client.Post("/api/cancel", headers, R"({"job_only": true})",
@@ -431,7 +465,7 @@ void test_only_plain_links_are_opened() {
         return;
     }
     httplib::Client client("127.0.0.1", server.port());
-    const httplib::Headers headers = {{"X-Transcriptor-Token", page_token(client)}};
+    const httplib::Headers headers = app_headers(server);
     const auto ask = [&](const std::string& url) {
         const auto res = client.Post("/api/open_link", headers,
                                      nlohmann::json{{"url", url}}.dump(),
@@ -526,6 +560,7 @@ int main(int argc, char** argv) {
     setenv("TRANSCRIPTOR_MODELS_DIR", paths::to_utf8(home / "models").c_str(), 1);
 
     test_utf8_cuts();
+    test_nothing_is_answered_without_the_token();
     test_status_survives_a_split_character();
     test_status_survives_text_that_is_not_utf8();
     test_a_one_field_save_keeps_a_missing_device();

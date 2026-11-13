@@ -1,10 +1,14 @@
-// Entry point: start the local server, then show the window.
+// Entry point of the engine: start the local server and serve until told to
+// stop.
 //
-// Everything runs on this machine. The server binds to loopback and exists
-// only so the native window has something to load — no audio, transcript or
-// summary ever leaves the process except to the files you choose to save.
+// There is no window in here. The desktop app (desktop/, Electron) starts this
+// process, reads the port and this run's token off its stdout, and is the only
+// client the server answers. Everything still runs on this machine: the server
+// binds to loopback, and no audio, transcript or summary ever leaves the
+// process except to the files you choose to save.
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <csignal>
 #include <cstdio>
@@ -14,8 +18,9 @@
 #include <thread>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 #include "app/server.h"
-#include "app/shell.h"
 #include "app/state.h"
 #include "audio/sources.h"
 #include "config.h"
@@ -35,9 +40,9 @@ namespace {
 
 using namespace transcriptor;
 
-// Set by Ctrl-C so the browser-mode loop below can fall out and shut down the
-// way closing the window does. Without it the process died where it stood, and
-// a model download in flight left its half-written .part file behind.
+// Set by Ctrl-C so the serving loop below can fall out and shut down in order.
+// Without it the process died where it stood, and a model download in flight
+// left its half-written .part file behind.
 volatile std::sig_atomic_t g_quit = 0;
 
 void on_quit_signal(int sig) {
@@ -51,9 +56,24 @@ void on_quit_signal(int sig) {
     g_quit = 1;
 }
 
+// Set when stdin reaches its end, which is how the desktop app says goodbye.
+// It holds the other end of that pipe for as long as it lives, so this fires
+// when it quits and also when it crashes or is killed -- the cases where
+// nobody is left to send a signal, and an engine that outlived its window
+// would sit there holding the microphone and a few gigabytes of model.
+std::atomic<bool> g_parent_gone{false};
+
+void watch_parent() {
+    std::thread([] {
+        char buf[64];
+        // Whatever arrives is ignored; only the end of it means anything.
+        while (std::fread(buf, 1, sizeof(buf), stdin) > 0) { }
+        g_parent_gone = true;
+    }).detach();   // blocked in a read for the life of the process
+}
+
 struct Options {
     bool check      = false;   // headless diagnostics, then exit
-    bool no_window  = false;   // serve only; open the default browser
     bool show_help  = false;
     bool show_version = false;
     int  port       = -1;      // -1 = use the configured port
@@ -64,7 +84,6 @@ Options parse_args(const std::vector<std::string>& args) {
     for (std::size_t i = 0; i < args.size(); ++i) {
         const std::string& a = args[i];
         if (a == "--check")            opts.check = true;
-        else if (a == "--no-window" || a == "--browser") opts.no_window = true;
         else if (a == "--help" || a == "-h") opts.show_help = true;
         else if (a == "--version")     opts.show_version = true;
         else if (a == "--port" && i + 1 < args.size()) {
@@ -81,10 +100,12 @@ void print_help() {
         "transcriptor " TRANSCRIPTOR_VERSION "\n"
         "  Records system audio, transcribes it offline, separates the speakers\n"
         "  and summarizes with a local LLM. No data ever leaves the machine.\n\n"
+        "  This is the engine. The Transcriptor desktop app starts it and is\n"
+        "  its window; run on its own it serves that app's API on loopback\n"
+        "  until its input is closed (Ctrl-D) or it is interrupted (Ctrl-C).\n\n"
         "Usage: transcriptor [options]\n\n"
         "  --check        Headless diagnostics (device, audio sources, models)\n"
-        "  --no-window    Do not open a window; use the browser\n"
-        "  --port <n>     Local server port\n"
+        "  --port <n>     Local server port (0 = any free port)\n"
         "  --version      Print the version\n"
         "  --help         This help\n");
 }
@@ -193,7 +214,9 @@ int run(const std::vector<std::string>& args) {
     if (opts.show_version) { std::printf("%s\n", TRANSCRIPTOR_VERSION); return 0; }
 
     Settings settings = Settings::load();
-    if (opts.port > 0) {
+    // 0 is a real choice: the desktop app asks for any free port, so a second
+    // program on the configured one cannot stop the app from starting.
+    if (opts.port >= 0) {
         settings.override_for_this_run([&](Settings& s) { s.port = opts.port; });
     }
 
@@ -210,36 +233,21 @@ int run(const std::vector<std::string>& args) {
         return 1;
     }
 
-    const std::string url = server.base_url();
-    std::printf("transcriptor: %s\n", url.c_str());
+    // One line, for whoever started us. The token goes nowhere else: it is
+    // what lets a request through, and a pipe to the parent is the one place
+    // only the parent can read. Flushed by hand -- stdout into a pipe is fully
+    // buffered, and the app is waiting on this line to open its window.
+    const nlohmann::json ready = {{"port", server.port()},
+                                  {"token", server.token()},
+                                  {"version", TRANSCRIPTOR_VERSION}};
+    std::printf("transcriptor-ready %s\n", ready.dump().c_str());
+    std::fflush(stdout);
 
-    bool windowed = false;
-    if (!opts.no_window) {
-        windowed = app::run_window(
-            url, L("Transcriptor · audio · text · summary",
-                   "Transcriptor · ses · metin · özet"),
-            [&state] {
-                app::TrayStatus s;
-                s.recording = state.recording();
-                s.paused = s.recording && state.paused();
-                s.can_record = !state.processing();
-                s.mode = app::tray_mode(state.settings_copy().tray);
-                return s;
-            });
-    }
-
-    if (!windowed) {
-        // No native window: hand off to the browser and keep serving until the
-        // process is killed (Ctrl-C, or the launcher closing).
-        app::open_in_browser(url);
-        std::printf(L("No window available; opened in the browser. Ctrl-C to quit.\n",
-                      "Pencere açılamadı; tarayıcıda açıldı. Kapatmak için Ctrl-C.\n"));
-        std::signal(SIGINT, on_quit_signal);
-        std::signal(SIGTERM, on_quit_signal);
-        while (!g_quit) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        }
-        std::printf(L("\nShutting down…\n", "\nKapatılıyor…\n"));
+    std::signal(SIGINT, on_quit_signal);
+    std::signal(SIGTERM, on_quit_signal);
+    watch_parent();
+    while (!g_quit && !g_parent_gone) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
     state.shutdown();

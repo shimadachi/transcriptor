@@ -31,7 +31,6 @@ endif()
 # Options
 # ---------------------------------------------------------------------------
 option(TRANSCRIPTOR_DIARIZE   "Speaker diarization via sherpa-onnx" ON)
-option(TRANSCRIPTOR_WEBVIEW   "Native window (WebView2 / WKWebView / WebKitGTK)" ON)
 option(TRANSCRIPTOR_CUDA      "GPU acceleration via CUDA (Linux/Windows, NVIDIA)" OFF)
 option(TRANSCRIPTOR_VULKAN    "GPU acceleration via Vulkan (Linux/Windows, any GPU)" OFF)
 option(TRANSCRIPTOR_METAL     "GPU acceleration via Metal (macOS)" ${APPLE})
@@ -45,39 +44,13 @@ if(MSVC AND TRANSCRIPTOR_STATIC_RT)
 endif()
 
 include(cmake/dependencies.cmake)
-include(cmake/embed_assets.cmake)
-
-# ---------------------------------------------------------------------------
-# Embedded web UI  (web/ -> a generated .cpp, so the binary needs no data dir)
-# ---------------------------------------------------------------------------
-transcriptor_embed_assets(
-    TARGET_NAME transcriptor_assets
-    ROOT        "${CMAKE_CURRENT_SOURCE_DIR}/web"
-    OUTPUT      "${CMAKE_CURRENT_BINARY_DIR}/generated/assets_generated.cpp")
-
-# The Linux tray icon: the same picture the installed launcher uses, compiled in
-# for the same reason the UI is, and sent to the panel as pixels by
-# src/app/tray.cpp. Windows draws its tray icon from the .ico resource, and
-# macOS has no tray.
-if(TRANSCRIPTOR_WEBVIEW AND NOT WIN32 AND NOT APPLE)
-    set(_tray_png "${CMAKE_CURRENT_SOURCE_DIR}/assets/logo-256.png")
-    file(READ "${_tray_png}" _tray_hex HEX)
-    string(REGEX REPLACE "(..)" "0x\\1," _tray_bytes "${_tray_hex}")
-    # CONFIGURE only rewrites the file when the bytes change, so a reconfigure
-    # does not rebuild tray.cpp for nothing.
-    file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/tray_icon.h"
-         CONTENT "// Generated from assets/logo-256.png by CMakeLists.txt -- do not edit.
-#pragma once
-static const unsigned char kTrayIconPng[] = {
-${_tray_bytes}};
-" @ONLY)
-    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_tray_png}")
-endif()
 
 # ---------------------------------------------------------------------------
 # The application
 # ---------------------------------------------------------------------------
-# Everything but the entry point and the audio device. Compiled once, into an
+# The engine: a headless process the desktop app (desktop/, Electron) starts and
+# talks to over loopback. This is everything but the entry point and the audio
+# device. Compiled once, into an
 # object library, and used by both the application and the recording-lifecycle
 # tests -- which supply their own AudioCapture, so they can drive a take without
 # a sound card and hold a device open on purpose to reproduce a race.
@@ -110,8 +83,7 @@ set(TRANSCRIPTOR_CORE_SOURCES
     src/pipeline/live.cpp
     src/app/state.cpp
     src/app/server.cpp
-    src/app/shell.cpp
-    src/app/tray.cpp)
+    src/app/shell.cpp)
 
 add_library(transcriptor_core OBJECT ${TRANSCRIPTOR_CORE_SOURCES})
 
@@ -120,7 +92,6 @@ target_include_directories(transcriptor_core PUBLIC
     "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
 target_link_libraries(transcriptor_core PUBLIC
-    transcriptor_assets
     transcriptor::deps)
 
 target_compile_definitions(transcriptor_core PUBLIC
@@ -182,14 +153,11 @@ target_link_libraries(transcriptor PRIVATE transcriptor_core)
 #
 # They were on `transcriptor`, which was once the whole application. Moving the
 # sources into transcriptor_core put them out of reach without any warning:
-# diarize/diarizer.cpp and app/shell.cpp both compile themselves out when their
-# define is missing, so speaker separation and the native window silently
-# disappeared from the build while everything still linked and ran.
+# diarize/diarizer.cpp compiles itself out when its define is missing, so
+# speaker separation silently disappeared from the build while everything still
+# linked and ran.
 if(TRANSCRIPTOR_DIARIZE)
     target_compile_definitions(transcriptor_core PUBLIC TRANSCRIPTOR_HAVE_DIARIZE=1)
-endif()
-if(TRANSCRIPTOR_WEBVIEW)
-    target_compile_definitions(transcriptor_core PUBLIC TRANSCRIPTOR_HAVE_WEBVIEW=1)
 endif()
 
 if(MSVC)
@@ -229,7 +197,6 @@ message(STATUS "")
 message(STATUS "transcriptor ${PROJECT_VERSION}")
 message(STATUS "  build type   : ${CMAKE_BUILD_TYPE}")
 message(STATUS "  diarization  : ${TRANSCRIPTOR_DIARIZE}")
-message(STATUS "  native window: ${TRANSCRIPTOR_WEBVIEW}")
 message(STATUS "  GPU          : CUDA=${TRANSCRIPTOR_CUDA} Vulkan=${TRANSCRIPTOR_VULKAN} Metal=${TRANSCRIPTOR_METAL}")
 if(TRANSCRIPTOR_CUDA)
     message(STATUS "  CUDA archs   : ${CMAKE_CUDA_ARCHITECTURES}")

@@ -15,7 +15,7 @@ from fontTools.pens.svgPathPen import SVGPathPen
 from fontTools.pens.boundsPen import BoundsPen
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FONT = f"{ROOT}/web/fonts/bricolage-grotesque-800-normal-latin.woff2"
+FONT = f"{ROOT}/desktop/src/assets/fonts/bricolage-grotesque-800-normal-latin.woff2"
 OUT = f"{ROOT}/assets"
 
 INK = "#f4efe4"

@@ -73,3 +73,7 @@ __pycache__/
 .idea/
 .cache/
 .DS_Store
+
+# The desktop app (Electron + React): installed packages and the built page.
+desktop/node_modules/
+desktop/dist/

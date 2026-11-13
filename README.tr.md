@@ -71,13 +71,13 @@ Genel → "Yeni sürümler için GitHub'a bak" ile kapatılır.
 
 | Katman | Kullanılan |
 |---|---|
-| Arayüz | HTML/CSS/JS, **native pencere** (WebView2 / WKWebView / WebKitGTK) |
+| Arayüz | **Electron + React** penceresi (`desktop/`), motorla loopback üzerinden konuşur |
 | STT | **whisper.cpp** (ggml) |
 | Konuşmacı ayrımı | **sherpa-onnx** + pyannote segmentation-3.0'ın ONNX hâli |
 | Özetleyici | **Gömülü llama.cpp** (opsiyonel olarak LM Studio/Ollama da) |
 | Ses yakalama | **miniaudio** (WASAPI / CoreAudio / PulseAudio) |
 | HTTP | **cpp-httplib** |
-| Dağıtım | **tek binary** (web arayüzü içine gömülü) |
+| Dağıtım | Electron uygulaması, yanında C++ motoruyla |
 
 ## Başlarken
 
@@ -110,4 +110,5 @@ Belgelerin tamamı [wiki'de](https://github.com/shimadachi/transcriptor/wiki):
 Derlenen binary'nin içindeki üçüncü taraf bileşenler kendi lisanslarıyla
 gelir: llama.cpp ve whisper.cpp (MIT), sherpa-onnx (Apache-2.0), ONNX Runtime
 (MIT), miniaudio (MIT/Unlicense), cpp-httplib (MIT), nlohmann/json (MIT),
-webview (MIT), Eigen (MPL-2.0), OpenFST (Apache-2.0).
+Eigen (MPL-2.0), OpenFST (Apache-2.0). Pencere Electron (MIT) ve React (MIT)
+üzerine kuruludur.

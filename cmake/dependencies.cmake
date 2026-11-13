@@ -13,7 +13,6 @@ set(TRANSCRIPTOR_SHERPA_TAG  "v1.10.46"     CACHE STRING "sherpa-onnx git tag")
 set(TRANSCRIPTOR_HTTPLIB_TAG "v0.18.3"      CACHE STRING "cpp-httplib git tag")
 set(TRANSCRIPTOR_JSON_TAG    "v3.11.3"      CACHE STRING "nlohmann/json git tag")
 set(TRANSCRIPTOR_MINIAUDIO_TAG "0.11.21"    CACHE STRING "miniaudio git tag")
-set(TRANSCRIPTOR_WEBVIEW_TAG "0.12.0"       CACHE STRING "webview git tag")
 
 add_library(transcriptor_deps INTERFACE)
 add_library(transcriptor::deps ALIAS transcriptor_deps)
@@ -266,23 +265,6 @@ FetchContent_MakeAvailable(miniaudio)
 target_include_directories(transcriptor_deps INTERFACE "${miniaudio_SOURCE_DIR}")
 
 # ---------------------------------------------------------------------------
-# Native window
-# ---------------------------------------------------------------------------
-if(TRANSCRIPTOR_WEBVIEW)
-    set(WEBVIEW_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
-    set(WEBVIEW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-    set(WEBVIEW_BUILD_DOCS     OFF CACHE BOOL "" FORCE)
-    set(WEBVIEW_BUILD_SHARED_LIBRARY OFF CACHE BOOL "" FORCE)
-
-    FetchContent_Declare(webview
-        GIT_REPOSITORY https://github.com/webview/webview.git
-        GIT_TAG        ${TRANSCRIPTOR_WEBVIEW_TAG}
-        GIT_SHALLOW    TRUE)
-    FetchContent_MakeAvailable(webview)
-    target_link_libraries(transcriptor_deps INTERFACE webview::core_static)
-endif()
-
-# ---------------------------------------------------------------------------
 # Platform libraries
 # ---------------------------------------------------------------------------
 find_package(Threads REQUIRED)
@@ -295,8 +277,7 @@ elseif(APPLE)
     find_library(COREFOUNDATION CoreFoundation)
     find_library(AUDIOTOOLBOX AudioToolbox)
     find_library(AUDIOUNIT AudioUnit)
-    # Foundation for the system-audio tap (src/audio/system_tap_mac.mm). The
-    # webview brings it in on its own, but a build without one must link too.
+    # Foundation for the system-audio tap (src/audio/system_tap_mac.mm).
     find_library(FOUNDATION Foundation)
     target_link_libraries(transcriptor_deps INTERFACE
         ${COREAUDIO} ${COREFOUNDATION} ${AUDIOTOOLBOX} ${AUDIOUNIT} ${FOUNDATION})

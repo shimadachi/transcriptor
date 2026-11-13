@@ -1,15 +1,16 @@
 // ---- UI language (en / tr) ----
-// English is the source language: it is what sits inline in index.html, so the
-// page reads correctly before this file runs, and it is what an unknown key
-// falls back to. Every visible string has an entry here; applyLang() rewrites
-// the DOM from it.
+// English is the source language and what an unknown key falls back to. Every
+// string the interface shows has an entry here, in both languages: a key with
+// no `tr` would render as English in a Turkish window, and one with no entry
+// at all as the key itself.
 //
-// Markup hooks:  data-i18n="key"        -> textContent
-//                data-i18n-html="key"   -> innerHTML (strings with tags)
-//                data-i18n-title="key"  -> title attribute
-//                data-i18n-ph="key"     -> placeholder attribute
+// t() reads the language from this module rather than from React state, so
+// code that is not a component -- the capture, the polling, a toast raised
+// from a timer -- can say things too. Components re-render on a language
+// change through useLang() (see lib/store.js), which is what makes their t()
+// calls run again.
 
-const STR = {
+export const STR = {
   // -- chrome ---------------------------------------------------------------
   'app.title':      {en: 'Transcriptor · audio · text · summary',
                      tr: 'Transcriptor · ses · metin · özet'},
@@ -42,11 +43,11 @@ const STR = {
   'src.cancelTitle':{en: 'Cancel and delete the recording / output',
                      tr: 'Kaydı/çıktıyı iptal et ve sil'},
   'src.ready':      {en: 'Ready', tr: 'Hazır'},
-  'src.browserBoth':  {en: '🎙 Browser — Microphone + System',
-                       tr: '🎙 Tarayıcı — Mikrofon + Sistem'},
-  'src.browserSys':   {en: '🖥 Browser — System / Tab audio',
-                       tr: '🖥 Tarayıcı — Sistem / Sekme sesi'},
-  'src.browserMic':   {en: '🎤 Browser — Microphone', tr: '🎤 Tarayıcı — Mikrofon'},
+  'src.browserBoth':  {en: '🎙 This window — Microphone + System',
+                       tr: '🎙 Bu pencere — Mikrofon + Sistem'},
+  'src.browserSys':   {en: '🖥 This window — System audio',
+                       tr: '🖥 Bu pencere — Sistem sesi'},
+  'src.browserMic':   {en: '🎤 This window — Microphone', tr: '🎤 Bu pencere — Mikrofon'},
   'src.micNoneAvail': {en: '+ Mic: none', tr: '+ Mik: yok'},
   'src.micNone':      {en: '+ No mic', tr: '+ Mik yok'},
   'saved.k':        {en: 'Saved →', tr: 'Kaydedildi →'},
@@ -59,10 +60,10 @@ const STR = {
   'saved.failed':   {en: 'Not saved →', tr: 'Kaydedilemedi →'},
 
   // -- status / notices -----------------------------------------------------
-  'st.browserPaused': {en: 'Browser recording paused…',
-                       tr: 'Tarayıcı kaydı duraklatıldı…'},
-  'st.browserRec':    {en: 'Recording in the browser…',
-                       tr: 'Tarayıcıda kayıt sürüyor…'},
+  'st.browserPaused': {en: 'Recording paused…',
+                       tr: 'Kayıt duraklatıldı…'},
+  'st.browserRec':    {en: 'Recording in this window…',
+                       tr: 'Bu pencerede kayıt sürüyor…'},
   'st.pausedSuffix':  {en: ' · paused', tr: ' · duraklatıldı'},
   'note.sttMissing':  {en: '<b>No speech model is ready.</b> Nothing is downloaded on your behalf — click here to pick one in Settings and fetch it.',
                        tr: '<b>Hazır bir konuşma modeli yok.</b> Sizin adınıza hiçbir şey indirilmez — Ayarlar\'dan birini seçip indirmek için buraya tıklayın.'},
@@ -103,8 +104,8 @@ const STR = {
                      tr: 'Canlı önizleme — kayıt metne dönüştürülünce yerini tam metin alır.'},
   'live.lagging':   {en: 'The live model cannot keep up, so the preview skips ahead where you see “…”. A smaller live model in Settings will.',
                      tr: 'Canlı model yetişemiyor; önizleme “…” gördüğünüz yerlerde ileri atlıyor. Ayarlar\'dan daha küçük bir canlı model seçin.'},
-  'live.browser':   {en: 'Live transcript needs one of the app\'s own sources — a browser recording is transcribed once it stops.',
-                     tr: 'Canlı metin uygulamanın kendi kaynaklarından biriyle çalışır — tarayıcı kaydı durunca metne dönüştürülür.'},
+  'live.browser':   {en: 'Live transcript needs one of the app\'s own sources — a take recorded in this window is transcribed once it stops.',
+                     tr: 'Canlı metin uygulamanın kendi kaynaklarından biriyle çalışır — bu pencerede alınan kayıt durunca metne dönüştürülür.'},
   'live.noModel':   {en: 'Live is on, but there is no live model to run — see the note above.',
                      tr: 'Canlı metin açık, ama çalıştırılacak canlı model yok — yukarıdaki nota bakın.'},
   'sum.label':      {en: 'Summary', tr: 'Özet'},
@@ -219,12 +220,12 @@ const STR = {
   'toast.saved':        {en: 'Settings saved', tr: 'Ayarlar kaydedildi'},
   'toast.savedDropped': {en: 'Settings saved · skipped {n} template(s) with an empty prompt',
                          tr: 'Ayarlar kaydedildi · yönergesi boş {n} şablon atlandı'},
-  'toast.noBrowserRec': {en: 'Browser recording is not supported (needs a secure context / localhost)',
-                         tr: 'Tarayıcı kaydı desteklenmiyor (güvenli bağlam / localhost gerekir)'},
+  'toast.noBrowserRec': {en: 'Recording in this window is not available here — pick one of the listed devices instead',
+                         tr: 'Bu pencerede kayıt burada kullanılamıyor — listedeki aygıtlardan birini seçin'},
   'toast.noPermission': {en: 'Permission denied, or not supported',
                          tr: 'İzin verilmedi veya desteklenmiyor'},
-  'toast.noAudio':      {en: 'No audio captured. On Linux only a TAB\'s audio can be shared (not a window/screen) — pick a tab and tick "share audio", or choose the system (loopback) source instead.',
-                         tr: 'Ses alınamadı. Linux\'ta yalnızca bir SEKME sesi paylaşılabilir (pencere/ekran değil) — bir sekme seçip "sesi paylaş"ı işaretleyin, ya da kaynaktan sistem (loopback) seçin.'},
+  'toast.noAudio':      {en: 'No audio captured. System audio cannot be recorded from this window on this system — choose the system (loopback) source in the list instead.',
+                         tr: 'Ses alınamadı. Bu sistemde sistem sesi bu pencereden kaydedilemiyor — listeden sistem (loopback) kaynağını seçin.'},
   'toast.recCancelled': {en: 'Recording cancelled', tr: 'Kayıt iptal edildi'},
   'toast.emptyRec':     {en: 'Empty recording', tr: 'Boş kayıt'},
   'toast.processing':   {en: 'Processing…', tr: 'İşleniyor…'},
@@ -236,9 +237,9 @@ const STR = {
   'toast.pendingDropped': {en: 'Recording discarded', tr: 'Kayıt silindi'},
   'toast.resolvePending': {en: 'A recording is still waiting to be uploaded — retry, save or discard it first',
                            tr: 'Yüklenmeyi bekleyen bir kayıt var — önce yeniden deneyin, kaydedin ya da silin'},
-  // Start pressed in the tray menu with a browser source picked.
-  'toast.trayPressRecord': {en: 'A browser source has to be started from here — press the record button',
-                            tr: 'Tarayıcı kaynağı buradan başlatılmalı — kayıt düğmesine basın'},
+  // Start pressed in the tray menu with one of the window's own sources picked.
+  'toast.trayPressRecord': {en: 'This source has to be started from here — press the record button',
+                            tr: 'Bu kaynak buradan başlatılmalı — kayıt düğmesine basın'},
 
   // -- a recording the server has not accepted yet --------------------------
   'pending.k':        {en: 'Not uploaded →', tr: 'Yüklenemedi →'},
@@ -450,8 +451,17 @@ const STR = {
 
 let LANG = 'en';
 
+export function getLang() { return LANG; }
+
+// Sets the language t() answers in. Only state/prefs.js calls this: it is the
+// one place that also tells React, the document and localStorage.
+export function setLangCode(lang) {
+  LANG = (lang === 'tr') ? 'tr' : 'en';
+  return LANG;
+}
+
 // Looks up `key`, substituting {name} placeholders from `vars`.
-function t(key, vars) {
+export function t(key, vars) {
   const e = STR[key];
   let s = e ? (e[LANG] || e.en) : key;
   if (vars) {
@@ -459,27 +469,3 @@ function t(key, vars) {
   }
   return s;
 }
-
-function applyLang(lang) {
-  LANG = (lang === 'tr') ? 'tr' : 'en';
-  document.documentElement.lang = LANG;
-  const set = (attr, fn) => {
-    document.querySelectorAll('[' + attr + ']').forEach(el => {
-      fn(el, t(el.getAttribute(attr)));
-    });
-  };
-  set('data-i18n',       (el, s) => { el.textContent = s; });
-  set('data-i18n-html',  (el, s) => { el.innerHTML = s; });
-  set('data-i18n-title', (el, s) => { el.title = s; });
-  set('data-i18n-ph',    (el, s) => { el.placeholder = s; });
-  // Anything rendered by JS rather than sitting in the markup.
-  if (window.afterLangChange) window.afterLangChange();
-}
-
-// Applied before app.js runs, so the first paint is already in the saved
-// language; the server's stored value is reconciled on the first settings fetch.
-(function () {
-  let saved = 'en';
-  try { saved = localStorage.getItem('transcriptor-lang') || 'en'; } catch (e) {}
-  applyLang(saved);
-})();

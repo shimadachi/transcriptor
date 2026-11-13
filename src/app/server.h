@@ -1,7 +1,8 @@
 // The local control-plane server.
 //
-// Serves the embedded web UI and the same /api/* surface the Flask build
-// exposed, so the browser code is unchanged. Binds to loopback only.
+// Serves /api/* to the desktop app (desktop/), which starts this process and
+// is its only client. There is no page here to open in a browser: every
+// request has to carry the token below. Binds to loopback only.
 #pragma once
 
 #include <memory>
@@ -27,6 +28,8 @@ public:
     void stop();
 
     int         port() const { return port_; }
+    // This run's secret, for whoever started the server to hand to its client.
+    const std::string& token() const { return token_; }
     std::string base_url() const;
 
 private:
@@ -35,9 +38,9 @@ private:
     AppState*             state_;
     std::string           host_;
     int                   port_;
-    // Minted by start(), stamped into index.html, and demanded back on every
-    // mutating request. Loopback is not a boundary on its own: anything on this
-    // machine can reach it, including a page the user did not open.
+    // Minted by start() and demanded back on every request. Loopback is not a
+    // boundary on its own: anything on this machine can reach it, including a
+    // page the user did not open.
     std::string           token_;
     std::unique_ptr<Impl> impl_;
 };

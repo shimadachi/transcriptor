@@ -18,7 +18,6 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
-#include "app/assets.h"
 #include "app/shell.h"
 #include "audio/sources.h"
 #include "diarize/diarizer.h"
@@ -73,12 +72,11 @@ json parse_body(const httplib::Request& req) {
     return j.is_object() ? j : json::object();
 }
 
-// The header the page proves itself with, and the tag it reads it out of.
+// The header the desktop app proves itself with on every request.
 constexpr const char* kTokenHeader = "X-Transcriptor-Token";
-constexpr const char* kTokenPlaceholder = "__CSRF_TOKEN__";
 
-// A fresh secret per run. Never persisted: a page from a previous run has no
-// business driving this one, and reloading it costs nothing.
+// A fresh secret per run. Never persisted: a window from a previous run has no
+// business driving this one, and it is handed a new one when it starts us.
 std::string random_token() {
     static const char kDigits[] = "0123456789abcdef";
     std::random_device rd;
@@ -225,25 +223,26 @@ bool Server::start() {
     const std::string token = token_;
 
     // -- request authorization ---------------------------------------------
-    // Everything under /api/ that changes something was open to anything that
-    // could reach loopback -- which, on this machine, is every process and
-    // every page in the user's browser. A tab on an unrelated site could POST a
-    // JSON body as text/plain and the browser would send it; the reply was
-    // unreadable, but the change had already happened. Repointing output_dir
-    // and then calling /api/library/delete turned that into removal of any
-    // directory on disk.
+    // Loopback is not a boundary on its own: every process on this machine can
+    // reach it, and so can every page in the user's browser. Mutating routes
+    // were once open to all of them -- a tab on an unrelated site could POST a
+    // JSON body as text/plain and the browser would send it; repointing
+    // output_dir and then calling /api/library/delete turned that into removal
+    // of any directory on disk.
     //
-    // GET is left alone: it changes nothing, and the same-origin policy already
-    // stops a foreign page reading what comes back. That also keeps the plain
-    // <audio src="/api/library/audio?id=…"> element working.
-    // When we are bound to loopback, every request has to be addressed to
-    // loopback as well. Without this, GET was answered whatever hostname it
-    // claimed -- and a name the attacker controls is the whole point of DNS
-    // rebinding: once the browser believes an attacker's domain resolves here,
-    // it treats this app as same-origin and can read transcripts, recordings,
-    // settings and the page's own token straight out of GET responses. The
-    // Origin and token checks below never see those requests, because they
-    // genuinely are same-origin by then.
+    // There is exactly one client now: the desktop app that started this
+    // process and was handed the token on our stdout (src/main.cpp). It adds
+    // the token to every request in its main process, so the token is asked
+    // for on every request -- GET included. GET used to be left open because a
+    // page's <audio src="/api/library/audio?id=..."> cannot send a header; the
+    // window's requests no longer come here directly, so that reason is gone,
+    // and with it the ability of any local process to read transcripts,
+    // recordings and settings off this port.
+    //
+    // The two older checks stay underneath it. When we are bound to loopback,
+    // every request has to be addressed to loopback as well: a name the
+    // attacker controls is the whole point of DNS rebinding. And a POST that
+    // says it came from a page somewhere else is refused whatever it carries.
     //
     // A host that is not loopback means the user deliberately asked to serve
     // beyond this machine, so their Host header is their business.
@@ -266,57 +265,20 @@ bool Server::start() {
             }
         }
 
-        if (req.method != "POST") return Result::Unhandled;
-
-        const std::string origin = req.get_header_value("Origin");
-        if (!origin.empty() && !is_loopback_origin(origin)) {
+        if (req.method == "POST") {
+            const std::string origin = req.get_header_value("Origin");
+            if (!origin.empty() && !is_loopback_origin(origin)) {
+                send_error(res, L("That request did not come from this app.",
+                                  "Bu istek bu uygulamadan gelmedi."), 403);
+                return Result::Handled;
+            }
+        }
+        if (req.get_header_value(kTokenHeader) != token) {
             send_error(res, L("That request did not come from this app.",
                               "Bu istek bu uygulamadan gelmedi."), 403);
             return Result::Handled;
         }
-        // The page reads this out of its own <meta> tag, which only same-origin
-        // script can reach. Sending it as a custom header also makes the
-        // request non-simple, so a cross-origin attempt has to clear a
-        // preflight that nothing here answers.
-        if (req.get_header_value(kTokenHeader) != token) {
-            send_error(res, L("This page is out of date — reload it.",
-                              "Bu sayfa güncel değil — yenileyin."), 403);
-            return Result::Handled;
-        }
         return Result::Unhandled;
-    });
-
-    // -- static ------------------------------------------------------------
-    auto serve_asset = [token](const std::string& path, httplib::Response& res) {
-        const Asset* asset = find_asset(path);
-        if (!asset) {
-            res.status = 404;
-            res.set_content("not found", "text/plain");
-            return;
-        }
-        if (path == "index.html") {
-            // Stamp this run's token into the page on the way out. Never
-            // cached: a token from a previous run is worse than none, since it
-            // would fail every button silently until the user reloaded.
-            std::string html(asset->data, asset->size);
-            const auto at = html.find(kTokenPlaceholder);
-            if (at != std::string::npos) {
-                html.replace(at, std::strlen(kTokenPlaceholder), token);
-            }
-            res.set_header("Cache-Control", "no-store");
-            res.set_content(html, asset->content_type);
-            return;
-        }
-        res.set_content(asset->data, asset->size, asset->content_type);
-    };
-
-    svr.Get("/", [serve_asset](const httplib::Request&, httplib::Response& res) {
-        serve_asset("index.html", res);
-    });
-
-    svr.Get(R"(/static/(.+))", [serve_asset](const httplib::Request& req,
-                                             httplib::Response& res) {
-        serve_asset(req.matches[1].str(), res);
     });
 
     // -- state -------------------------------------------------------------
@@ -523,17 +485,16 @@ bool Server::start() {
 
     // The update banner's button. Takes no parameters on purpose: the URL is
     // fixed above, so nothing from the page is ever handed to the OS opener.
-    // Needed because target="_blank" goes nowhere inside the native webview.
     svr.Post("/api/open_releases", [](const httplib::Request&,
                                       httplib::Response& res) {
         send_json(res, json{{"ok", open_in_browser(kReleasesUrl)},
                             {"url", kReleasesUrl}});
     });
 
-    // A link in a summary. The native window drops target="_blank", so a click
-    // on one did nothing at all; the page asks for it here instead, the way the
-    // update banner does -- but this URL comes from the page, so it is held to
-    // openable_link() before the OS sees it.
+    // A link in a summary. The window never navigates away from the app, so the
+    // page asks for the link here instead, the way the update banner does --
+    // but this URL comes from the page, so it is held to openable_link() before
+    // the OS sees it.
     svr.Post("/api/open_link", [](const httplib::Request& req,
                                   httplib::Response& res) {
         const std::string url = get_string(parse_body(req), "url");
@@ -908,7 +869,7 @@ bool Server::start() {
             // Reported so anything driving the API can see which value is in
             // force. Rounded because widening the float would otherwise print
             // 0.800000011920929. The settings panel keeps its own copy of the
-            // table (CLTHR_BY_LANG in web/app.js) so it can preview a language
+            // table (CLTHR_BY_LANG in desktop/src/lib/tables.js) so it can preview a language
             // the user has picked but not yet saved.
             {"cluster_threshold", std::round(s.cluster_threshold() * 100.0) / 100.0},
 

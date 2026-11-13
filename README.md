@@ -71,13 +71,13 @@ about you or your recordings, and is switched off under Settings → General →
 
 | Layer | Used |
 |---|---|
-| Interface | HTML/CSS/JS in a **native window** (WebView2 / WKWebView / WebKitGTK) |
+| Interface | **Electron + React** window (`desktop/`), talking to the engine over loopback |
 | STT | **whisper.cpp** (ggml) |
 | Speaker separation | **sherpa-onnx** + the ONNX build of pyannote segmentation-3.0 |
 | Summarizer | **Embedded llama.cpp** (optionally LM Studio / Ollama) |
 | Audio capture | **miniaudio** (WASAPI / CoreAudio / PulseAudio) |
 | HTTP | **cpp-httplib** |
-| Distribution | **one binary**, web UI compiled in |
+| Distribution | the Electron app with the C++ engine beside it |
 
 ## Getting started
 
@@ -110,5 +110,6 @@ The full documentation is in the [wiki](https://github.com/shimadachi/transcript
 
 Third-party components inside the compiled binary keep their own licenses:
 llama.cpp and whisper.cpp (MIT), sherpa-onnx (Apache-2.0), ONNX Runtime (MIT),
-miniaudio (MIT/Unlicense), cpp-httplib (MIT), nlohmann/json (MIT), webview
-(MIT), Eigen (MPL-2.0), OpenFST (Apache-2.0).
+miniaudio (MIT/Unlicense), cpp-httplib (MIT), nlohmann/json (MIT), Eigen
+(MPL-2.0), OpenFST (Apache-2.0). The window is built on Electron (MIT) and
+React (MIT).

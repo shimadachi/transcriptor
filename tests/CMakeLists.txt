@@ -229,7 +229,7 @@ target_link_libraries(test_live PRIVATE transcriptor_core)
 add_test(NAME live COMMAND test_live)
 set_tests_properties(live PROPERTIES TIMEOUT 60 LABELS app)
 
-# -- the HTTP API (V3, V7, V12, V18, V23, V30, V34, V38) -----------------------
+# -- the HTTP API (E1, V3, V7, V12, V18, V23, V30, V34, V38) -------------------
 # What the page is told, read through the real Server over a loopback socket.
 # Links the application the way the lifecycle test does. POSIX only: the config
 # directory can only be moved out of the machine's own through the environment
@@ -243,22 +243,18 @@ if(UNIX)
     set_tests_properties(api PROPERTIES TIMEOUT 120 LABELS app)
 endif()
 
-# -- browser recording UI (R3, R10, R13, G1, G2, G3) --------------------------
-# Runs the real web/app.js under a mocked DOM. Skipped where node is absent
-# rather than failing: node is not a build dependency of the application.
+# -- the desktop app's tables (D1, V49) ---------------------------------------
+# Constants the window and the engine each hold a copy of, and the rule that
+# every string the interface shows exists in English and Turkish. Reads
+# desktop/src with node's builtins alone, so it needs no `npm install`. Skipped
+# where node is absent rather than failing: node is not needed to build the
+# engine.
 find_program(TRANSCRIPTOR_NODE NAMES node nodejs)
 if(TRANSCRIPTOR_NODE)
-    add_test(NAME ui
-             COMMAND "${TRANSCRIPTOR_NODE}" "${TESTS_SRC}/ui/test_ui.js"
+    add_test(NAME desktop_tables
+             COMMAND "${TRANSCRIPTOR_NODE}" "${TESTS_SRC}/desktop/test_tables.mjs"
                      "${CMAKE_SOURCE_DIR}")
-    set_tests_properties(ui PROPERTIES TIMEOUT 60)
-
-    # Constants the browser and the C++ each hold a copy of, and the page's own
-    # tables (V14, V23, V26, V27, V28, V31, V49, V52).
-    add_test(NAME ui_tables
-             COMMAND "${TRANSCRIPTOR_NODE}" "${TESTS_SRC}/ui/test_tables.js"
-                     "${CMAKE_SOURCE_DIR}")
-    set_tests_properties(ui_tables PROPERTIES TIMEOUT 60)
+    set_tests_properties(desktop_tables PROPERTIES TIMEOUT 60)
 else()
-    message(STATUS "node not found -- the UI regression tests will not run")
+    message(STATUS "node not found -- the desktop table checks will not run")
 endif()
