@@ -1,7 +1,7 @@
 {
   "name": "transcriptor-desktop",
   "productName": "Transcriptor",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "The Transcriptor window: an Electron shell and React UI over the local C++ engine",
   "license": "MIT",

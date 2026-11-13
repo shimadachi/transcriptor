@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(transcriptor
-    VERSION 0.3.1
+    VERSION 0.4.0
     DESCRIPTION "Offline speech-to-text + speaker diarization + local LLM summary"
     LANGUAGES C CXX)
 
